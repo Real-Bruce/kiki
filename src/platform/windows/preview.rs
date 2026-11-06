@@ -186,7 +186,7 @@ impl State {
                     self.editor.warn(message);
                 }
             }
-            8 | 9 => {
+            7..=9 => {
                 self.pending_output = Some(index);
             }
             5 => self.editor.undo(),
@@ -328,8 +328,27 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     (*pointer).busy = false;
                     let _ = KillTimer(Some(hwnd), 5);
                     match result {
-                        Ok(()) => {
-                            let _ = DestroyWindow(hwnd);
+                        Ok(completed) => {
+                            let opened = match completed {
+                                super::output::Completed::Done => Ok(()),
+                                super::output::Completed::Pinned(image) => super::pinned::open(
+                                    image,
+                                    (*pointer)
+                                        .selection
+                                        .rect
+                                        .map(|r| PixelPoint {
+                                            x: r.left,
+                                            y: r.top,
+                                        })
+                                        .unwrap_or((*pointer).pointer),
+                                ),
+                            };
+                            if let Err(e) = opened {
+                                super::show_error(&format!("贴图创建失败，编辑已保留：{e}"));
+                                let _ = InvalidateRect(Some(hwnd), None, false);
+                            } else {
+                                let _ = DestroyWindow(hwnd);
+                            }
                         }
                         Err(e) => {
                             super::show_error(&format!("输出失败，编辑内容已保留：{e}"));
@@ -339,14 +358,15 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 }
                 LRESULT(0)
             }
-            super::text_input::SAVE => {
+            super::text_input::SAVE | super::text_input::PIN => {
                 if (*pointer)
                     .text_input
                     .as_ref()
                     .and_then(TextInput::hwnd)
                     .is_some_and(|child| child.0 as usize == wp.0)
                 {
-                    (*pointer).pending_output = Some(8);
+                    (*pointer).pending_output =
+                        Some(if msg == super::text_input::PIN { 7 } else { 8 });
                     if let Err(e) = begin_output(hwnd, pointer) {
                         super::show_error(&e.to_string());
                     }
@@ -626,6 +646,10 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                             }
                         }
                         32 => state.keyboard_focus && state.activate(state.focus),
+                        80 if GetKeyState(VK_CONTROL.0 as i32) < 0 => {
+                            state.pending_output = Some(7);
+                            false
+                        }
                         83 if GetKeyState(VK_CONTROL.0 as i32) < 0 => {
                             state.pending_output = Some(8);
                             false
@@ -924,6 +948,8 @@ fn begin_output(hwnd: HWND, pointer: *mut State) -> Result<()> {
                 return Err(e);
             }
         }
+    } else if kind == 7 {
+        super::output::Destination::Pin
     } else {
         super::output::Destination::Clipboard
     };

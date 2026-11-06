@@ -6,6 +6,8 @@ mod diagnostics;
 mod display;
 mod icon;
 mod output;
+mod pinned;
+mod pinned_render;
 mod png;
 mod preview;
 mod runtime;
@@ -49,6 +51,8 @@ impl Drop for AppStateGuard {
     fn drop(&mut self) {
         // Take ownership first: window destruction and thread cleanup may reenter callbacks.
         let state = APP.with_borrow_mut(Option::take);
+        pinned::close_all();
+        pinned_render::shutdown();
         if let Some(mut state) = state {
             state.gate.cancel();
             if let Some(cancel) = state.cancel.take() {
@@ -269,6 +273,11 @@ pub fn run() -> Result<()> {
         });
         let app_state = AppStateGuard;
         preview::register(module.into())?;
+        pinned::register(module.into())?;
+        #[cfg(feature = "diagnostics")]
+        if std::env::args_os().any(|a| a == "--pin-demo") {
+            pinned::demo()?;
+        }
         #[cfg(feature = "diagnostics")]
         let readiness_probe = diagnostics::start_readiness_probe(hwnd, _hotkey.is_some())?;
         if std::env::args_os().any(|arg| arg == "--capture") {
@@ -523,6 +532,7 @@ fn dispatch(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
             TRAY if lparam.0 as u32 == WM_RBUTTONUP => {
                 if let Ok(menu) = CreatePopupMenu() {
                     let _ = AppendMenuW(menu, MF_STRING, 1, w!("开始截图"));
+                    let _ = AppendMenuW(menu, MF_STRING, 3, w!("关闭所有贴图"));
                     let _ = AppendMenuW(menu, MF_STRING, 2, w!("退出"));
                     let mut point = POINT::default();
                     let _ = GetCursorPos(&mut point);
@@ -540,6 +550,8 @@ fn dispatch(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
                     let _ = DestroyMenu(menu);
                     if command == 1 {
                         begin_capture(hwnd);
+                    } else if command == 3 {
+                        pinned::close_all();
                     } else if command == 2 {
                         destroy_hidden(hwnd);
                     }

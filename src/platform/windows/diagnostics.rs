@@ -25,6 +25,14 @@ pub fn run_if_requested() -> Result<bool> {
         super::output::inspect_clipboard(&path)?;
         return Ok(true);
     }
+    if args.get(1).is_some_and(|arg| arg == "--pin-stress") {
+        let path = args
+            .get(2)
+            .map(PathBuf::from)
+            .ok_or_else(|| Error::new(E_FAIL, "需要输出目录"))?;
+        super::pinned::stress(&path)?;
+        return Ok(true);
+    }
     if args.get(1).is_some_and(|arg| arg == "--annotation-probe") {
         let path = args
             .get(2)
@@ -85,7 +93,7 @@ fn stress(path: PathBuf, cancel: bool) -> Result<()> {
     Ok(())
 }
 
-fn row(csv: &mut std::fs::File, index: u32, elapsed: f64) -> Result<()> {
+pub(super) fn row(csv: &mut std::fs::File, index: u32, elapsed: f64) -> Result<()> {
     // SAFETY: initialized output counters and current-process pseudo handle; no handle ownership transfer.
     unsafe {
         let process = GetCurrentProcess();

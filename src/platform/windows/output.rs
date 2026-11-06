@@ -29,9 +29,14 @@ impl Drop for Permit {
 pub enum Destination {
     Clipboard,
     File(PathBuf),
+    Pin,
+}
+pub enum Completed {
+    Done,
+    Pinned(Arc<Image>),
 }
 pub struct Job {
-    pub receiver: mpsc::Receiver<Result<()>>,
+    pub receiver: mpsc::Receiver<Result<Completed>>,
     cancel: Arc<AtomicBool>,
 }
 impl Drop for Job {
@@ -56,6 +61,17 @@ pub fn start(
     owner: usize,
     destination: Destination,
 ) -> Result<Job> {
+    launch(source, Some((rect, editor)), owner, destination)
+}
+pub fn start_image(source: Arc<Image>, owner: usize, destination: Destination) -> Result<Job> {
+    launch(source, None, owner, destination)
+}
+fn launch(
+    source: Arc<Image>,
+    scene: Option<(PixelRect, Editor)>,
+    owner: usize,
+    destination: Destination,
+) -> Result<Job> {
     if WORKER
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
         .is_err()
@@ -72,11 +88,23 @@ pub fn start(
             let _permit = permit;
             let result = std::panic::catch_unwind(|| {
                 check(&worker_cancel)?;
-                let image = super::composition::render(&source, rect, &editor)?;
+                let image = match scene {
+                    Some((rect, editor)) => {
+                        Arc::new(super::composition::render(&source, rect, &editor)?)
+                    }
+                    None => source,
+                };
                 check(&worker_cancel)?;
                 match destination {
-                    Destination::Clipboard => clipboard(&image, owner, &worker_cancel),
-                    Destination::File(path) => save_atomic(&image, &path, &worker_cancel),
+                    Destination::Clipboard => {
+                        clipboard(&image, owner, &worker_cancel)?;
+                        Ok(Completed::Done)
+                    }
+                    Destination::File(path) => {
+                        save_atomic(&image, &path, &worker_cancel)?;
+                        Ok(Completed::Done)
+                    }
+                    Destination::Pin => Ok(Completed::Pinned(image)),
                 }
             })
             .unwrap_or_else(|_| Err(fail("输出线程失败，编辑内容已保留")));

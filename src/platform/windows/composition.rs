@@ -155,7 +155,7 @@ pub fn render(source: &Image, selection: PixelRect, editor: &Editor) -> Result<I
     Ok(output)
 }
 #[cfg(any(feature = "diagnostics", test))]
-fn fixture() -> Result<(Image, Editor)> {
+pub(super) fn fixture() -> Result<(Image, Editor)> {
     fixture_at(-160, -90)
 }
 #[cfg(any(feature = "diagnostics", test))]
