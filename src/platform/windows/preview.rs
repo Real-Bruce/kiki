@@ -26,10 +26,17 @@ impl Preview {
     pub fn is_open(&self) -> bool {
         self.0.get().is_some()
     }
-    pub fn open(capture: CaptureResult) -> Result<Self> {
-        Self::open_inner(capture, true)
+    pub fn hwnd(&self) -> Option<HWND> {
+        self.0.get()
     }
+    pub fn open_mode(capture: CaptureResult, screen: bool) -> Result<Self> {
+        Self::open_impl(capture, true, screen)
+    }
+    #[cfg(test)]
     fn open_inner(capture: CaptureResult, visible: bool) -> Result<Self> {
+        Self::open_impl(capture, visible, false)
+    }
+    fn open_impl(capture: CaptureResult, visible: bool, screen: bool) -> Result<Self> {
         let bounds = capture.image.bounds();
         let (width, height) = bounds
             .size()
@@ -63,11 +70,28 @@ impl Preview {
             let lifetime = Rc::new(Cell::new(Some(hwnd)));
             let owner = Self(lifetime.clone());
             let canvas = Canvas::new(hwnd, capture.image)?;
+            let mut selection = Selection::new(bounds);
+            if screen {
+                let pointer = position();
+                selection.rect = capture
+                    .screens
+                    .iter()
+                    .find(|s| pointer.is_some_and(|p| contains(s.bounds, p)))
+                    .or(capture.screens.first())
+                    .and_then(|s| bounds.intersection(s.bounds));
+            }
+            let cfg = super::preferences::current();
+            let mut editor = Editor::default();
+            for style in &mut editor.styles {
+                style.color = cfg.color;
+                style.width = f32::from(cfg.stroke_width);
+            }
+            editor.text_size = f32::from(cfg.text_size);
             let state = State {
                 lifetime,
                 canvas,
-                selection: Selection::new(bounds),
-                editor: Editor::default(),
+                selection,
+                editor,
                 parameter_down: false,
                 text_input: None,
                 output: None,
@@ -283,7 +307,7 @@ pub fn register(instance: HINSTANCE) -> Result<()> {
             hCursor: LoadCursorW(None, IDC_CROSS)?,
             ..Default::default()
         };
-        if RegisterClassW(&class) == 0 {
+        if RegisterClassW(&class) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS {
             return Err(Error::from_win32());
         }
     }
@@ -731,7 +755,11 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 LRESULT(1)
             }
             WM_SETTINGCHANGE | WM_THEMECHANGED => {
-                (*pointer).canvas.dark = system_dark();
+                let dark = system_dark();
+                (*pointer).canvas.dark = dark;
+                if let Some(input) = (*pointer).text_input.as_mut() {
+                    let _ = input.set_theme(dark);
+                }
                 let _ = InvalidateRect(Some(hwnd), None, false);
                 LRESULT(0)
             }

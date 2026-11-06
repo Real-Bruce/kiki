@@ -131,7 +131,8 @@ pub fn save_dialog(owner: HWND) -> Result<Option<PathBuf>> {
                 | FOS_FORCEFILESYSTEM
                 | FOS_OVERWRITEPROMPT
                 | FOS_NOCHANGEDIR
-                | FOS_PATHMUSTEXIST,
+                | FOS_PATHMUSTEXIST
+                | FOS_STRICTFILETYPES,
         )?;
         dialog.SetFileTypes(&[Common::COMDLG_FILTERSPEC {
             pszName: w!("PNG 图片"),
@@ -145,7 +146,11 @@ pub fn save_dialog(owner: HWND) -> Result<Option<PathBuf>> {
         );
         let name: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
         dialog.SetFileName(PCWSTR(name.as_ptr()))?;
-        if let Some(directory) = LAST_DIRECTORY.with_borrow(Clone::clone) {
+        if let Some(directory) = super::preferences::current()
+            .last_directory
+            .map(PathBuf::from)
+            .or_else(|| LAST_DIRECTORY.with_borrow(Clone::clone))
+        {
             use std::os::windows::ffi::OsStrExt;
             let wide: Vec<u16> = directory.as_os_str().encode_wide().chain(Some(0)).collect();
             if let Ok(folder) =
@@ -166,6 +171,9 @@ pub fn save_dialog(owner: HWND) -> Result<Option<PathBuf>> {
         let result = PathBuf::from(std::ffi::OsString::from_wide(path.as_wide()));
         CoTaskMemFree(Some(path.0.cast()));
         LAST_DIRECTORY.with_borrow_mut(|last| *last = result.parent().map(Path::to_path_buf));
+        if let Some(parent) = result.parent() {
+            super::preferences::remember_directory(parent);
+        }
         Ok(Some(result))
     }
 }

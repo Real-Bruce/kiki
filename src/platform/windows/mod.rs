@@ -5,6 +5,7 @@ mod composition;
 mod diagnostics;
 mod display;
 mod icon;
+mod menu;
 mod output;
 mod pinned;
 mod pinned_device;
@@ -13,9 +14,12 @@ mod png;
 mod preview;
 mod runtime;
 mod selection_render;
+mod settings;
+mod settings_render;
 #[cfg(test)]
 mod tests;
 mod text_input;
+mod text_viewer;
 mod window_targets;
 
 use crate::core::session::{SessionGate, SessionId};
@@ -33,7 +37,7 @@ use windows::{
     Win32::{
         Foundation::*,
         System::{LibraryLoader::GetModuleHandleW, RemoteDesktop::*, Threading::CreateMutexW},
-        UI::{Input::KeyboardAndMouse::*, Shell::*, WindowsAndMessaging::*},
+        UI::{Shell::*, WindowsAndMessaging::*},
     },
     core::{Error, Result, w},
 };
@@ -46,12 +50,14 @@ struct App {
     cancel: Option<Arc<AtomicBool>>,
     worker: Option<JoinHandle<()>>,
     preview: Option<preview::Preview>,
+    select_screen: bool,
 }
 struct AppStateGuard;
 impl Drop for AppStateGuard {
     fn drop(&mut self) {
         // Take ownership first: window destruction and thread cleanup may reenter callbacks.
         let state = APP.with_borrow_mut(Option::take);
+        settings::close();
         pinned::close_all();
         pinned_render::shutdown();
         if let Some(mut state) = state {
@@ -112,16 +118,6 @@ impl Drop for Tray {
         }
     }
 }
-struct Hotkey(HWND);
-impl Drop for Hotkey {
-    fn drop(&mut self) {
-        // SAFETY: this UI thread owns the registered hotkey.
-        unsafe {
-            let _ = UnregisterHotKey(Some(self.0), 1);
-        }
-    }
-}
-
 pub fn show_error(message: &str) {
     #[cfg(test)]
     tests::record_ui_error(message);
@@ -195,6 +191,26 @@ pub fn run() -> Result<()> {
         let mutex_status = GetLastError();
         let _instance = Instance(mutex);
         if mutex_status == ERROR_ALREADY_EXISTS {
+            if std::env::args_os().any(|a| a == "--settings") {
+                if let Ok(existing) = FindWindowW(w!("kiki.Tray"), None) {
+                    let _ = PostMessageW(
+                        Some(existing),
+                        preferences::OPEN_SETTINGS,
+                        WPARAM(0),
+                        LPARAM(0),
+                    );
+                }
+            }
+            if let Ok(existing) = FindWindowW(w!("kiki.Tray"), None) {
+                if std::env::args_os().any(|a| a == "--capture" || a == "--capture-screen") {
+                    let msg = if std::env::args_os().any(|a| a == "--capture-screen") {
+                        preferences::FULLSCREEN
+                    } else {
+                        preferences::CAPTURE
+                    };
+                    let _ = PostMessageW(Some(existing), msg, WPARAM(0), LPARAM(0));
+                }
+            }
             return Ok(());
         }
         let module = GetModuleHandleW(None)?;
@@ -223,6 +239,7 @@ pub fn run() -> Result<()> {
             None,
         )?;
         let _window = HiddenWindow::own(hwnd);
+        let (_preferences, warning) = preferences::initialize(hwnd)?;
         let mut data = NOTIFYICONDATAW {
             cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
             hWnd: hwnd,
@@ -235,7 +252,7 @@ pub fn run() -> Result<()> {
         for (dst, src) in data
             .szTip
             .iter_mut()
-            .zip("kiki · Ctrl+Alt+A".encode_utf16())
+            .zip(format!("kiki · {}", preferences::current().hotkey.label()).encode_utf16())
         {
             *dst = src;
         }
@@ -250,24 +267,6 @@ pub fn run() -> Result<()> {
         let _tray = Tray(data);
         WTSRegisterSessionNotification(hwnd, NOTIFY_FOR_THIS_SESSION)?;
         _window.0.notifications.set(true);
-        let _hotkey = match RegisterHotKey(
-            Some(hwnd),
-            1,
-            MOD_CONTROL | MOD_ALT | MOD_NOREPEAT,
-            u32::from(b'A'),
-        ) {
-            Ok(()) => Some(Hotkey(hwnd)),
-            Err(_) => {
-                #[cfg(feature = "diagnostics")]
-                let is_startup_probe = std::env::args_os().any(|a| a == "--startup-probe");
-                #[cfg(not(feature = "diagnostics"))]
-                let is_startup_probe = false;
-                if !is_startup_probe {
-                    show_error("Ctrl+Alt+A 已被占用，仍可通过托盘开始截图。");
-                }
-                None
-            }
-        };
         APP.with_borrow_mut(|app| {
             *app = Some(App {
                 receiver: None,
@@ -275,6 +274,7 @@ pub fn run() -> Result<()> {
                 cancel: None,
                 worker: None,
                 preview: None,
+                select_screen: false,
             })
         });
         let app_state = AppStateGuard;
@@ -289,11 +289,45 @@ pub fn run() -> Result<()> {
             pinned::demo_4k()?;
         }
         #[cfg(feature = "diagnostics")]
-        let readiness_probe = diagnostics::start_readiness_probe(hwnd, _hotkey.is_some())?;
+        let readiness_probe = diagnostics::start_readiness_probe(hwnd, preferences::active())?;
         #[cfg(feature = "diagnostics")]
         diagnostics::start_pin_observer(hwnd)?;
+        if std::env::args_os().any(|arg| arg == "--capture-screen") {
+            PostMessageW(Some(hwnd), preferences::FULLSCREEN, WPARAM(0), LPARAM(0))?;
+        }
         if std::env::args_os().any(|arg| arg == "--capture") {
-            PostMessageW(Some(hwnd), WM_HOTKEY, WPARAM(1), LPARAM(0))?;
+            PostMessageW(Some(hwnd), preferences::CAPTURE, WPARAM(0), LPARAM(0))?;
+        }
+        if std::env::args_os().any(|arg| arg == "--settings") {
+            settings::open()?;
+        }
+        if let Some(warning) = warning {
+            show_error(&warning);
+        }
+        if !preferences::current().first_tip_seen && preferences::hints() {
+            let mut balloon = _tray.0;
+            balloon.uFlags = NIF_INFO;
+            for (d, s) in balloon
+                .szInfoTitle
+                .iter_mut()
+                .zip("kiki 已在托盘运行".encode_utf16())
+            {
+                *d = s;
+            }
+            for (d, s) in balloon.szInfo.iter_mut().zip(
+                format!(
+                    "按 {} 开始截图；右键托盘打开设置。",
+                    preferences::current().hotkey.label()
+                )
+                .encode_utf16(),
+            ) {
+                *d = s;
+            }
+            if Shell_NotifyIconW(NIM_MODIFY, &balloon).as_bool() {
+                let mut cfg = preferences::current();
+                cfg.first_tip_seen = true;
+                let _ = preferences::update(cfg);
+            }
         }
         let mut message = MSG::default();
         loop {
@@ -303,6 +337,9 @@ pub fn run() -> Result<()> {
             }
             if status == 0 {
                 break;
+            }
+            if settings::route(&message) {
+                continue;
             }
             let _ = TranslateMessage(&message);
             DispatchMessageW(&message);
@@ -319,7 +356,10 @@ pub fn run() -> Result<()> {
 }
 
 fn begin_capture(hwnd: HWND) {
-    let result = try_begin_capture(hwnd);
+    begin_capture_mode(hwnd, false);
+}
+fn begin_capture_mode(hwnd: HWND, select_screen: bool) {
+    let result = try_begin_capture_mode(hwnd, select_screen);
     // Error UI can run a nested message loop; no application-state borrow may remain.
     if let Err(message) = result {
         report_capture_error(&message);
@@ -337,7 +377,7 @@ fn report_capture_error(message: &str) {
     }
 }
 
-fn try_begin_capture(hwnd: HWND) -> std::result::Result<(), String> {
+fn try_begin_capture_mode(hwnd: HWND, select_screen: bool) -> std::result::Result<(), String> {
     APP.with_borrow_mut(|app| {
         let Some(state) = app else {
             return Ok(());
@@ -346,6 +386,7 @@ fn try_begin_capture(hwnd: HWND) -> std::result::Result<(), String> {
             return Ok(());
         }
         state.preview = None;
+        state.select_screen = select_screen;
         state.gate.cancel();
         let ticket = match state.gate.start() {
             Ok(Some(ticket)) => ticket,
@@ -482,7 +523,10 @@ fn poll(hwnd: HWND) {
             let _ = KillTimer(Some(hwnd), 1);
         }
         let result = match result {
-            Ok(Some(frame)) => preview::Preview::open(frame),
+            Ok(Some(frame)) => {
+                let mode = APP.with_borrow(|app| app.as_ref().is_some_and(|s| s.select_screen));
+                preview::Preview::open_mode(frame, mode)
+            }
             Ok(None) => return,
             Err(error) => Err(error),
         };
@@ -515,9 +559,66 @@ unsafe extern "system" fn window_proc(
 fn dispatch(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     // SAFETY: parameters originate from Win32; popup menu is destroyed in this call.
     unsafe {
+        if let Some(result) = menu::handle(msg, lparam) {
+            return result;
+        }
         match msg {
             WM_HOTKEY => {
+                if preferences::matches(wparam.0) {
+                    if settings::hotkey_focused() {
+                        settings::restore_hotkey_input();
+                    } else {
+                        begin_capture(hwnd);
+                    }
+                }
+                LRESULT(0)
+            }
+            preferences::OPEN_SETTINGS => {
+                if let Err(error) = settings::open() {
+                    show_error(&error.to_string());
+                }
+                LRESULT(0)
+            }
+            preferences::CAPTURE => {
                 begin_capture(hwnd);
+                LRESULT(0)
+            }
+            preferences::FULLSCREEN => {
+                begin_capture_mode(hwnd, true);
+                LRESULT(0)
+            }
+            config_store::SAVED => {
+                preferences::poll();
+                settings::refresh();
+                LRESULT(0)
+            }
+            preferences::CHANGED | WM_THEMECHANGED | WM_SETTINGCHANGE => {
+                settings::refresh();
+                pinned::theme_changed();
+                text_viewer::theme_changed();
+                let preview = APP.with_borrow(|app| {
+                    app.as_ref()
+                        .and_then(|s| s.preview.as_ref())
+                        .and_then(|p| p.hwnd())
+                });
+                if let Some(preview) = preview {
+                    let _ = PostMessageW(Some(preview), WM_THEMECHANGED, WPARAM(0), LPARAM(0));
+                }
+                let mut tip = NOTIFYICONDATAW {
+                    cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
+                    hWnd: hwnd,
+                    uID: 1,
+                    uFlags: NIF_TIP,
+                    ..Default::default()
+                };
+                for (d, s) in tip
+                    .szTip
+                    .iter_mut()
+                    .zip(format!("kiki · {}", preferences::current().hotkey.label()).encode_utf16())
+                {
+                    *d = s;
+                }
+                let _ = Shell_NotifyIconW(NIM_MODIFY, &tip);
                 LRESULT(0)
             }
             #[cfg(feature = "diagnostics")]
@@ -547,31 +648,32 @@ fn dispatch(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
                 LRESULT(0)
             }
             TRAY if lparam.0 as u32 == WM_RBUTTONUP => {
-                if let Ok(menu) = CreatePopupMenu() {
-                    let _ = AppendMenuW(menu, MF_STRING, 1, w!("开始截图"));
-                    let _ = AppendMenuW(menu, MF_STRING, 3, w!("关闭所有贴图"));
-                    let _ = AppendMenuW(menu, MF_STRING, 2, w!("退出"));
-                    let mut point = POINT::default();
-                    let _ = GetCursorPos(&mut point);
-                    let _ = SetForegroundWindow(hwnd);
-                    let command = TrackPopupMenu(
-                        menu,
-                        TPM_RETURNCMD | TPM_RIGHTBUTTON,
-                        point.x,
-                        point.y,
-                        None,
-                        hwnd,
-                        None,
-                    )
-                    .0;
-                    let _ = DestroyMenu(menu);
-                    if command == 1 {
-                        begin_capture(hwnd);
-                    } else if command == 3 {
-                        pinned::close_all();
-                    } else if command == 2 {
-                        destroy_hidden(hwnd);
+                let mut point = POINT::default();
+                let _ = GetCursorPos(&mut point);
+                let command = menu::popup(
+                    hwnd,
+                    point.x,
+                    point.y,
+                    &[
+                        (1, "开始截图", true),
+                        (5, "当前屏幕截图", true),
+                        (4, "设置…", true),
+                        (0, "", true),
+                        (3, "关闭所有贴图", true),
+                        (2, "退出", true),
+                    ],
+                );
+                match command {
+                    1 => begin_capture(hwnd),
+                    5 => begin_capture_mode(hwnd, true),
+                    4 => {
+                        if let Err(error) = settings::open() {
+                            show_error(&error.to_string());
+                        }
                     }
+                    3 => pinned::close_all(),
+                    2 => PostQuitMessage(0),
+                    _ => {}
                 }
                 LRESULT(0)
             }
@@ -580,7 +682,8 @@ fn dispatch(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
                 LRESULT(0)
             }
             WM_CLOSE => {
-                destroy_hidden(hwnd);
+                // Exit the pump first so workers and registrations drop before the host HWND.
+                PostQuitMessage(0);
                 LRESULT(0)
             }
             WM_NCDESTROY => {
@@ -596,7 +699,8 @@ fn dispatch(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         }
     }
 }
-#[cfg(test)]
 mod config_store;
-#[cfg(test)]
 mod hotkey;
+
+mod preferences;
+mod startup;

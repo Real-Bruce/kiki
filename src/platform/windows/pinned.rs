@@ -94,7 +94,7 @@ pub fn register(instance: HINSTANCE) -> Result<()> {
             lpszClassName: w!("kiki.Pinned"),
             ..Default::default()
         };
-        if RegisterClassW(&class) == 0 {
+        if RegisterClassW(&class) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS {
             return Err(Error::from_win32());
         }
     }
@@ -244,6 +244,19 @@ pub fn count() -> usize {
             .count()
     })
 }
+pub fn theme_changed() {
+    let handles: Vec<_> = WINDOWS.with_borrow(|windows| {
+        windows
+            .iter()
+            .filter_map(|e| e.life.upgrade().and_then(|l| l.get()))
+            .collect()
+    });
+    for hwnd in handles {
+        unsafe {
+            let _ = PostMessageW(Some(hwnd), WM_THEMECHANGED, WPARAM(0), LPARAM(0));
+        }
+    }
+}
 pub fn close_all() {
     let handles = WINDOWS.with_borrow_mut(|windows| {
         let handles: Vec<_> = windows
@@ -286,6 +299,9 @@ fn point(lp: LPARAM) -> (i32, i32) {
 fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     // SAFETY: userdata holds the unique State Box. No Rust reference to it is retained over modal/native window operations.
     unsafe {
+        if let Some(result) = super::menu::handle(msg, lp) {
+            return result;
+        }
         let pointer = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut State;
         if msg == WM_NCDESTROY && !pointer.is_null() {
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
@@ -541,45 +557,35 @@ fn zoom(hwnd: HWND, pointer: *mut State, factor: Option<f64>, screen: (i32, i32)
             let (w, h) = s.view.dimensions(s.minimum);
             (x, y, w, h, (s.view.scale * 100.).round())
         };
-        notice(
-            hwnd,
-            pointer,
-            if factor.is_none() && percent < 100. {
-                format!("显示上限 {percent:.0}%")
-            } else {
-                format!("{percent:.0}%")
-            },
-        );
+        if super::preferences::hints() {
+            notice(
+                hwnd,
+                pointer,
+                if factor.is_none() && percent < 100. {
+                    format!("显示上限 {percent:.0}%")
+                } else {
+                    format!("{percent:.0}%")
+                },
+            );
+        }
         let _ = SetWindowPos(hwnd, None, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
     }
 }
 fn context_menu(hwnd: HWND, p: (i32, i32), busy: bool) -> u32 {
-    // SAFETY: menu is UI-thread local and destroyed after modal tracking. No State reference spans the modal loop.
-    unsafe {
-        let Ok(menu) = CreatePopupMenu() else {
-            return 0;
-        };
-        let flags = MF_STRING | if busy { MF_GRAYED } else { MF_ENABLED };
-        let _ = AppendMenuW(menu, flags, 1, w!("复制\tCtrl+C"));
-        let _ = AppendMenuW(menu, flags, 2, w!("保存 PNG\tCtrl+S"));
-        let _ = AppendMenuW(menu, flags, 3, w!("恢复原始比例\tCtrl+0"));
-        let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
-        let _ = AppendMenuW(menu, MF_STRING, 4, w!("关闭\tEsc"));
-        let _ = SetForegroundWindow(hwnd);
-        let command = TrackPopupMenu(
-            menu,
-            TPM_RETURNCMD | TPM_RIGHTBUTTON,
-            p.0,
-            p.1,
-            None,
-            hwnd,
-            None,
-        )
-        .0 as u32;
-        let _ = DestroyMenu(menu);
-        command
-    }
+    super::menu::popup(
+        hwnd,
+        p.0,
+        p.1,
+        &[
+            (1, "复制\tCtrl+C", !busy),
+            (2, "保存 PNG\tCtrl+S", !busy),
+            (3, "恢复原始比例\tCtrl+0", !busy),
+            (0, "", true),
+            (4, "关闭\tEsc", true),
+        ],
+    )
 }
+
 fn action(hwnd: HWND, pointer: *mut State, command: u32) {
     // SAFETY: caller checked lifetime. Modal save dialog runs without borrowed State and lifetime is checked again afterwards.
     unsafe {

@@ -127,6 +127,109 @@ pub fn set_control(hwnd: HWND, hotkey: Hotkey) {
         );
     }
 }
+/// Retain native key handling while painting its surface in the application's theme.
+pub fn theme_control(hwnd: HWND) -> Result<()> {
+    // SAFETY: a live UI-owned HOTKEY_CLASS control; no borrowed state or allocations are retained by the subclass.
+    unsafe {
+        if !windows::Win32::UI::Shell::SetWindowSubclass(hwnd, Some(themed_proc), 77, 0).as_bool() {
+            return Err(windows::core::Error::from_win32());
+        }
+    }
+    Ok(())
+}
+unsafe extern "system" fn themed_proc(
+    hwnd: HWND,
+    msg: u32,
+    wp: windows::Win32::Foundation::WPARAM,
+    lp: windows::Win32::Foundation::LPARAM,
+    _id: usize,
+    _data: usize,
+) -> windows::Win32::Foundation::LRESULT {
+    use windows::Win32::{
+        Foundation::*,
+        Graphics::Gdi::*,
+        UI::{Shell::*, WindowsAndMessaging::*},
+    };
+    // SAFETY: the native hotkey control still owns focus, caret and keyboard processing. Paint uses only call-scoped GDI resources.
+    unsafe {
+        if msg == WM_PAINT {
+            let mut ps = PAINTSTRUCT::default();
+            let dc = BeginPaint(hwnd, &mut ps);
+            let mut rect = RECT::default();
+            let _ = GetClientRect(hwnd, &mut rect);
+            let dark = super::selection_render::system_dark();
+            let bg = CreateSolidBrush(ref_color(if dark { 0x333333 } else { 0xffffff }));
+            FillRect(dc, &rect, bg);
+            let _ = DeleteObject(bg.into());
+            let border = CreateSolidBrush(ref_color(if GetFocus() == hwnd {
+                0x0078d4
+            } else if dark {
+                0x666666
+            } else {
+                0x999999
+            }));
+            FrameRect(dc, &rect, border);
+            let _ = DeleteObject(border.into());
+            SetBkMode(dc, TRANSPARENT);
+            SetTextColor(dc, ref_color(if dark { 0xf2f2f2 } else { 0x202020 }));
+            let font = HFONT(SendMessageW(hwnd, WM_GETFONT, None, None).0 as *mut _);
+            let old = SelectObject(dc, font.into());
+            let label = control_value(hwnd)
+                .map(|key| key.label())
+                .unwrap_or_else(|_| "按 Ctrl 或 Alt 加按键…".into());
+            let mut text: Vec<_> = label.encode_utf16().collect();
+            rect.left += 8;
+            DrawTextW(
+                dc,
+                &mut text,
+                &mut rect,
+                DT_LEFT | DT_VCENTER | DT_SINGLELINE,
+            );
+            SelectObject(dc, old);
+            let _ = EndPaint(hwnd, &ps);
+            return LRESULT(0);
+        }
+        if msg == WM_ERASEBKGND {
+            return LRESULT(1);
+        }
+        if msg == WM_NCDESTROY {
+            let _ = RemoveWindowSubclass(hwnd, Some(themed_proc), 77);
+        }
+        let value = DefSubclassProc(hwnd, msg, wp, lp);
+        if matches!(msg, WM_KEYUP | WM_SYSKEYUP)
+            && [VK_CONTROL, VK_MENU, VK_SHIFT]
+                .iter()
+                .all(|key| GetAsyncKeyState(i32::from(key.0)) >= 0)
+            && control_value(hwnd).is_err()
+        {
+            if let Ok(parent) = GetParent(hwnd) {
+                let _ = PostMessageW(
+                    Some(parent),
+                    super::settings::RESTORE_HOTKEY,
+                    WPARAM(0),
+                    LPARAM(0),
+                );
+            }
+        }
+        if matches!(
+            msg,
+            WM_SETFOCUS
+                | WM_KILLFOCUS
+                | WM_KEYDOWN
+                | WM_KEYUP
+                | WM_SYSKEYDOWN
+                | WM_SYSKEYUP
+                | WM_THEMECHANGED
+        ) {
+            let _ = InvalidateRect(Some(hwnd), None, false);
+        }
+        value
+    }
+}
+fn ref_color(rgb: u32) -> windows::Win32::Foundation::COLORREF {
+    windows::Win32::Foundation::COLORREF(((rgb & 255) << 16) | (rgb & 0xff00) | ((rgb >> 16) & 255))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -51,11 +51,18 @@ pub struct Canvas {
     source: std::sync::Arc<Image>,
 }
 pub fn system_dark() -> bool {
-    if std::env::args_os().any(|a| a == "--theme=dark") {
-        return true;
-    }
-    if std::env::args_os().any(|a| a == "--theme=light") {
-        return false;
+    match super::preferences::theme() {
+        Some(crate::core::config::Theme::Dark) => return true,
+        Some(crate::core::config::Theme::Light) => return false,
+        Some(crate::core::config::Theme::System) => {}
+        None => {
+            if std::env::args_os().any(|a| a == "--theme=dark") {
+                return true;
+            }
+            if std::env::args_os().any(|a| a == "--theme=light") {
+                return false;
+            }
+        }
     }
     UISettings::new()
         .and_then(|settings| settings.GetColorValue(UIColorType::Background))
@@ -305,24 +312,26 @@ impl Canvas {
                 self.paint_toolbar(&layout, editor, pointer, focus, pressed, busy);
                 self.paint_parameters(&layout, editor, focus);
             }
-            let hint = D2D_RECT_F {
-                left: 16. * scale,
-                top: h - 44. * scale,
-                right: (if text_active { 480. } else { 350. }) * scale,
-                bottom: h - 12. * scale,
-            };
-            self.round(hint, 6. * scale, color(30, 36, 46, 0.88));
-            self.label(
-                if busy {
-                    "正在输出，请稍候…"
-                } else if text_active {
-                    "Enter 换行　Ctrl+Enter 完成　Esc 取消文字"
-                } else {
-                    "拖动框选　F 当前屏幕　Esc 取消"
-                },
-                hint,
-                color(255, 255, 255, 1.),
-            );
+            if busy || super::preferences::hints() {
+                let hint = D2D_RECT_F {
+                    left: 16. * scale,
+                    top: h - 44. * scale,
+                    right: (if text_active { 480. } else { 350. }) * scale,
+                    bottom: h - 12. * scale,
+                };
+                self.round(hint, 6. * scale, color(30, 36, 46, 0.88));
+                self.label(
+                    if busy {
+                        "正在输出，请稍候…"
+                    } else if text_active {
+                        "Enter 换行　Ctrl+Enter 完成　Esc 取消文字"
+                    } else {
+                        "拖动框选　F 当前屏幕　Esc 取消"
+                    },
+                    hint,
+                    color(255, 255, 255, 1.),
+                );
+            }
             self.target.EndDraw(None, None)
         }
     }
@@ -471,7 +480,7 @@ impl Canvas {
                     );
                 }
             }
-            if let Some(i) = hovered {
+            if let Some(i) = hovered.filter(|_| super::preferences::hints()) {
                 let b = layout.buttons[i];
                 let width =
                     ((i64::from(b.right) - i64::from(b.left)) as f32 + 48. * s).round() as i32;

@@ -129,6 +129,7 @@ fn native_failure_paths_release_state_and_allow_retry() {
                         cancel: None,
                         worker: None,
                         preview: None,
+                        select_screen: false,
                     })
                 });
 
