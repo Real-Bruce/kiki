@@ -179,8 +179,9 @@ pub fn run() -> Result<()> {
     // SAFETY: window/tray APIs run on the main thread; pointers below are call-scoped.
     unsafe {
         let mutex = CreateMutexW(None, false, w!("Local\\kiki.WindowsV1"))?;
+        let mutex_status = GetLastError();
         let _instance = Instance(mutex);
-        if GetLastError() == ERROR_ALREADY_EXISTS {
+        if mutex_status == ERROR_ALREADY_EXISTS {
             return Ok(());
         }
         let module = GetModuleHandleW(None)?;
@@ -226,8 +227,12 @@ pub fn run() -> Result<()> {
             *dst = src;
         }
         if !Shell_NotifyIconW(NIM_ADD, &data).as_bool() {
-            let _ = DestroyWindow(hwnd);
-            return Err(Error::from_win32());
+            // Shell_NotifyIcon documents only BOOL success, not a reliable last-error code.
+            // Return a stable error before RAII destroys the hidden window and changes thread error state.
+            return Err(Error::new(
+                E_FAIL,
+                "无法创建托盘图标，请确认桌面任务栏可用，并在正常桌面环境中重试。",
+            ));
         }
         let _tray = Tray(data);
         WTSRegisterSessionNotification(hwnd, NOTIFY_FOR_THIS_SESSION)?;
