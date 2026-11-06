@@ -17,7 +17,7 @@ cargo build --release
 
 构建结果为 `target/x86_64-pc-windows-msvc/release/icapture.exe`。运行后驻留托盘，Ctrl+Alt+A 或托盘开始截图可打开冻结桌面的诊断预览；关闭预览仍保留托盘。`--capture` 可在首次启动时直接开始捕获。
 
-开发探针：`icapture.exe --probe artifacts/p1` 写入真实桌面 PNG 与捕获耗时；`icapture.exe --stress artifacts/p1/stress` 执行 100 次捕获、释放及资源采样。仅显式调用时运行，结果目录不入库。探针会包含真实屏幕内容，请勿将其作为公开测试数据提交。
+开发探针须用 `cargo build --release --features diagnostics` 单独编译，默认构建不包含它们：`icapture.exe --probe artifacts/p1` 写入真实桌面 PNG 与捕获耗时；`icapture.exe --stress artifacts/p1/stress` 执行 100 次捕获、释放及资源采样；`scripts/Measure-Startup.ps1` 采集 30 次独立进程启动到热键和托盘就绪时间。仅显式调用时运行，结果目录不入库。探针会包含真实屏幕内容，请勿将其作为公开测试数据提交。完成后用默认 `cargo build --release` 恢复不含探针的程序。
 
 当前验证结果和缺项见 [P1 验证报告](docs/validation/P1.md)。最终标注、输出操作、贴图、设置、主题及 ZIP 交付尚待后续阶段。
 

@@ -1,9 +1,12 @@
 mod capture;
+#[cfg(feature = "diagnostics")]
 mod diagnostics;
+#[cfg(any(feature = "diagnostics", test))]
 mod png;
 mod preview;
 mod runtime;
 
+use crate::core::session::{SessionGate, SessionId};
 use std::{cell::RefCell, sync::mpsc, thread::JoinHandle};
 use windows::{
     Win32::{
@@ -17,7 +20,8 @@ use windows::{
 const TRAY: u32 = WM_APP + 1;
 thread_local! { static APP: RefCell<Option<App>> = const { RefCell::new(None) }; }
 struct App {
-    receiver: Option<mpsc::Receiver<Result<capture::CaptureResult>>>,
+    receiver: Option<mpsc::Receiver<(SessionId, Result<capture::CaptureResult>)>>,
+    gate: SessionGate,
     worker: Option<JoinHandle<()>>,
     preview: Option<preview::Preview>,
 }
@@ -64,9 +68,11 @@ pub fn show_error(message: &str) {
 
 pub fn run() -> Result<()> {
     let _runtime = runtime::Runtime::initialize()?;
+    #[cfg(feature = "diagnostics")]
     if diagnostics::run_if_requested()? {
         return Ok(());
     }
+    #[cfg(feature = "diagnostics")]
     if let Some(directory) = std::env::args_os()
         .nth(1)
         .filter(|a| a == "--probe")
@@ -151,18 +157,27 @@ pub fn run() -> Result<()> {
         ) {
             Ok(()) => Some(Hotkey(hwnd)),
             Err(_) => {
-                show_error("Ctrl+Alt+A 已被占用，仍可通过托盘开始截图。");
+                #[cfg(feature = "diagnostics")]
+                let is_startup_probe = std::env::args_os().any(|a| a == "--startup-probe");
+                #[cfg(not(feature = "diagnostics"))]
+                let is_startup_probe = false;
+                if !is_startup_probe {
+                    show_error("Ctrl+Alt+A 已被占用，仍可通过托盘开始截图。");
+                }
                 None
             }
         };
         APP.with_borrow_mut(|app| {
             *app = Some(App {
                 receiver: None,
+                gate: SessionGate::default(),
                 worker: None,
                 preview: None,
             })
         });
         preview::register(module.into())?;
+        #[cfg(feature = "diagnostics")]
+        let readiness_probe = diagnostics::start_readiness_probe(hwnd, _hotkey.is_some())?;
         if std::env::args_os().any(|arg| arg == "--capture") {
             PostMessageW(Some(hwnd), WM_HOTKEY, WPARAM(1), LPARAM(0))?;
         }
@@ -180,11 +195,18 @@ pub fn run() -> Result<()> {
         }
         APP.with_borrow_mut(|app| {
             if let Some(mut state) = app.take() {
+                state.gate.cancel();
                 if let Some(worker) = state.worker.take() {
                     let _ = worker.join();
                 }
             }
         });
+        #[cfg(feature = "diagnostics")]
+        if let Some(probe) = readiness_probe {
+            probe
+                .join()
+                .map_err(|_| Error::new(E_FAIL, "启动采样线程意外退出"))??;
+        }
     }
     Ok(())
 }
@@ -198,12 +220,21 @@ fn begin_capture(hwnd: HWND) {
             return;
         }
         state.preview = None;
+        state.gate.cancel();
+        let ticket = match state.gate.start() {
+            Ok(Some(ticket)) => ticket,
+            Ok(None) => return,
+            Err(message) => {
+                show_error(message);
+                return;
+            }
+        };
         let (tx, rx) = mpsc::sync_channel(1);
         match std::thread::Builder::new()
             .name("capture".into())
             .spawn(move || {
                 let result = capture::desktop();
-                let _ = tx.send(result);
+                let _ = tx.send((ticket, result));
             }) {
             Ok(worker) => {
                 state.receiver = Some(rx);
@@ -213,7 +244,10 @@ fn begin_capture(hwnd: HWND) {
                     SetTimer(Some(hwnd), 1, 15, None);
                 }
             }
-            Err(e) => show_error(&format!("无法启动捕获任务：{e}")),
+            Err(e) => {
+                state.gate.cancel();
+                show_error(&format!("无法启动捕获任务：{e}"));
+            }
         }
     });
 }
@@ -221,23 +255,45 @@ fn begin_capture(hwnd: HWND) {
 fn poll(hwnd: HWND) {
     let result = APP.with_borrow_mut(|app| {
         let state = app.as_mut()?;
-        let result = match state.receiver.as_ref()?.try_recv() {
-            Ok(result) => result,
+        let (ticket, result) = match state.receiver.as_ref()?.try_recv() {
+            Ok(message) => message,
             Err(mpsc::TryRecvError::Empty) => return None,
-            Err(_) => Err(Error::new(E_FAIL, "捕获线程意外退出")),
+            Err(_) => {
+                state.receiver = None;
+                state.gate.cancel();
+                if let Some(worker) = state.worker.take() {
+                    let _ = worker.join();
+                }
+                return Some(Err(Error::new(E_FAIL, "捕获线程意外退出")));
+            }
         };
         state.receiver = None;
         if let Some(worker) = state.worker.take() {
             let _ = worker.join();
         }
-        Some(result)
+        if !state.gate.accept_frame(ticket) {
+            // A display cancellation invalidates this generation; dropping releases pixels.
+            return Some(Ok(None));
+        }
+        match result {
+            Ok(frame) => Some(Ok(Some(frame))),
+            Err(error) => {
+                state.gate.cancel();
+                Some(Err(error))
+            }
+        }
     });
     if let Some(result) = result {
         // SAFETY: timer belongs to the hidden tray window.
         unsafe {
             let _ = KillTimer(Some(hwnd), 1);
         }
-        match result.and_then(preview::Preview::open) {
+        let result = match result {
+            Ok(Some(frame)) => preview::Preview::open(frame),
+            Ok(None) => return,
+            Err(error) => Err(error),
+        };
+        match result {
             Ok(preview) => APP.with_borrow_mut(|app| {
                 if let Some(state) = app {
                     state.preview = Some(preview);
@@ -273,6 +329,16 @@ fn dispatch(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
             }
             WM_TIMER => {
                 poll(hwnd);
+                LRESULT(0)
+            }
+            WM_DISPLAYCHANGE => {
+                let preview = APP.with_borrow_mut(|app| {
+                    let state = app.as_mut()?;
+                    state.gate.cancel();
+                    state.preview.take()
+                });
+                // Destroy outside RefCell borrow because window destruction can reenter dispatch.
+                drop(preview);
                 LRESULT(0)
             }
             TRAY if lparam.0 as u32 == WM_LBUTTONUP => {

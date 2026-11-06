@@ -3,8 +3,11 @@ use super::capture;
 use std::{io::Write, path::PathBuf};
 use windows::{
     Win32::{
-        Foundation::E_FAIL,
-        System::{ProcessStatus::*, Threading::*},
+        Foundation::*,
+        System::{
+            ProcessStatus::*, SystemInformation::GetSystemTimePreciseAsFileTime, Threading::*,
+        },
+        UI::{HiDpi::GetDpiForSystem, WindowsAndMessaging::*},
     },
     core::{Error, Result},
 };
@@ -78,4 +81,49 @@ fn row(csv: &mut std::fs::File, index: u32, elapsed: f64) -> Result<()> {
 }
 fn io_error(e: std::io::Error) -> Error {
     Error::new(E_FAIL, e.to_string())
+}
+
+pub fn start_readiness_probe(
+    hwnd: HWND,
+    registered: bool,
+) -> Result<Option<std::thread::JoinHandle<Result<()>>>> {
+    let mut args = std::env::args_os();
+    if args.nth(1).is_none_or(|arg| arg != "--startup-probe") {
+        return Ok(None);
+    }
+    let folder = args
+        .next()
+        .map(PathBuf::from)
+        .ok_or_else(|| Error::new(E_FAIL, "--startup-probe 需要输出目录"))?;
+    // SAFETY: output FILETIMEs are initialized; this is a read-only current-process snapshot.
+    let (elapsed_ms, dpi) = unsafe {
+        let mut creation = FILETIME::default();
+        let mut exit = FILETIME::default();
+        let mut kernel = FILETIME::default();
+        let mut user = FILETIME::default();
+        GetProcessTimes(
+            GetCurrentProcess(),
+            &mut creation,
+            &mut exit,
+            &mut kernel,
+            &mut user,
+        )?;
+        let now = GetSystemTimePreciseAsFileTime();
+        let ticks = |t: FILETIME| (u64::from(t.dwHighDateTime) << 32) | u64::from(t.dwLowDateTime);
+        let delta = ticks(now)
+            .checked_sub(ticks(creation))
+            .ok_or_else(|| Error::new(E_FAIL, "采样期间系统时钟发生回拨"))?;
+        (delta as f64 / 10_000., GetDpiForSystem())
+    };
+    let window_bits = hwnd.0 as usize;
+    let worker = std::thread::Builder::new().name("startup-probe".into()).spawn(move || {
+        let result = (|| {
+            std::fs::create_dir_all(&folder).map_err(io_error)?;
+            std::fs::write(folder.join("startup.csv"), format!("ready_ms,hotkey_registered,system_dpi\n{elapsed_ms:.3},{registered},{dpi}\n")).map_err(io_error)
+        })();
+        // SAFETY: hidden window belongs to this diagnostic process; UI waits for this worker on exit.
+        unsafe { PostMessageW(Some(HWND(window_bits as *mut _)),WM_CLOSE,WPARAM(0),LPARAM(0))?; }
+        result
+    }).map_err(io_error)?;
+    Ok(Some(worker))
 }
