@@ -2,7 +2,7 @@ use crate::core::{
     display::DisplayInfo,
     geometry::PixelRect,
     image::Image,
-    selection::{PixelPoint, Selection, contains, toolbar},
+    selection::{PixelPoint, Selection, contains, fit_panel, selection_label, toolbar},
 };
 use windows::{
     UI::ViewManagement::{UIColorType, UISettings},
@@ -20,6 +20,7 @@ use windows_numerics::Vector2;
 
 pub struct Layout {
     pub bounds: PixelRect,
+    pub screen: PixelRect,
     pub buttons: [PixelRect; 11],
     pub scale: f32,
 }
@@ -97,25 +98,7 @@ impl Canvas {
         }
     }
     pub fn layout(&self, rect: PixelRect, screens: &[DisplayInfo]) -> Layout {
-        let center = PixelPoint {
-            x: ((i64::from(rect.left) + i64::from(rect.right)) / 2) as i32,
-            y: ((i64::from(rect.top) + i64::from(rect.bottom)) / 2) as i32,
-        };
-        let screen = screens
-            .iter()
-            .find(|screen| contains(screen.bounds, center))
-            .or_else(|| {
-                screens.iter().max_by_key(|screen| {
-                    screen
-                        .bounds
-                        .intersection(rect)
-                        .and_then(|r| r.size())
-                        .map_or(0, |(w, h)| u64::from(w) * u64::from(h))
-                })
-            });
-        let (screen, preferred) = screen.map_or((self.source.bounds(), 1.), |s| {
-            (s.bounds, s.scale_percent as f32 / 100.)
-        });
+        let (screen, preferred) = self.display(rect, screens);
         let scale = preferred
             .min((i64::from(screen.right) - i64::from(screen.left)) as f32 / 520.)
             .max(0.1);
@@ -143,9 +126,31 @@ impl Canvas {
         });
         Layout {
             bounds,
+            screen,
             buttons,
             scale,
         }
+    }
+    fn display(&self, rect: PixelRect, screens: &[DisplayInfo]) -> (PixelRect, f32) {
+        let center = PixelPoint {
+            x: ((i64::from(rect.left) + i64::from(rect.right)) / 2) as i32,
+            y: ((i64::from(rect.top) + i64::from(rect.bottom)) / 2) as i32,
+        };
+        let screen = screens
+            .iter()
+            .find(|screen| contains(screen.bounds, center))
+            .or_else(|| {
+                screens.iter().max_by_key(|screen| {
+                    screen
+                        .bounds
+                        .intersection(rect)
+                        .and_then(|r| r.size())
+                        .map_or(0, |(w, h)| u64::from(w) * u64::from(h))
+                })
+            });
+        screen.map_or((self.source.bounds(), 1.), |s| {
+            (s.bounds, s.scale_percent as f32 / 100.)
+        })
     }
     pub fn paint(
         &mut self,
@@ -154,19 +159,20 @@ impl Canvas {
         screens: &[DisplayInfo],
         pointer: PixelPoint,
         focus: usize,
+        pressed: Option<usize>,
     ) -> Result<()> {
         let layout = selection
             .rect
             .filter(|_| !selection.active())
             .map(|r| self.layout(r, screens));
-        let scale = layout.as_ref().map_or_else(
-            || {
-                screens
-                    .first()
-                    .map_or(1., |s| s.scale_percent as f32 / 100.)
-            },
-            |l| l.scale,
-        );
+        let anchor = selection.rect.or(hover).unwrap_or(PixelRect {
+            left: pointer.x,
+            top: pointer.y,
+            right: pointer.x,
+            bottom: pointer.y,
+        });
+        let (screen, preferred) = self.display(anchor, screens);
+        let scale = layout.as_ref().map_or(preferred, |l| l.scale);
         // SAFETY: all drawing resources belong to this UI thread; BeginDraw is always paired with EndDraw.
         unsafe {
             if (scale - self.scale).abs() > 0.001 {
@@ -236,12 +242,14 @@ impl Canvas {
                     }
                 }
                 if let Some((rw, rh)) = rect.size() {
-                    let label = D2D_RECT_F {
-                        left: r.left.max(4.),
-                        top: (r.top - 29. * scale).max(4.),
-                        right: (r.left + 132. * scale).min(w - 4.),
-                        bottom: (r.top - 3. * scale).max(30. * scale),
-                    };
+                    let label = self.local(selection_label(
+                        rect,
+                        screen,
+                        layout.as_ref().map(|l| l.bounds),
+                        (132. * scale).round() as i32,
+                        (26. * scale).round() as i32,
+                        (3. * scale).round() as i32,
+                    ));
                     self.round(label, 5. * scale, color(0, 94, 176, 1.));
                     self.label(&format!("{rw} × {rh}"), label, color(255, 255, 255, 1.));
                 }
@@ -257,7 +265,7 @@ impl Canvas {
                 );
             }
             if let Some(layout) = layout {
-                self.paint_toolbar(&layout, pointer, focus);
+                self.paint_toolbar(&layout, pointer, focus, pressed);
             }
             let hint = D2D_RECT_F {
                 left: 16. * scale,
@@ -274,7 +282,13 @@ impl Canvas {
             self.target.EndDraw(None, None)
         }
     }
-    fn paint_toolbar(&self, layout: &Layout, pointer: PixelPoint, focus: usize) {
+    fn paint_toolbar(
+        &self,
+        layout: &Layout,
+        pointer: PixelPoint,
+        focus: usize,
+        pressed: Option<usize>,
+    ) {
         // SAFETY: synchronous UI-thread drawing; all brushes and formats are retained by Canvas.
         unsafe {
             let r = self.local(layout.bounds);
@@ -365,6 +379,17 @@ impl Canvas {
                         },
                     );
                 }
+                if over && active && pressed == Some(i) {
+                    self.round(
+                        b,
+                        6. * s,
+                        if self.dark {
+                            color(35, 66, 96, 1.)
+                        } else {
+                            color(188, 217, 245, 1.)
+                        },
+                    );
+                }
                 if i == 9 {
                     self.round(b, 6. * s, color(0, 120, 212, 0.65));
                 }
@@ -401,13 +426,18 @@ impl Canvas {
                 }
             }
             if let Some(i) = hovered {
-                let b = self.local(layout.buttons[i]);
-                let t = D2D_RECT_F {
-                    left: b.left - 14. * s,
-                    top: r.top - 34. * s,
-                    right: b.right + 14. * s,
-                    bottom: r.top - 6. * s,
-                };
+                let b = layout.buttons[i];
+                let width =
+                    ((i64::from(b.right) - i64::from(b.left)) as f32 + 48. * s).round() as i32;
+                let t = self.local(fit_panel(
+                    PixelPoint {
+                        x: b.left.saturating_sub((24. * s).round() as i32),
+                        y: layout.bounds.top.saturating_sub((34. * s).round() as i32),
+                    },
+                    layout.screen,
+                    width,
+                    (28. * s).round() as i32,
+                ));
                 self.round(t, 6. * s, panel);
                 self.label(
                     names[i],

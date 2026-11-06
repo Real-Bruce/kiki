@@ -68,13 +68,22 @@ impl Selection {
             y: p.y.clamp(self.bounds.top, self.bounds.bottom),
         }
     }
+    pub fn handle_at(&self, p: PixelPoint, radius: i32) -> Option<usize> {
+        Self::handles(self.rect?)
+            .iter()
+            .enumerate()
+            .filter_map(|(index, h)| {
+                let dx = (i64::from(h.x) - i64::from(p.x)).abs();
+                let dy = (i64::from(h.y) - i64::from(p.y)).abs();
+                (dx <= i64::from(radius) && dy <= i64::from(radius)).then_some((index, dx + dy))
+            })
+            .min_by_key(|(_, distance)| *distance)
+            .map(|(index, _)| index)
+    }
     pub fn begin(&mut self, p: PixelPoint, radius: i32) {
         let p = self.clamp(p);
         let kind = if let Some(rect) = self.rect {
-            if let Some(index) = Self::handles(rect).iter().position(|h| {
-                (i64::from(h.x) - i64::from(p.x)).abs() <= i64::from(radius)
-                    && (i64::from(h.y) - i64::from(p.y)).abs() <= i64::from(radius)
-            }) {
+            if let Some(index) = self.handle_at(p, radius) {
                 DragKind::Resize(index)
             } else if contains(rect, p) {
                 DragKind::Move
@@ -165,6 +174,56 @@ impl Selection {
         self.drag = None;
         self.rect = self.bounds.intersection(screen);
     }
+}
+/// Preserve the panel's size at display edges, rather than clipping its text.
+pub fn fit_panel(origin: PixelPoint, screen: PixelRect, width: i32, height: i32) -> PixelRect {
+    if screen.size().is_none() {
+        return screen;
+    }
+    let width =
+        i64::from(width.max(1)).min((i64::from(screen.right) - i64::from(screen.left)).max(1));
+    let height =
+        i64::from(height.max(1)).min((i64::from(screen.bottom) - i64::from(screen.top)).max(1));
+    let left = i64::from(origin.x).clamp(i64::from(screen.left), i64::from(screen.right) - width);
+    let top = i64::from(origin.y).clamp(i64::from(screen.top), i64::from(screen.bottom) - height);
+    PixelRect {
+        left: left as i32,
+        top: top as i32,
+        right: (left + width) as i32,
+        bottom: (top + height) as i32,
+    }
+}
+
+pub fn selection_label(
+    rect: PixelRect,
+    screen: PixelRect,
+    bar: Option<PixelRect>,
+    width: i32,
+    height: i32,
+    gap: i32,
+) -> PixelRect {
+    let initial = fit_panel(
+        PixelPoint {
+            x: rect.left,
+            y: rect.top.saturating_sub(height).saturating_sub(gap),
+        },
+        screen,
+        width,
+        height,
+    );
+    let Some(bar) = bar.filter(|bar| initial.intersection(*bar).is_some()) else {
+        return initial;
+    };
+    for y in [
+        bar.top.saturating_sub(height).saturating_sub(gap),
+        bar.bottom.saturating_add(gap),
+    ] {
+        let candidate = fit_panel(PixelPoint { x: rect.left, y }, screen, width, height);
+        if candidate.intersection(bar).is_none() {
+            return candidate;
+        }
+    }
+    initial
 }
 fn normalize(a: PixelPoint, b: PixelPoint) -> PixelRect {
     PixelRect {
@@ -362,5 +421,77 @@ mod tests {
         selection.begin(PixelPoint { x: 1919, y: 1079 }, 2);
         selection.finish(PixelPoint { x: 1800, y: 900 }, None);
         assert_eq!(selection.rect.and_then(PixelRect::size), Some((120, 180)));
+    }
+
+    #[test]
+    fn edge_labels_keep_their_size_and_tiny_handles_choose_nearest() {
+        let screen = PixelRect {
+            left: -1920,
+            top: -1080,
+            right: 0,
+            bottom: 0,
+        };
+        let panel = fit_panel(PixelPoint { x: -2, y: -2 }, screen, 264, 52);
+        assert_eq!(
+            panel,
+            PixelRect {
+                left: -264,
+                top: -52,
+                right: 0,
+                bottom: 0
+            }
+        );
+        assert_eq!(
+            fit_panel(
+                PixelPoint {
+                    x: i32::MAX,
+                    y: i32::MIN
+                },
+                screen,
+                i32::MAX,
+                i32::MAX
+            ),
+            screen
+        );
+        let mut selection = Selection::new(screen);
+        selection.rect = Some(PixelRect {
+            left: -10,
+            top: -10,
+            right: -6,
+            bottom: -6,
+        });
+        assert_eq!(selection.handle_at(PixelPoint { x: -6, y: -6 }, 7), Some(4));
+        selection.begin(PixelPoint { x: -6, y: -6 }, 7);
+        selection.finish(PixelPoint { x: 0, y: 0 }, None);
+        assert_eq!(
+            selection.rect,
+            Some(PixelRect {
+                left: -10,
+                top: -10,
+                right: 0,
+                bottom: 0
+            })
+        );
+    }
+
+    #[test]
+    fn bottom_corner_label_does_not_hide_under_toolbar() {
+        let screen = PixelRect {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1080,
+        };
+        let selection = PixelRect {
+            left: 1888,
+            top: 1050,
+            right: 1900,
+            bottom: 1063,
+        };
+        let bar = toolbar(selection, screen, 650, 60, 12);
+        let label = selection_label(selection, screen, Some(bar), 165, 33, 4);
+        assert_eq!(label.size(), Some((165, 33)));
+        assert!(label.intersection(bar).is_none());
+        assert_eq!(label.right, 1920);
     }
 }

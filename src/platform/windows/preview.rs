@@ -63,7 +63,11 @@ impl Preview {
                 canvas,
                 selection: Selection::new(bounds),
                 screens: capture.screens,
-                windows: capture.windows,
+                windows: capture
+                    .windows
+                    .into_iter()
+                    .filter_map(|r| bounds.intersection(r))
+                    .collect(),
                 pointer: position().unwrap_or(PixelPoint {
                     x: bounds.left,
                     y: bounds.top,
@@ -194,6 +198,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                         &state.screens,
                         state.pointer,
                         state.focus,
+                        state.down_button,
                     )
                 };
                 let _ = EndPaint(hwnd, &ps);
@@ -273,6 +278,8 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                             }
                         }
                         70 => {
+                            release = true;
+                            state.down_button = None;
                             state.pointer = position().unwrap_or(state.pointer);
                             if let Some(screen) = state
                                 .screens
@@ -305,6 +312,21 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 let state = &*pointer;
                 let cursor = if state.button_at(state.pointer).is_some() {
                     IDC_ARROW
+                } else if let Some(handle) =
+                    state.selection.handle_at(state.pointer, state.radius())
+                {
+                    match handle {
+                        0 | 4 => IDC_SIZENWSE,
+                        2 | 6 => IDC_SIZENESW,
+                        1 | 5 => IDC_SIZENS,
+                        _ => IDC_SIZEWE,
+                    }
+                } else if state
+                    .selection
+                    .rect
+                    .is_some_and(|r| contains(r, state.pointer))
+                {
+                    IDC_SIZEALL
                 } else {
                     IDC_CROSS
                 };
