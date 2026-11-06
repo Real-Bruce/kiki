@@ -6,6 +6,8 @@ mod display;
 mod png;
 mod preview;
 mod runtime;
+#[cfg(test)]
+mod tests;
 
 use crate::core::session::{SessionGate, SessionId};
 use std::{
@@ -35,6 +37,22 @@ struct App {
     cancel: Option<Arc<AtomicBool>>,
     worker: Option<JoinHandle<()>>,
     preview: Option<preview::Preview>,
+}
+struct AppStateGuard;
+impl Drop for AppStateGuard {
+    fn drop(&mut self) {
+        // Take ownership first: window destruction and thread cleanup may reenter callbacks.
+        let state = APP.with_borrow_mut(Option::take);
+        if let Some(mut state) = state {
+            state.gate.cancel();
+            if let Some(cancel) = state.cancel.take() {
+                cancel.store(true, Ordering::Release);
+            }
+            if let Some(worker) = state.worker.take() {
+                let _ = worker.join();
+            }
+        }
+    }
 }
 struct Instance(HANDLE);
 struct HiddenState {
@@ -237,6 +255,7 @@ pub fn run() -> Result<()> {
                 preview: None,
             })
         });
+        let app_state = AppStateGuard;
         preview::register(module.into())?;
         #[cfg(feature = "diagnostics")]
         let readiness_probe = diagnostics::start_readiness_probe(hwnd, _hotkey.is_some())?;
@@ -255,17 +274,7 @@ pub fn run() -> Result<()> {
             let _ = TranslateMessage(&message);
             DispatchMessageW(&message);
         }
-        APP.with_borrow_mut(|app| {
-            if let Some(mut state) = app.take() {
-                state.gate.cancel();
-                if let Some(cancel) = state.cancel.take() {
-                    cancel.store(true, Ordering::Release);
-                }
-                if let Some(worker) = state.worker.take() {
-                    let _ = worker.join();
-                }
-            }
-        });
+        drop(app_state);
         #[cfg(feature = "diagnostics")]
         if let Some(probe) = readiness_probe {
             probe
@@ -277,44 +286,54 @@ pub fn run() -> Result<()> {
 }
 
 fn begin_capture(hwnd: HWND) {
+    let result = try_begin_capture(hwnd);
+    // Error UI can run a nested message loop; no application-state borrow may remain.
+    if let Err(message) = result {
+        report_capture_error(&message);
+    }
+}
+
+fn report_capture_error(message: &str) {
+    #[cfg(test)]
+    {
+        tests::record_error(message);
+    }
+    #[cfg(not(test))]
+    {
+        show_error(message);
+    }
+}
+
+fn try_begin_capture(hwnd: HWND) -> std::result::Result<(), String> {
     APP.with_borrow_mut(|app| {
         let Some(state) = app else {
-            return;
+            return Ok(());
         };
         if state.receiver.is_some() || state.preview.as_ref().is_some_and(|p| p.is_open()) {
-            return;
+            return Ok(());
         }
         state.preview = None;
         state.gate.cancel();
         let ticket = match state.gate.start() {
             Ok(Some(ticket)) => ticket,
-            Ok(None) => return,
+            Ok(None) => return Ok(()),
             Err(message) => {
-                show_error(message);
-                return;
+                return Err(message.into());
             }
         };
         let (tx, rx) = mpsc::sync_channel(1);
         let cancel = Arc::new(AtomicBool::new(false));
         let worker_cancel = cancel.clone();
-        // SAFETY: UI thread owns hwnd; this timer exists only for the bounded capture request.
-        unsafe {
-            if SetTimer(Some(hwnd), 1, 15, None) == 0 {
-                state.gate.cancel();
-                show_error("无法接收截图完成通知，请稍后重试。");
-                return;
-            }
+        if !start_capture_timer(hwnd) {
+            state.gate.cancel();
+            return Err("无法接收截图完成通知，请稍后重试。".into());
         }
-        match std::thread::Builder::new()
-            .name("capture".into())
-            .spawn(move || {
-                let result = capture::desktop_with_cancel(&worker_cancel);
-                let _ = tx.send((ticket, result));
-            }) {
+        match spawn_capture(ticket, worker_cancel, tx) {
             Ok(worker) => {
                 state.receiver = Some(rx);
                 state.cancel = Some(cancel);
                 state.worker = Some(worker);
+                Ok(())
             }
             Err(e) => {
                 state.gate.cancel();
@@ -322,10 +341,49 @@ fn begin_capture(hwnd: HWND) {
                 unsafe {
                     let _ = KillTimer(Some(hwnd), 1);
                 }
-                show_error(&format!("无法启动捕获任务：{e}"));
+                Err(format!("无法启动捕获任务：{e}"))
             }
         }
-    });
+    })
+}
+
+fn start_capture_timer(hwnd: HWND) -> bool {
+    #[cfg(test)]
+    if tests::take_fault(tests::Fault::Timer) {
+        return false;
+    }
+    // SAFETY: caller is the owning UI thread, with a live hidden window and no timer callback.
+    unsafe { SetTimer(Some(hwnd), 1, 15, None) != 0 }
+}
+
+fn spawn_capture(
+    ticket: SessionId,
+    cancel: Arc<AtomicBool>,
+    tx: mpsc::SyncSender<(SessionId, Result<capture::CaptureResult>)>,
+) -> std::io::Result<JoinHandle<()>> {
+    #[cfg(test)]
+    if tests::take_fault(tests::Fault::Spawn) {
+        return Err(std::io::Error::other("测试注入：工作线程创建失败"));
+    }
+    #[cfg(test)]
+    let fault = tests::take_worker_fault();
+    std::thread::Builder::new()
+        .name("capture".into())
+        .spawn(move || {
+            #[cfg(test)]
+            if let Some(fault) = fault {
+                if fault == tests::Fault::CaptureError {
+                    let _ = tx.send((ticket, Err(Error::new(E_FAIL, "测试注入：捕获失败"))));
+                }
+                if fault == tests::Fault::LateFrame {
+                    let result = tests::late_frame(&cancel);
+                    let _ = tx.send((ticket, result));
+                }
+                return;
+            }
+            let result = capture::desktop_with_cancel(&cancel);
+            let _ = tx.send((ticket, result));
+        })
 }
 
 fn cancel_session() {
@@ -401,7 +459,7 @@ fn poll(hwnd: HWND) {
                     state.preview = Some(preview);
                 }
             }),
-            Err(e) => show_error(&format!("截图失败，已返回托盘：{e}")),
+            Err(e) => report_capture_error(&format!("截图失败，已返回托盘：{e}")),
         }
     }
 }

@@ -82,3 +82,13 @@
 - 默认及 all-features 的严格 Clippy、6 项默认测试通过；默认 Release 为 362,496 字节。
 - 关联提交主题：fix(app): cancel on session changes and own hidden window lifecycle。
 - 当前测试窗口保留供用户继续操作。P2 详情及未验证环境继续见 validation/P2.md；HDR 和最终选区/编辑界面尚未完成。
+
+## P2 原生失败与退出回归
+
+- 用真实 Win32 隐藏窗口、定时器、工作线程及消息泵，注入定时器失败、线程启动失败、捕获错误与通道断开；失败后均可重试。
+- 注入显示变化、锁屏与两类断开消息后，实际工作线程返回晚到测试帧不会弹出预览。它们是消息/故障注入，不是对应硬件或锁屏实机通过。
+- 修复错误报告时仍持有应用借用的重入风险；增加 AppStateGuard，异常返回也先回收捕获与预览，再结束 COM 运行环境。
+- 30 次独立启动和正常退出回归通过，启动就绪 P95 56.117 ms、最大 247.161 ms；数据位于 artifacts/performance/startup-lifecycle-regression。
+- 默认及 all-features 严格 Clippy、7 项测试通过，默认 Release 363,520 字节；最终一次真实捕获正常。
+- 关联提交主题：test(app): exercise native failure recovery and guard teardown。
+- 多屏实机按用户要求继续暂缓；HDR、真实锁屏/热插拔、最终编辑与输出流程仍待完成。测试窗口继续保留。
