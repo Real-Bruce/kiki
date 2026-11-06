@@ -1,4 +1,7 @@
+mod annotation_render;
 mod capture;
+#[cfg(any(feature = "diagnostics", test))]
+mod composition;
 #[cfg(feature = "diagnostics")]
 mod diagnostics;
 mod display;

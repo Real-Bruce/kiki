@@ -1,5 +1,5 @@
 use crate::core::{
-    annotation::{Editor, Shape, Tool, arrow_head},
+    annotation::{Editor, Shape, Tool},
     display::DisplayInfo,
     geometry::PixelRect,
     image::Image,
@@ -203,19 +203,7 @@ impl Canvas {
         });
         let (screen, preferred) = self.display(anchor, screens);
         let scale = layout.as_ref().map_or(preferred, |l| l.scale);
-        let text_layouts: Vec<Option<IDWriteTextLayout>> = editor
-            .objects()
-            .iter()
-            .map(|o| match &o.shape {
-                Shape::Text {
-                    content,
-                    size,
-                    wrap_width,
-                    ..
-                } => self.text_layout(content, *size, *wrap_width).map(Some),
-                _ => Ok(None),
-            })
-            .collect::<Result<_>>()?;
+        let text_layouts = super::annotation_render::layouts(&self.dw, editor)?;
         // SAFETY: all drawing resources belong to this UI thread; BeginDraw is always paired with EndDraw.
         unsafe {
             if (scale - self.scale).abs() > 0.001 {
@@ -502,20 +490,7 @@ impl Canvas {
         }
     }
     fn text_layout(&self, content: &str, size: f32, width: f32) -> Result<IDWriteTextLayout> {
-        // SAFETY: UI-thread factory with call-scoped UTF-16 text; DirectWrite copies layout text.
-        unsafe {
-            let format = self.dw.CreateTextFormat(
-                w!("Segoe UI"),
-                None,
-                DWRITE_FONT_WEIGHT_NORMAL,
-                DWRITE_FONT_STYLE_NORMAL,
-                DWRITE_FONT_STRETCH_NORMAL,
-                size,
-                w!("zh-CN"),
-            )?;
-            let wide: Vec<u16> = content.encode_utf16().collect();
-            self.dw.CreateTextLayout(&wide, &format, width, 1_000_000.)
-        }
+        super::annotation_render::text_layout(&self.dw, content, size, width)
     }
     pub fn text_object(
         &self,
@@ -713,53 +688,14 @@ impl Canvas {
         unsafe {
             self.target
                 .PushAxisAlignedClip(&self.local(clip), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-            for (index, object) in editor.objects().iter().enumerate() {
-                if editing == Some(index) {
-                    continue;
-                }
-                let c = object.style.color;
-                self.brush.SetColor(&color(c[0], c[1], c[2], 1.));
-                let width = object.style.width;
-                match &object.shape {
-                    Shape::Text { bounds, .. } => {
-                        if let Some(layout) = &layouts[index] {
-                            self.target.DrawTextLayout(
-                                point(PixelPoint {
-                                    x: bounds.left,
-                                    y: bounds.top,
-                                }),
-                                layout,
-                                &self.brush,
-                                D2D1_DRAW_TEXT_OPTIONS_NONE,
-                            );
-                        }
-                    }
-                    Shape::Rectangle(r) => {
-                        self.target
-                            .DrawRectangle(&self.local(*r), &self.brush, width, None)
-                    }
-                    Shape::Arrow(start, end) => {
-                        let a = point(*start);
-                        let b = point(*end);
-                        self.target.DrawLine(a, b, &self.brush, width, None);
-                        for wing in arrow_head(*start, *end, width) {
-                            self.target
-                                .DrawLine(b, point(wing), &self.brush, width, None);
-                        }
-                    }
-                    Shape::Pen(points) => {
-                        for pair in points.windows(2) {
-                            self.target.DrawLine(
-                                point(pair[0]),
-                                point(pair[1]),
-                                &self.brush,
-                                width,
-                                None,
-                            );
-                        }
-                    }
-                }
-            }
+            super::annotation_render::draw(
+                &self.target,
+                &self.brush,
+                self.source.bounds(),
+                editor,
+                layouts,
+                editing,
+            );
             if let Some(object) = editor.selected.and_then(|i| editor.objects().get(i)) {
                 self.brush.SetColor(&color(239, 153, 44, 1.));
                 self.target

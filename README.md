@@ -23,6 +23,8 @@ cargo build --release
 
 开发构建可显式使用 `--trace-window-targets <文件路径>` 记录窗口类别、样式和边界，用于检查透明辅助层筛选；每次捕获覆盖该文件，不记录窗口标题或输入内容。
 
+成图开发探针：diagnostics 构建可用 `kiki.exe --annotation-probe artifacts/p4-composition` 输出一张明确的测试底图和一张真实桌面裁剪，各自叠加诊断标注，用于检查共享绘制、透明区域和 PNG 内容。它不启用普通用户的保存/复制功能，输出含真实屏幕内容。详见 [P4 成图记录](docs/validation/P4_COMPOSITION.md)。
+
 ## 新会话执行入口
 
 请先阅读 [AGENTS.md](AGENTS.md)，然后按 [实施计划](docs/IMPLEMENTATION_PLAN.md) 开始工作。

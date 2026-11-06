@@ -178,3 +178,12 @@
 - 最终深色窗口读取前已关闭；真实拼音候选、重编取消/IME 候选交互、深色输入框与参数键盘访问等完整 GUI 矩阵未验收。没有用 Unicode 注入或模拟 IME 消息冒充真实拼音通过。
 - 原始界面证据、边界和下一步见 validation/P4_TEXT.md。P4 继续进行，P3 按用户要求暂缓；下一步以真实 IME/编辑取消回归和 P5 合成输出联验收口。
 - 关联提交主题：feat(annotation): add native multiline text editing and IME routing。
+
+## P4 成图语义与 P5 基础
+
+- 本轮深色窗口在绑定前已消失，真实 IME、取消、深色等原遗留继续保留；未反复唤起截图。
+- 提取预览与输出共用的 annotation_render，新增仅供 diagnostics/test 的 WIC/Direct2D 干净成图；保持全局物理坐标、透明间隙与独立底图所有权，排除对象选择框和 UI 装饰。
+- 25 项 all-features 测试、fmt、两种配置严格 Clippy 与两种 Release 构建通过。独立成图与完整成图裁剪的 84,000 个像素逐字节一致；底图和选中状态相关回归通过。
+- 实际运行 --annotation-probe 并打开两张 PNG，分别为明确的测试底图和真实 WGC 桌面裁剪加诊断标注；中文与三种几何标注可见。原始文件位于忽略目录 artifacts/p4-composition，详见 validation/P4_COMPOSITION.md。
+- 默认 EXE 526,336 字节；composition 尚未进入默认用户输出链路，无新增依赖。P5 下一步接后台合成、剪贴板和原生保存，继续保留失败后的编辑状态；P3 暂缓及 P4 未验收项不变。
+- 关联提交主题：feat(render): share annotation painting with clean image composition。
