@@ -22,7 +22,6 @@ impl Image {
     }
 
     /// Copy an independently owned region; uncovered pixels remain transparent.
-    #[cfg(any(feature = "diagnostics", test))]
     pub fn region(&self, bounds: PixelRect) -> Result<Self, String> {
         let mut output = Self::new(bounds)?;
         output.blit(self);

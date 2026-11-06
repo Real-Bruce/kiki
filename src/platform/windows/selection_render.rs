@@ -32,6 +32,7 @@ pub struct PaintInput<'a> {
     pub editor: &'a Editor,
     pub editing: Option<usize>,
     pub text_active: bool,
+    pub busy: bool,
     pub hover: Option<PixelRect>,
     pub screens: &'a [DisplayInfo],
     pub pointer: PixelPoint,
@@ -47,7 +48,7 @@ pub struct Canvas {
     icons: IDWriteTextFormat,
     scale: f32,
     pub dark: bool,
-    source: Image,
+    source: std::sync::Arc<Image>,
 }
 pub fn system_dark() -> bool {
     if std::env::args_os().any(|a| a == "--theme=dark") {
@@ -61,6 +62,9 @@ pub fn system_dark() -> bool {
         .is_ok_and(|c| u32::from(c.R) + u32::from(c.G) + u32::from(c.B) < 384)
 }
 impl Canvas {
+    pub fn source(&self) -> std::sync::Arc<Image> {
+        self.source.clone()
+    }
     pub fn bounds(&self) -> PixelRect {
         self.source.bounds()
     }
@@ -110,7 +114,7 @@ impl Canvas {
                 icons,
                 scale: 1.,
                 dark: system_dark(),
-                source: image,
+                source: std::sync::Arc::new(image),
             })
         }
     }
@@ -185,6 +189,7 @@ impl Canvas {
             editor,
             editing,
             text_active,
+            busy,
             hover,
             screens,
             pointer,
@@ -297,7 +302,7 @@ impl Canvas {
             }
             self.paint_annotations(editor, selection.rect, editing, &text_layouts);
             if let Some(layout) = layout {
-                self.paint_toolbar(&layout, editor, pointer, focus, pressed);
+                self.paint_toolbar(&layout, editor, pointer, focus, pressed, busy);
                 self.paint_parameters(&layout, editor, focus);
             }
             let hint = D2D_RECT_F {
@@ -308,7 +313,9 @@ impl Canvas {
             };
             self.round(hint, 6. * scale, color(30, 36, 46, 0.88));
             self.label(
-                if text_active {
+                if busy {
+                    "正在输出，请稍候…"
+                } else if text_active {
                     "Enter 换行　Ctrl+Enter 完成　Esc 取消文字"
                 } else {
                     "拖动框选　F 当前屏幕　Esc 取消"
@@ -326,6 +333,7 @@ impl Canvas {
         pointer: PixelPoint,
         focus: usize,
         pressed: Option<usize>,
+        busy: bool,
     ) {
         // SAFETY: synchronous UI-thread drawing; all brushes and formats are retained by Canvas.
         unsafe {
@@ -383,14 +391,14 @@ impl Canvas {
                 "撤销 · Ctrl+Z",
                 "重做 · Ctrl+Y",
                 "贴图",
-                "保存",
+                "保存 · Ctrl+S",
                 "复制",
                 "取消 · Esc",
             ];
             let mut hovered = None;
             for (i, button) in layout.buttons.iter().enumerate() {
                 let b = self.local(*button);
-                let active = editor.enabled(i);
+                let active = !busy && editor.enabled(i);
                 let over = contains(*button, pointer);
                 if over {
                     hovered = Some(i);
@@ -429,7 +437,7 @@ impl Canvas {
                     );
                 }
                 if i == 9 {
-                    self.round(b, 6. * s, color(0, 120, 212, 0.65));
+                    self.round(b, 6. * s, color(0, 120, 212, if busy { 0.65 } else { 1. }));
                 }
                 let foreground = if i == editor.tool.button() {
                     if self.dark {
@@ -776,7 +784,7 @@ impl Canvas {
                     line((-4., 9.), (4., 9.));
                 }
                 9 => {
-                    self.brush.SetColor(&color(255, 255, 255, 0.7));
+                    self.brush.SetColor(&color(255, 255, 255, 1.));
                     self.target.DrawRectangle(
                         &D2D_RECT_F {
                             left: r.left + 10. * s,
@@ -805,7 +813,7 @@ impl Canvas {
                             left: r.left + 29. * s,
                             ..r
                         },
-                        color(255, 255, 255, 0.75),
+                        color(255, 255, 255, 1.),
                     );
                 }
                 10 => {

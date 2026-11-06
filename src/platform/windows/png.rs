@@ -46,11 +46,104 @@ pub fn save(image: &Image, path: &Path) -> Result<()> {
     }
 }
 
+pub fn encode(image: &Image) -> Result<Vec<u8>> {
+    let _apartment = super::composition::Apartment::enter()?;
+    // SAFETY: in-memory COM stream and WIC objects belong to this worker; stream owns and releases its global allocation.
+    unsafe {
+        let stream = StructuredStorage::CreateStreamOnHGlobal(
+            windows::Win32::Foundation::HGLOBAL::default(),
+            true,
+        )?;
+        let factory: IWICImagingFactory =
+            CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
+        let encoder = factory.CreateEncoder(&GUID_ContainerFormatPng, std::ptr::null())?;
+        encoder.Initialize(&stream, WICBitmapEncoderNoCache)?;
+        let mut frame = None;
+        encoder.CreateNewFrame(&mut frame, std::ptr::null_mut())?;
+        let frame = frame.ok_or_else(|| Error::new(E_FAIL, "无法创建 PNG 帧"))?;
+        frame.Initialize(None)?;
+        let (width, height) = image
+            .bounds()
+            .size()
+            .ok_or_else(|| Error::new(E_FAIL, "图像尺寸无效"))?;
+        frame.SetSize(width, height)?;
+        let mut format = GUID_WICPixelFormat32bppBGRA;
+        frame.SetPixelFormat(&mut format)?;
+        if format != GUID_WICPixelFormat32bppBGRA {
+            return Err(Error::new(E_FAIL, "PNG 格式不匹配"));
+        }
+        frame.WritePixels(height, image.stride(), image.pixels())?;
+        frame.Commit()?;
+        encoder.Commit()?;
+        let mut stat = STATSTG::default();
+        stream.Stat(&mut stat, STATFLAG_NONAME)?;
+        let length = usize::try_from(stat.cbSize).map_err(|_| Error::new(E_FAIL, "PNG 过大"))?;
+        if length > 600 * 1024 * 1024 {
+            return Err(Error::new(E_FAIL, "PNG 超过内存限制"));
+        }
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(length)
+            .map_err(|_| Error::new(E_FAIL, "没有足够内存编码 PNG"))?;
+        bytes.resize(length, 0);
+        stream.Seek(0, STREAM_SEEK_SET, None)?;
+        let mut read = 0;
+        stream
+            .Read(bytes.as_mut_ptr().cast(), length as u32, Some(&mut read))
+            .ok()?;
+        if read as usize != length {
+            return Err(Error::new(E_FAIL, "PNG 读取不完整"));
+        }
+        Ok(bytes)
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::geometry::PixelRect;
 
+    #[test]
+    fn memory_png_preserves_straight_alpha_and_pixels() {
+        let mut image = Image::new(PixelRect {
+            left: 0,
+            top: 0,
+            right: 3,
+            bottom: 1,
+        })
+        .unwrap();
+        image
+            .pixels_mut()
+            .copy_from_slice(&[0, 0, 255, 255, 50, 100, 200, 128, 0, 0, 0, 0]);
+        let bytes = encode(&image).unwrap();
+        assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n");
+        let _apartment = super::super::composition::Apartment::enter().unwrap();
+        // SAFETY: this test retains encoded storage and all COM resources through synchronous decoding on the same thread.
+        unsafe {
+            let factory: IWICImagingFactory =
+                CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER).unwrap();
+            let stream = factory.CreateStream().unwrap();
+            stream.InitializeFromMemory(&bytes).unwrap();
+            let decoder = factory
+                .CreateDecoderFromStream(&stream, std::ptr::null(), WICDecodeMetadataCacheOnLoad)
+                .unwrap();
+            let converter = factory.CreateFormatConverter().unwrap();
+            converter
+                .Initialize(
+                    &decoder.GetFrame(0).unwrap(),
+                    &GUID_WICPixelFormat32bppBGRA,
+                    WICBitmapDitherTypeNone,
+                    None,
+                    0.,
+                    WICBitmapPaletteTypeCustom,
+                )
+                .unwrap();
+            let mut decoded = [0; 12];
+            converter
+                .CopyPixels(std::ptr::null(), 12, &mut decoded)
+                .unwrap();
+            assert_eq!(decoded, image.pixels());
+        }
+    }
     #[test]
     fn wic_png_roundtrip_preserves_size_bgra_and_transparent_gap() {
         let directory = std::env::temp_dir().join(format!("kiki-wic-test-{}", std::process::id()));

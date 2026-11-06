@@ -14,9 +14,9 @@ use windows::{
     },
     core::{Error, Result},
 };
-struct Apartment(bool);
+pub(super) struct Apartment(bool);
 impl Apartment {
-    fn enter() -> Result<Self> {
+    pub(super) fn enter() -> Result<Self> {
         // SAFETY: initialize COM on the calling worker, preserving an existing STA.
         let status = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
         if status.is_err() && status != RPC_E_CHANGED_MODE {
@@ -158,6 +158,7 @@ pub fn render(source: &Image, selection: PixelRect, editor: &Editor) -> Result<I
 fn fixture() -> Result<(Image, Editor)> {
     fixture_at(-160, -90)
 }
+#[cfg(any(feature = "diagnostics", test))]
 fn fixture_at(left: i32, top: i32) -> Result<(Image, Editor)> {
     use crate::core::{
         annotation::{Object, Shape, Style, Tool},

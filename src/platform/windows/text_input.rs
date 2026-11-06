@@ -17,6 +17,7 @@ use windows::{
 };
 pub const COMMIT: u32 = WM_APP + 40;
 pub const CANCEL: u32 = WM_APP + 41;
+pub const SAVE: u32 = WM_APP + 42;
 struct TextFlags {
     composing: Cell<bool>,
     suppress_return: Cell<bool>,
@@ -274,6 +275,8 @@ unsafe extern "system" fn subclass(
                     Some(CANCEL)
                 } else if wp.0 == 13 && GetKeyState(VK_CONTROL.0 as i32) < 0 {
                     Some(COMMIT)
+                } else if wp.0 == 83 && GetKeyState(VK_CONTROL.0 as i32) < 0 {
+                    Some(SAVE)
                 } else {
                     None
                 };
@@ -289,7 +292,8 @@ unsafe extern "system" fn subclass(
                 return LRESULT(0);
             }
             if msg == WM_CHAR
-                && (wp.0 == 27
+                && (wp.0 == 19
+                    || wp.0 == 27
                     || ((wp.0 == 13 || wp.0 == 10)
                         && (state.flags.suppress_return.get()
                             || GetKeyState(VK_CONTROL.0 as i32) < 0)))

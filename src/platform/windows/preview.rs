@@ -67,6 +67,9 @@ impl Preview {
                 editor: Editor::default(),
                 parameter_down: false,
                 text_input: None,
+                output: None,
+                busy: false,
+                pending_output: None,
                 screens: capture.screens,
                 windows: capture
                     .windows
@@ -81,6 +84,7 @@ impl Preview {
                 pressed_window: None,
                 down_button: None,
                 focus: usize::MAX,
+                keyboard_focus: false,
             };
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(Box::new(state)) as isize);
             let _ = ShowWindow(hwnd, SW_SHOW);
@@ -116,6 +120,9 @@ struct State {
     editor: Editor,
     parameter_down: bool,
     text_input: Option<TextInput>,
+    output: Option<super::output::Job>,
+    busy: bool,
+    pending_output: Option<usize>,
     screens: Vec<DisplayInfo>,
     windows: Vec<PixelRect>,
     pointer: PixelPoint,
@@ -123,6 +130,7 @@ struct State {
     pressed_window: Option<PixelRect>,
     down_button: Option<usize>,
     focus: usize,
+    keyboard_focus: bool,
 }
 impl State {
     fn activate(&mut self, index: usize) -> bool {
@@ -177,6 +185,9 @@ impl State {
                 if let Err(message) = self.apply_parameter(index - 11) {
                     self.editor.warn(message);
                 }
+            }
+            8 | 9 => {
+                self.pending_output = Some(index);
             }
             5 => self.editor.undo(),
             6 => self.editor.redo(),
@@ -290,7 +301,58 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         if pointer.is_null() {
             return DefWindowProcW(hwnd, msg, wp, lp);
         }
+        if (*pointer).busy
+            && matches!(
+                msg,
+                WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP | WM_LBUTTONDBLCLK | WM_KEYDOWN
+            )
+        {
+            return LRESULT(0);
+        }
         match msg {
+            WM_TIMER if wp.0 == 5 => {
+                let result =
+                    (*pointer)
+                        .output
+                        .as_ref()
+                        .and_then(|job| match job.receiver.try_recv() {
+                            Ok(result) => Some(result),
+                            Err(std::sync::mpsc::TryRecvError::Empty) => None,
+                            Err(_) => {
+                                Some(Err(Error::new(E_FAIL, "输出线程意外退出，编辑内容已保留")))
+                            }
+                        });
+                if let Some(result) = result {
+                    let job = (*pointer).output.take();
+                    drop(job);
+                    (*pointer).busy = false;
+                    let _ = KillTimer(Some(hwnd), 5);
+                    match result {
+                        Ok(()) => {
+                            let _ = DestroyWindow(hwnd);
+                        }
+                        Err(e) => {
+                            super::show_error(&format!("输出失败，编辑内容已保留：{e}"));
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
+                    }
+                }
+                LRESULT(0)
+            }
+            super::text_input::SAVE => {
+                if (*pointer)
+                    .text_input
+                    .as_ref()
+                    .and_then(TextInput::hwnd)
+                    .is_some_and(|child| child.0 as usize == wp.0)
+                {
+                    (*pointer).pending_output = Some(8);
+                    if let Err(e) = begin_output(hwnd, pointer) {
+                        super::show_error(&e.to_string());
+                    }
+                }
+                LRESULT(0)
+            }
             WM_ERASEBKGND => LRESULT(1),
             WM_PAINT => {
                 let mut ps = PAINTSTRUCT::default();
@@ -302,10 +364,15 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                         editor: &state.editor,
                         editing: state.text_input.as_ref().and_then(|input| input.index),
                         text_active: state.text_input.is_some(),
+                        busy: state.busy,
                         hover: state.hover,
                         screens: &state.screens,
                         pointer: state.pointer,
-                        focus: state.focus,
+                        focus: if state.keyboard_focus {
+                            state.focus
+                        } else {
+                            usize::MAX
+                        },
                         pressed: state.down_button,
                     })
                 };
@@ -381,6 +448,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     state.pointer = position().unwrap_or(state.pointer);
                     state.pressed_window = state.window_at(state.pointer);
                     state.parameter_down = false;
+                    state.keyboard_focus = false;
                     if let Some(parameter) = state.parameter_at(state.pointer) {
                         state.parameter_down = true;
                         state.focus = 11 + parameter;
@@ -464,6 +532,12 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 if let Some(message) = warning {
                     super::show_error(message);
                 }
+                if (*pointer).pending_output.is_some() {
+                    if let Err(e) = begin_output(hwnd, pointer) {
+                        super::show_error(&e.to_string());
+                    }
+                    return LRESULT(0);
+                }
                 if close {
                     let _ = DestroyWindow(hwnd);
                 } else {
@@ -521,6 +595,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                             false
                         }
                         9 => {
+                            state.keyboard_focus = true;
                             let backwards = GetKeyState(VK_SHIFT.0 as i32) < 0;
                             let mut next = if state.focus < 22 {
                                 state.focus
@@ -542,7 +617,19 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                             state.focus = next;
                             false
                         }
-                        13 | 32 => state.activate(state.focus),
+                        13 => {
+                            if state.keyboard_focus && state.focus < 22 {
+                                state.activate(state.focus)
+                            } else {
+                                state.pending_output = Some(9);
+                                false
+                            }
+                        }
+                        32 => state.keyboard_focus && state.activate(state.focus),
+                        83 if GetKeyState(VK_CONTROL.0 as i32) < 0 => {
+                            state.pending_output = Some(8);
+                            false
+                        }
                         46 => {
                             state.editor.delete();
                             false
@@ -563,6 +650,12 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 }
                 if let Some(message) = (*pointer).editor.take_warning() {
                     super::show_error(message);
+                }
+                if (*pointer).pending_output.is_some() {
+                    if let Err(e) = begin_output(hwnd, pointer) {
+                        super::show_error(&e.to_string());
+                    }
+                    return LRESULT(0);
                 }
                 if close {
                     let _ = DestroyWindow(hwnd);
@@ -778,6 +871,88 @@ fn restyle_text(
                 state.editor.commit_text(Some(index), object)?;
             }
         }
+    }
+    Ok(())
+}
+
+fn begin_output(hwnd: HWND, pointer: *mut State) -> Result<()> {
+    // SAFETY: UI dispatch owns this live state; no borrow is held across dialog, capture release or native callbacks.
+    let (kind, lifetime) = unsafe {
+        let state = &mut *pointer;
+        if state.busy {
+            return Ok(());
+        }
+        let Some(kind) = state.pending_output.take() else {
+            return Ok(());
+        };
+        (kind, state.lifetime.clone())
+    };
+    finish_text(hwnd, pointer)?;
+    // SAFETY: the state borrow ends before ReleaseCapture can reenter the message pump.
+    unsafe {
+        {
+            let state = &mut *pointer;
+            if state.selection.rect.is_none() {
+                return Err(Error::new(E_FAIL, "请先选择截图范围"));
+            }
+            state.editor.finish(state.pointer);
+            state.selection.finish(state.pointer, state.pressed_window);
+            state.busy = true;
+        }
+        let _ = ReleaseCapture();
+    }
+    let destination = if kind == 8 {
+        let result = super::output::save_dialog(hwnd);
+        if lifetime.get() != Some(hwnd) {
+            return Ok(());
+        }
+        match result {
+            Ok(Some(path)) => super::output::Destination::File(path),
+            Ok(None) => {
+                // SAFETY: lifetime above confirms the same live window.
+                unsafe {
+                    (*pointer).busy = false;
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                }
+                return Ok(());
+            }
+            Err(e) => {
+                // SAFETY: same live window; return to editing on dialog failure.
+                unsafe {
+                    (*pointer).busy = false;
+                }
+                return Err(e);
+            }
+        }
+    } else {
+        super::output::Destination::Clipboard
+    };
+    // SAFETY: timer posts only to this live UI window; snapshot owns geometry, Arc shares immutable pixels without copying the desktop.
+    unsafe {
+        if SetTimer(Some(hwnd), 5, 20, None) == 0 {
+            (*pointer).busy = false;
+            return Err(Error::new(E_FAIL, "无法启动输出检查，请重试"));
+        }
+        let state = &mut *pointer;
+        let rect = state
+            .selection
+            .rect
+            .ok_or_else(|| Error::new(E_FAIL, "选区已失效"))?;
+        match super::output::start(
+            state.canvas.source(),
+            rect,
+            state.editor.snapshot(),
+            hwnd.0 as usize,
+            destination,
+        ) {
+            Ok(job) => state.output = Some(job),
+            Err(e) => {
+                state.busy = false;
+                let _ = KillTimer(Some(hwnd), 5);
+                return Err(e);
+            }
+        }
+        let _ = InvalidateRect(Some(hwnd), None, false);
     }
     Ok(())
 }

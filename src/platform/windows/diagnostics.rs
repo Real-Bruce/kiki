@@ -14,6 +14,17 @@ use windows::{
 
 pub fn run_if_requested() -> Result<bool> {
     let args: Vec<_> = std::env::args_os().collect();
+    if args
+        .get(1)
+        .is_some_and(|arg| arg == "--inspect-output-clipboard")
+    {
+        let path = args
+            .get(2)
+            .map(PathBuf::from)
+            .ok_or_else(|| Error::new(E_FAIL, "需要输出目录"))?;
+        super::output::inspect_clipboard(&path)?;
+        return Ok(true);
+    }
     if args.get(1).is_some_and(|arg| arg == "--annotation-probe") {
         let path = args
             .get(2)

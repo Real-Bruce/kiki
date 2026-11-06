@@ -279,6 +279,15 @@ impl Editor {
     pub fn take_warning(&mut self) -> Option<&'static str> {
         self.warning.take()
     }
+    pub fn snapshot(&self) -> Self {
+        Self {
+            objects: self.objects.clone(),
+            tool: self.tool,
+            styles: self.styles,
+            text_size: self.text_size,
+            ..Default::default()
+        }
+    }
     pub fn objects(&self) -> &[Object] {
         &self.objects
     }
@@ -293,7 +302,7 @@ impl Editor {
     }
     pub fn enabled(&self, index: usize) -> bool {
         (matches!(index, 11..=21) && self.tool != Tool::Select)
-            || matches!(index, 0..=4 | 10)
+            || matches!(index, 0..=4 | 8..=10)
             || (index == 5 && self.can_undo())
             || (index == 6 && self.can_redo())
     }
