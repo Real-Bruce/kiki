@@ -152,6 +152,7 @@ pub fn register(instance: HINSTANCE) -> Result<()> {
         let class = WNDCLASSW {
             lpfnWndProc: Some(proc),
             hInstance: instance,
+            hIcon: super::icon::application(instance, false)?,
             lpszClassName: w!("iCapture.Preview"),
             hCursor: LoadCursorW(None, IDC_CROSS)?,
             ..Default::default()

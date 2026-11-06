@@ -2,6 +2,15 @@
 
 更新时间：2026-11-06
 
+## 用户追加：应用图标
+
+- 接入用户提供的 `iCapture-icons.zip` 中 Windows 多尺寸 ICO，作为 EXE、托盘与窗口类标识；不新增依赖或外部运行文件。
+- SDK 资源编译接入 Cargo 构建；源码资源及来源见 `resources/icons/README.md`。
+- fmt、all-features 严格 Clippy、14 项现有测试及默认/diagnostics Release 构建通过；真实资源管理器与 EXE 提取图标已检查，默认 EXE 为 476,672 字节。
+- 启动探针未生成 CSV，不将退出码 0 当作托盘就绪通过；托盘视觉、窗口切换标识及跨 DPI 仍待复验。详见 validation/ICONS.md。
+- 关联提交主题：feat(app): embed supplied application icon。
+- 原 P2/P3 未验收项继续保留，下一阶段入口不变。
+
 ## 当前状态
 
 - 产品方案与视觉方向已获用户确认。

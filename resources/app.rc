@@ -1,0 +1,2 @@
+// Keep ID 1 as the first icon group for Windows Explorer and shortcuts.
+1 ICON "resources/icons/iCapture.ico"

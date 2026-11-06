@@ -2,6 +2,7 @@ mod capture;
 #[cfg(feature = "diagnostics")]
 mod diagnostics;
 mod display;
+mod icon;
 #[cfg(any(feature = "diagnostics", test))]
 mod png;
 mod preview;
@@ -186,6 +187,7 @@ pub fn run() -> Result<()> {
         let class = WNDCLASSW {
             lpfnWndProc: Some(window_proc),
             hInstance: module.into(),
+            hIcon: icon::application(module.into(), false)?,
             lpszClassName: w!("iCapture.Tray"),
             ..Default::default()
         };
@@ -213,7 +215,7 @@ pub fn run() -> Result<()> {
             uID: 1,
             uFlags: NIF_ICON | NIF_MESSAGE | NIF_TIP,
             uCallbackMessage: TRAY,
-            hIcon: LoadIconW(None, IDI_APPLICATION)?,
+            hIcon: icon::application(module.into(), true)?,
             ..Default::default()
         };
         for (dst, src) in data
