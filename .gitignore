@@ -1,0 +1,18 @@
+/target/
+/dist/
+/artifacts/
+/.local/
+/.vs/
+*.pdb
+*.dmp
+*.log
+*.tmp
+*.pfx
+*.p12
+*.key
+.env
+.env.*
+!.env.example
+Thumbs.db
+Desktop.ini
+# 应用仓库必须提交 Cargo.lock；不得忽略 docs/design 中的批准设计稿。
