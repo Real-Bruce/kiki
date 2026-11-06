@@ -9,7 +9,8 @@ mod runtime;
 
 use crate::core::session::{SessionGate, SessionId};
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
+    rc::Rc,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -20,7 +21,7 @@ use std::{
 use windows::{
     Win32::{
         Foundation::*,
-        System::{LibraryLoader::GetModuleHandleW, Threading::CreateMutexW},
+        System::{LibraryLoader::GetModuleHandleW, RemoteDesktop::*, Threading::CreateMutexW},
         UI::{Input::KeyboardAndMouse::*, Shell::*, WindowsAndMessaging::*},
     },
     core::{Error, Result, w},
@@ -36,6 +37,35 @@ struct App {
     preview: Option<preview::Preview>,
 }
 struct Instance(HANDLE);
+struct HiddenState {
+    hwnd: Cell<Option<HWND>>,
+    notifications: Cell<bool>,
+}
+struct HiddenWindow(Rc<HiddenState>);
+impl HiddenWindow {
+    fn own(hwnd: HWND) -> Self {
+        let lifetime = Rc::new(HiddenState {
+            hwnd: Cell::new(Some(hwnd)),
+            notifications: Cell::new(false),
+        });
+        // SAFETY: fresh UI-thread window has no userdata; the callback reclaims this one Box on NCDESTROY.
+        unsafe {
+            SetWindowLongPtrW(
+                hwnd,
+                GWLP_USERDATA,
+                Box::into_raw(Box::new(lifetime.clone())) as isize,
+            );
+        }
+        Self(lifetime)
+    }
+}
+impl Drop for HiddenWindow {
+    fn drop(&mut self) {
+        if let Some(hwnd) = self.0.hwnd.get() {
+            destroy_hidden(hwnd);
+        }
+    }
+}
 impl Drop for Instance {
     fn drop(&mut self) {
         // SAFETY: wrapper uniquely owns the mutex handle.
@@ -156,6 +186,7 @@ pub fn run() -> Result<()> {
             Some(module.into()),
             None,
         )?;
+        let _window = HiddenWindow::own(hwnd);
         let mut data = NOTIFYICONDATAW {
             cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
             hWnd: hwnd,
@@ -177,6 +208,8 @@ pub fn run() -> Result<()> {
             return Err(Error::from_win32());
         }
         let _tray = Tray(data);
+        WTSRegisterSessionNotification(hwnd, NOTIFY_FOR_THIS_SESSION)?;
+        _window.0.notifications.set(true);
         let _hotkey = match RegisterHotKey(
             Some(hwnd),
             1,
@@ -264,6 +297,14 @@ fn begin_capture(hwnd: HWND) {
         let (tx, rx) = mpsc::sync_channel(1);
         let cancel = Arc::new(AtomicBool::new(false));
         let worker_cancel = cancel.clone();
+        // SAFETY: UI thread owns hwnd; this timer exists only for the bounded capture request.
+        unsafe {
+            if SetTimer(Some(hwnd), 1, 15, None) == 0 {
+                state.gate.cancel();
+                show_error("无法接收截图完成通知，请稍后重试。");
+                return;
+            }
+        }
         match std::thread::Builder::new()
             .name("capture".into())
             .spawn(move || {
@@ -274,17 +315,41 @@ fn begin_capture(hwnd: HWND) {
                 state.receiver = Some(rx);
                 state.cancel = Some(cancel);
                 state.worker = Some(worker);
-                // SAFETY: hwnd belongs to this UI thread; timer exists only during capture.
-                unsafe {
-                    SetTimer(Some(hwnd), 1, 15, None);
-                }
             }
             Err(e) => {
                 state.gate.cancel();
+                // SAFETY: no worker was started; roll back this UI thread's capture timer.
+                unsafe {
+                    let _ = KillTimer(Some(hwnd), 1);
+                }
                 show_error(&format!("无法启动捕获任务：{e}"));
             }
         }
     });
+}
+
+fn cancel_session() {
+    let preview = APP.with_borrow_mut(|app| {
+        let state = app.as_mut()?;
+        state.gate.cancel();
+        if let Some(cancel) = state.cancel.as_ref() {
+            cancel.store(true, Ordering::Release);
+        }
+        state.preview.take()
+    });
+    // Window destruction can reenter the dispatcher; release the state borrow first.
+    drop(preview);
+}
+
+fn destroy_hidden(hwnd: HWND) {
+    // SAFETY: called only on the owning UI thread; userdata remains installed until NCDESTROY.
+    unsafe {
+        let pointer = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut Rc<HiddenState>;
+        if !pointer.is_null() && (&*pointer).notifications.replace(false) {
+            let _ = WTSUnRegisterSessionNotification(hwnd);
+        }
+        let _ = DestroyWindow(hwnd);
+    }
 }
 
 fn poll(hwnd: HWND) {
@@ -369,16 +434,16 @@ fn dispatch(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
                 LRESULT(0)
             }
             WM_DISPLAYCHANGE => {
-                let preview = APP.with_borrow_mut(|app| {
-                    let state = app.as_mut()?;
-                    state.gate.cancel();
-                    if let Some(cancel) = state.cancel.as_ref() {
-                        cancel.store(true, Ordering::Release);
-                    }
-                    state.preview.take()
-                });
-                // Destroy outside RefCell borrow because window destruction can reenter dispatch.
-                drop(preview);
+                cancel_session();
+                LRESULT(0)
+            }
+            WM_WTSSESSION_CHANGE
+                if matches!(
+                    wparam.0 as u32,
+                    WTS_SESSION_LOCK | WTS_CONSOLE_DISCONNECT | WTS_REMOTE_DISCONNECT
+                ) =>
+            {
+                cancel_session();
                 LRESULT(0)
             }
             TRAY if lparam.0 as u32 == WM_LBUTTONUP => {
@@ -406,7 +471,7 @@ fn dispatch(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
                     if command == 1 {
                         begin_capture(hwnd);
                     } else if command == 2 {
-                        let _ = DestroyWindow(hwnd);
+                        destroy_hidden(hwnd);
                     }
                 }
                 LRESULT(0)
@@ -414,6 +479,19 @@ fn dispatch(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
             WM_DESTROY => {
                 PostQuitMessage(0);
                 LRESULT(0)
+            }
+            WM_CLOSE => {
+                destroy_hidden(hwnd);
+                LRESULT(0)
+            }
+            WM_NCDESTROY => {
+                let pointer = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut Rc<HiddenState>;
+                if !pointer.is_null() {
+                    SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+                    let lifetime = Box::from_raw(pointer);
+                    lifetime.hwnd.set(None);
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
             }
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
         }

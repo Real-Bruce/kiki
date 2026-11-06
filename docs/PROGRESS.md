@@ -73,3 +73,12 @@
 - 完整方法、数值、原始证据位置及限制见 validation/P2.md。
 - 关联提交主题：feat(capture): validate physical pixels and cancellable sessions。
 - 遗留：多屏实机暂缓；HDR、锁屏与真实热插拔尚未验收，P2 不标为全部完成。后续继续可独立实施的部分。
+
+## P2 补充生命周期与输入验收
+
+- 当前会话的锁屏/控制台或远程断开通知已接入取消路径，销毁窗口前注销通知；没有主动锁屏或改变系统设置。
+- 隐藏窗口改用 RAII 和共享存活状态；定时器创建失败或工作线程启动失败会安全回退，罕见分支仍待故障注入。
+- 最新原生 GUI 实际启动、捕获成功；用户在诊断输入框完成中文、中英切换和多行输入，真实界面与文本证据已留存。
+- 默认及 all-features 的严格 Clippy、6 项默认测试通过；默认 Release 为 362,496 字节。
+- 关联提交主题：fix(app): cancel on session changes and own hidden window lifecycle。
+- 当前测试窗口保留供用户继续操作。P2 详情及未验证环境继续见 validation/P2.md；HDR 和最终选区/编辑界面尚未完成。
