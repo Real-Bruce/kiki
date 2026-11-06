@@ -596,3 +596,7 @@ fn dispatch(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         }
     }
 }
+#[cfg(test)]
+mod config_store;
+#[cfg(test)]
+mod hotkey;

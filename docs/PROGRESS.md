@@ -39,7 +39,7 @@
 | P3 选区与视觉骨架 | 进行中 | 深浅色、窗口吸附、八点调整与回车取消已实测；边缘标签避让等最新修正及高 DPI 仍待验收 |
 | P4 可编辑标注 | 进行中 | 几何/文字与有界撤销已接入；真实 IME 候选、完整实机矩阵和输出联验待完成 |
 | P5 输出与贴图 | 单屏 SDR 验收完成 | 输出/贴图全链路、Word 粘贴、失败恢复及 CPU/GPU 回收通过；跨环境遗留与 P7 指标单列 |
-| P6 设置与主题 | 未开始 | |
+| P6 设置与主题 | 进行中 | 配置/原子保存与热键事务基础经验证；运行时管理器和六页设置 UI 待接入 |
 | P7 完整验证与优化 | 未开始 | |
 | P8 打包交付 | 未开始 | |
 
@@ -220,3 +220,11 @@
 - 默认及 all-features 严格 Clippy、fmt、两种 Release 构建通过。默认 EXE 664,576 字节，位于 target/p5-pin-checkpoint。详见 validation/P5_COMPLETION.md。
 - 本次资源指标不等同于私有工作集，P7 的 ≤20 MiB 目标还需测量与优化；更多应用、真实 IME、多屏/混合 DPI、HDR 仍按原阶段矩阵推进，不将其标为已通过。
 - 关联提交主题：fix(p5): reclaim pinned resources and complete output recovery validation。未推送。
+
+## P6 开始：配置与热键基础
+
+- 按用户要求整理精简交接，见 P6_HANDOFF.md；本会话没有直接执行系统上下文压缩的工具，未宣称已压缩。
+- 已实际查看 03 设置设计稿，实现版本化配置模型、后台有界原子写入/损坏保护及事务式热键注册基础，暂在测试构建中启用，等待运行时和六页设置 UI 接入。
+- 新增 6 项实际回归，全套 all-features 38 项测试通过；原生热键冲突、控件往返、锁定文件、损坏恢复、最后版本保存均有验证。没有配置用户实际开机启动，没有写入用户真实配置。
+- fmt、默认及 all-features 严格 Clippy、默认 Release 构建通过。本轮没有设置窗口 GUI 验收，P6 不标完成；详见 validation/P6.md。
+- 关联提交主题：feat(settings): add configuration and hotkey transaction foundations。下一步从 P6_HANDOFF.md 的运行时管理器接入继续。
