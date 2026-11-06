@@ -261,4 +261,106 @@ mod tests {
         let full = toolbar(screen, screen, 650, 60, 12);
         assert!(full.top >= 0 && full.bottom <= 1080);
     }
+
+    #[test]
+    fn all_handles_preserve_opposite_edges_and_allow_crossing() {
+        let bounds = PixelRect {
+            left: -300,
+            top: -200,
+            right: 300,
+            bottom: 200,
+        };
+        let original = PixelRect {
+            left: -100,
+            top: -80,
+            right: 100,
+            bottom: 80,
+        };
+        let cases = [
+            (0, PixelPoint { x: -120, y: -90 }, [-120, -90, 100, 80]),
+            (1, PixelPoint { x: 0, y: -90 }, [-100, -90, 100, 80]),
+            (2, PixelPoint { x: 120, y: -90 }, [-100, -90, 120, 80]),
+            (3, PixelPoint { x: 120, y: 0 }, [-100, -80, 120, 80]),
+            (4, PixelPoint { x: 120, y: 90 }, [-100, -80, 120, 90]),
+            (5, PixelPoint { x: 0, y: 90 }, [-100, -80, 100, 90]),
+            (6, PixelPoint { x: -120, y: 90 }, [-120, -80, 100, 90]),
+            (7, PixelPoint { x: -120, y: 0 }, [-120, -80, 100, 80]),
+            (0, PixelPoint { x: 150, y: 120 }, [100, 80, 150, 120]),
+        ];
+        for (index, end, [left, top, right, bottom]) in cases {
+            let mut selection = Selection::new(bounds);
+            selection.rect = Some(original);
+            selection.begin(Selection::handles(original)[index], 5);
+            selection.finish(end, None);
+            assert_eq!(
+                selection.rect,
+                Some(PixelRect {
+                    left,
+                    top,
+                    right,
+                    bottom
+                })
+            );
+            assert!(!selection.active());
+        }
+    }
+
+    #[test]
+    fn window_click_clips_to_snapshot_and_cancel_restores_previous_selection() {
+        let bounds = PixelRect {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1080,
+        };
+        let window = PixelRect {
+            left: -10,
+            top: -20,
+            right: 900,
+            bottom: 700,
+        };
+        let point = PixelPoint { x: 400, y: 300 };
+        let mut selection = Selection::new(bounds);
+        selection.begin(point, 6);
+        selection.finish(point, Some(window));
+        let clipped = Some(PixelRect {
+            left: 0,
+            top: 0,
+            right: 900,
+            bottom: 700,
+        });
+        assert_eq!(selection.rect, clipped);
+        selection.begin(PixelPoint { x: 1100, y: 800 }, 6);
+        selection.update(PixelPoint { x: 1800, y: 1000 });
+        assert!(selection.cancel_drag());
+        assert_eq!(selection.rect, clipped);
+        assert!(!selection.cancel_drag());
+        selection.begin(point, 6);
+        selection.update(PixelPoint { x: 1500, y: 1000 });
+        assert!(selection.cancel_drag());
+        assert_eq!(selection.rect, clipped);
+    }
+
+    #[test]
+    fn one_pixel_selection_remains_resizable_at_screen_edge() {
+        let bounds = PixelRect {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1080,
+        };
+        let mut selection = Selection::new(bounds);
+        selection.rect = Some(PixelRect {
+            left: 1910,
+            top: 1070,
+            right: 1920,
+            bottom: 1080,
+        });
+        selection.begin(PixelPoint { x: 1910, y: 1070 }, 2);
+        selection.finish(PixelPoint { x: 1919, y: 1079 }, None);
+        assert_eq!(selection.rect.and_then(PixelRect::size), Some((1, 1)));
+        selection.begin(PixelPoint { x: 1919, y: 1079 }, 2);
+        selection.finish(PixelPoint { x: 1800, y: 900 }, None);
+        assert_eq!(selection.rect.and_then(PixelRect::size), Some((120, 180)));
+    }
 }

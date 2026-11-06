@@ -5,6 +5,15 @@ use windows::{
 };
 
 pub fn enumerate() -> Result<Vec<PixelRect>> {
+    #[cfg(feature = "diagnostics")]
+    let mut trace = {
+        let args: Vec<_> = std::env::args_os().collect();
+        args.windows(2)
+            .find(|pair| pair[0] == "--trace-window-targets")
+            .map(|pair| std::fs::File::create(&pair[1]))
+            .transpose()
+            .map_err(|e| windows::core::Error::new(E_FAIL, e.to_string()))?
+    };
     let mut handles = Vec::<HWND>::new();
     // SAFETY: EnumWindows is synchronous; callback only appends handles to the caller-owned vector.
     unsafe {
@@ -45,7 +54,24 @@ pub fn enumerate() -> Result<Vec<PixelRect>> {
                 right: r.right,
                 bottom: r.bottom,
             };
-            if rect.size().is_some() {
+            #[cfg(feature = "diagnostics")]
+            if let Some(trace) = trace.as_mut() {
+                use std::io::Write;
+                let mut class = [0u16; 256];
+                let len = GetClassNameW(hwnd, &mut class).max(0) as usize;
+                writeln!(
+                    trace,
+                    "class={} ex_style={:08x} bounds={rect:?}",
+                    String::from_utf16_lossy(&class[..len]),
+                    GetWindowLongPtrW(hwnd, GWL_EXSTYLE),
+                )
+                .map_err(|e| windows::core::Error::new(E_FAIL, e.to_string()))?;
+            }
+            // Input-transparent overlays (cursor indicators, capture helpers) do not
+            // represent the visible window the user is pointing at.
+            let transparent =
+                GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TRANSPARENT.0 != 0;
+            if !transparent && rect.size().is_some() {
                 rects.push(rect);
             }
         }

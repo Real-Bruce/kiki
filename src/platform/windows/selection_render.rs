@@ -369,7 +369,11 @@ impl Canvas {
                     self.round(b, 6. * s, color(0, 120, 212, 0.65));
                 }
                 let foreground = if i == 0 {
-                    color(0, 120, 212, 1.)
+                    if self.dark {
+                        color(235, 246, 255, 1.)
+                    } else {
+                        color(0, 120, 212, 1.)
+                    }
                 } else if !active {
                     if self.dark {
                         color(153, 159, 170, 0.65)
