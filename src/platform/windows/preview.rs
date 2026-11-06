@@ -27,6 +27,9 @@ impl Preview {
         self.0.get().is_some()
     }
     pub fn open(capture: CaptureResult) -> Result<Self> {
+        Self::open_inner(capture, true)
+    }
+    fn open_inner(capture: CaptureResult, visible: bool) -> Result<Self> {
         let bounds = capture.image.bounds();
         let (width, height) = bounds
             .size()
@@ -87,7 +90,9 @@ impl Preview {
                 keyboard_focus: false,
             };
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(Box::new(state)) as isize);
-            let _ = ShowWindow(hwnd, SW_SHOW);
+            if visible {
+                let _ = ShowWindow(hwnd, SW_SHOW);
+            }
             SetWindowPos(
                 hwnd,
                 Some(HWND_TOPMOST),
@@ -95,10 +100,16 @@ impl Preview {
                 bounds.top,
                 width,
                 height,
-                SWP_SHOWWINDOW,
+                if visible {
+                    SWP_SHOWWINDOW
+                } else {
+                    SWP_NOACTIVATE
+                },
             )?;
-            let _ = SetForegroundWindow(hwnd);
-            let _ = SetFocus(Some(hwnd));
+            if visible {
+                let _ = SetForegroundWindow(hwnd);
+                let _ = SetFocus(Some(hwnd));
+            }
             Ok(owner)
         }
     }
@@ -981,4 +992,223 @@ fn begin_output(hwnd: HWND, pointer: *mut State) -> Result<()> {
         let _ = InvalidateRect(Some(hwnd), None, false);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{composition, output, tests::take_ui_errors};
+    use super::*;
+    use std::{
+        sync::{Arc, atomic::AtomicBool},
+        time::{Duration, Instant},
+    };
+    use windows::Win32::System::DataExchange::*;
+    fn pump_until_done(preview: &Preview) {
+        let deadline = Instant::now() + Duration::from_secs(6);
+        while preview.is_open() && Instant::now() < deadline {
+            // SAFETY: test thread owns this hidden window and its message queue.
+            unsafe {
+                let hwnd = preview.0.get().unwrap();
+                let p = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut State;
+                if !(*p).busy {
+                    return;
+                }
+                let mut msg = MSG::default();
+                while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                    let _ = TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        if preview.is_open() {
+            // SAFETY: same checked hidden window is owned by the test.
+            unsafe {
+                let p = GetWindowLongPtrW(preview.0.get().unwrap(), GWLP_USERDATA) as *mut State;
+                assert!(!(*p).busy, "output did not finish");
+            }
+        }
+    }
+    fn setup() -> (Preview, *mut State) {
+        let (image, editor) = composition::fixture().unwrap();
+        let bounds = image.bounds();
+        let preview = Preview::open_inner(
+            CaptureResult {
+                image,
+                #[cfg(feature = "diagnostics")]
+                elapsed: Duration::ZERO,
+                screens: Vec::new(),
+                windows: Vec::new(),
+            },
+            false,
+        )
+        .unwrap();
+        // SAFETY: test owns the hidden HWND and initializes its editor synchronously without a modal loop.
+        unsafe {
+            let p = GetWindowLongPtrW(preview.0.get().unwrap(), GWLP_USERDATA) as *mut State;
+            (*p).selection.rect = Some(bounds);
+            (*p).editor = editor;
+            (preview, p)
+        }
+    }
+    #[test]
+    fn real_output_failures_preserve_editing_then_retry_and_cancel() {
+        super::super::tests::graphics_runtime();
+        let _com = composition::Apartment::enter().unwrap();
+        // SAFETY: this test owns all hidden HWNDs; only genuine output calls, clipboard locks, native EDIT and window messages are exercised.
+        unsafe {
+            let instance = GetModuleHandleW(None).unwrap().into();
+            register(instance).unwrap();
+            if let Err(error) = super::super::pinned::register(instance) {
+                assert_eq!(
+                    error.code(),
+                    windows::core::HRESULT::from_win32(ERROR_CLASS_ALREADY_EXISTS.0)
+                );
+            }
+            let (preview, p) = setup();
+            let hwnd = preview.0.get().unwrap();
+            let objects = (*p).editor.objects().to_vec();
+            let sequence = GetClipboardSequenceNumber();
+            output::TEST_DIALOG.with_borrow_mut(|path| *path = Some(None));
+            (*p).pending_output = Some(8);
+            begin_output(hwnd, p).unwrap();
+            assert!(!(*p).busy);
+            assert!(preview.is_open());
+            assert_eq!((*p).editor.objects(), objects);
+            let dir =
+                std::env::temp_dir().join(format!("kiki-native-output-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("readonly.png");
+            std::fs::write(&path, b"keep original").unwrap();
+            let original_permissions = std::fs::metadata(&path).unwrap().permissions();
+            let mut permissions = original_permissions.clone();
+            permissions.set_readonly(true);
+            std::fs::set_permissions(&path, permissions).unwrap();
+            output::TEST_DIALOG.with_borrow_mut(|value| *value = Some(Some(path.clone())));
+            (*p).pending_output = Some(8);
+            begin_output(hwnd, p).unwrap();
+            pump_until_done(&preview);
+            assert!(preview.is_open());
+            assert_eq!((*p).editor.objects(), objects);
+            assert_eq!(std::fs::read(&path).unwrap(), b"keep original");
+            assert_eq!(take_ui_errors().len(), 1);
+            assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+            assert_eq!(GetClipboardSequenceNumber(), sequence);
+            // Real clipboard contention, without clearing the user's current formats.
+            let locker = CreateWindowExW(
+                WINDOW_EX_STYLE::default(),
+                w!("STATIC"),
+                w!("kiki clipboard contention test"),
+                WS_POPUP,
+                0,
+                0,
+                1,
+                1,
+                None,
+                None,
+                Some(instance),
+                None,
+            )
+            .unwrap();
+            OpenClipboard(Some(locker)).unwrap();
+            (*p).pending_output = Some(9);
+            begin_output(hwnd, p).unwrap();
+            pump_until_done(&preview);
+            CloseClipboard().unwrap();
+            DestroyWindow(locker).unwrap();
+            assert!(preview.is_open());
+            assert_eq!((*p).editor.objects(), objects);
+            assert!(take_ui_errors()[0].contains("占用"));
+            assert_eq!(GetClipboardSequenceNumber(), sequence);
+            // Genuine retry after a locked target becomes writable, preserving all annotations.
+            std::fs::set_permissions(&path, original_permissions).unwrap();
+            use std::os::windows::fs::OpenOptionsExt;
+            let locked = std::fs::OpenOptions::new()
+                .read(true)
+                .share_mode(0)
+                .open(&path)
+                .unwrap();
+            output::TEST_DIALOG.with_borrow_mut(|value| *value = Some(Some(path.clone())));
+            (*p).pending_output = Some(8);
+            begin_output(hwnd, p).unwrap();
+            pump_until_done(&preview);
+            assert!(preview.is_open());
+            assert_eq!(take_ui_errors().len(), 1);
+            drop(locked);
+            output::TEST_DIALOG.with_borrow_mut(|value| *value = Some(Some(path.clone())));
+            (*p).pending_output = Some(8);
+            begin_output(hwnd, p).unwrap();
+            pump_until_done(&preview);
+            assert!(!preview.is_open());
+            assert_eq!(GetClipboardSequenceNumber(), sequence);
+            let bytes = std::fs::read(&path).unwrap();
+            assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n");
+            assert_eq!(u32::from_be_bytes(bytes[16..20].try_into().unwrap()), 640);
+            assert!(take_ui_errors().is_empty());
+            // A live native multi-line draft is committed before pinning; source desktop ownership is released.
+            let (preview, p) = setup();
+            let hwnd = preview.0.get().unwrap();
+            let bounds = (*p).canvas.bounds();
+            (*p).text_input = Some(
+                TextInput::open(
+                    hwnd,
+                    None,
+                    bounds,
+                    bounds,
+                    "未提交中文\n第二行",
+                    24.,
+                    crate::core::annotation::Style::default(),
+                )
+                .unwrap(),
+            );
+            let source = Arc::downgrade(&(*p).canvas.source());
+            (*p).pending_output = Some(7);
+            begin_output(hwnd, p).unwrap();
+            assert!((*p).text_input.is_none());
+            assert_eq!((*p).editor.objects().len(), objects.len() + 1);
+            pump_until_done(&preview);
+            assert!(!preview.is_open());
+            assert!(source.upgrade().is_none());
+            assert_eq!(GetClipboardSequenceNumber(), sequence);
+            super::super::pinned::close_all();
+            assert!(take_ui_errors().is_empty());
+            // Closing a preview while its output worker is blocked cancels it; subsequent work remains possible.
+            let (preview, p) = setup();
+            let hwnd = preview.0.get().unwrap();
+            let locker = CreateWindowExW(
+                WINDOW_EX_STYLE::default(),
+                w!("STATIC"),
+                w!("kiki clipboard contention test"),
+                WS_POPUP,
+                0,
+                0,
+                1,
+                1,
+                None,
+                None,
+                Some(instance),
+                None,
+            )
+            .unwrap();
+            OpenClipboard(Some(locker)).unwrap();
+            (*p).pending_output = Some(9);
+            begin_output(hwnd, p).unwrap();
+            let weak = Arc::downgrade(&(*p).canvas.source());
+            drop(preview);
+            CloseClipboard().unwrap();
+            DestroyWindow(locker).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while weak.upgrade().is_some() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert!(weak.upgrade().is_none());
+            let (image, editor) = composition::fixture().unwrap();
+            let rendered = composition::render(&image, image.bounds(), &editor).unwrap();
+            output::save_atomic(&rendered, &path, &AtomicBool::new(false)).unwrap();
+            assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+            std::fs::remove_file(path).unwrap();
+            std::fs::remove_dir(dir).unwrap();
+            super::super::pinned_render::shutdown();
+        }
+    }
 }

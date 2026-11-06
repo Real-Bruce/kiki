@@ -28,7 +28,7 @@ struct Entry {
 struct State {
     life: Rc<Cell<Option<HWND>>>,
     image: Arc<Image>,
-    canvas: Canvas,
+    canvas: Option<Canvas>,
     view: View,
     minimum: (i32, i32),
     dpi: u32,
@@ -37,6 +37,32 @@ struct State {
     notice: Option<String>,
     busy: bool,
     job: Option<Job>,
+}
+impl State {
+    fn paint(&mut self, hwnd: HWND) -> Result<()> {
+        let draw = |canvas: &Canvas| {
+            canvas.paint(
+                self.view,
+                self.minimum,
+                self.dpi,
+                self.hover,
+                self.notice.as_deref(),
+                self.busy,
+            )
+        };
+        if let Some(canvas) = self.canvas.as_ref() {
+            if draw(canvas).is_ok() {
+                return Ok(());
+            }
+        }
+        // A flip-model HWND accepts only one swap chain: release the old one before recreating it.
+        self.canvas = None;
+        let (w, h) = self.view.dimensions(self.minimum);
+        let canvas = Canvas::new(hwnd, &self.image, w, h, self.dpi)?;
+        draw(&canvas)?;
+        self.canvas = Some(canvas);
+        Ok(())
+    }
 }
 struct Creating(HWND);
 impl Drop for Creating {
@@ -75,7 +101,7 @@ pub fn register(instance: HINSTANCE) -> Result<()> {
     Ok(())
 }
 pub fn open(image: Arc<Image>, anchor: PixelPoint) -> Result<()> {
-    open_inner(image, anchor, true)
+    open_inner(image, anchor, !cfg!(test))
 }
 fn open_inner(image: Arc<Image>, anchor: PixelPoint, visible: bool) -> Result<()> {
     let bytes = image.pixels().len();
@@ -170,7 +196,7 @@ fn open_inner(image: Arc<Image>, anchor: PixelPoint, visible: bool) -> Result<()
         let state = State {
             life: life.clone(),
             image,
-            canvas,
+            canvas: Some(canvas),
             view,
             minimum,
             dpi,
@@ -204,13 +230,27 @@ fn open_inner(image: Arc<Image>, anchor: PixelPoint, visible: bool) -> Result<()
     }
     Ok(())
 }
+#[cfg(feature = "diagnostics")]
+pub fn count() -> usize {
+    WINDOWS.with_borrow(|windows| {
+        windows
+            .iter()
+            .filter(|entry| {
+                entry
+                    .life
+                    .upgrade()
+                    .is_some_and(|life| life.get().is_some())
+            })
+            .count()
+    })
+}
 pub fn close_all() {
     let handles = WINDOWS.with_borrow_mut(|windows| {
         let handles: Vec<_> = windows
             .iter()
             .filter_map(|entry| entry.life.upgrade().and_then(|life| life.get()))
             .collect();
-        windows.clear();
+
         handles
     });
     for hwnd in handles {
@@ -219,6 +259,14 @@ pub fn close_all() {
             let _ = DestroyWindow(hwnd);
         }
     }
+    WINDOWS.with_borrow_mut(|windows| {
+        windows.retain(|entry| {
+            entry
+                .life
+                .upgrade()
+                .is_some_and(|life| life.get().is_some())
+        })
+    });
 }
 unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match std::panic::catch_unwind(|| dispatch(hwnd, msg, wp, lp)) {
@@ -252,7 +300,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                         .is_some_and(|life| life.get().is_some())
                 })
             }) {
-                super::pinned_render::shutdown();
+                super::pinned_device::idle();
             }
             return DefWindowProcW(hwnd, msg, wp, lp);
         }
@@ -264,30 +312,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             WM_PAINT => {
                 let mut ps = PAINTSTRUCT::default();
                 let _ = BeginPaint(hwnd, &mut ps);
-                let result = {
-                    let s = &mut *pointer;
-                    let paint = |canvas: &Canvas| {
-                        canvas.paint(
-                            s.view,
-                            s.minimum,
-                            s.dpi,
-                            s.hover,
-                            s.notice.as_deref(),
-                            s.busy,
-                        )
-                    };
-                    match paint(&s.canvas) {
-                        Ok(()) => Ok(()),
-                        Err(_) => {
-                            let (w, h) = s.view.dimensions(s.minimum);
-                            Canvas::new(hwnd, &s.image, w, h, s.dpi).and_then(|canvas| {
-                                paint(&canvas)?;
-                                s.canvas = canvas;
-                                Ok(())
-                            })
-                        }
-                    }
-                };
+                let result = (*pointer).paint(hwnd);
                 let _ = EndPaint(hwnd, &ps);
                 if let Err(e) = result {
                     super::show_error(&format!("贴图显示失败：{e}"));
@@ -296,7 +321,9 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             }
             WM_SIZE => {
                 let (w, h) = (lp.0 as u16 as i32, ((lp.0 as usize >> 16) as u16) as i32);
-                let _ = (*pointer).canvas.resize(w, h);
+                if let Some(canvas) = (*pointer).canvas.as_ref() {
+                    let _ = canvas.resize(w, h);
+                }
                 let _ = InvalidateRect(Some(hwnd), None, false);
                 LRESULT(0)
             }
@@ -454,9 +481,8 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 (*pointer).minimum = minimum((*pointer).dpi);
                 let rect = *(lp.0 as *const RECT);
                 let (w, h) = (*pointer).view.dimensions((*pointer).minimum);
-                if let Ok(canvas) = Canvas::new(hwnd, &(*pointer).image, w, h, (*pointer).dpi) {
-                    (*pointer).canvas = canvas;
-                }
+                (*pointer).canvas = None;
+                (*pointer).canvas = Canvas::new(hwnd, &(*pointer).image, w, h, (*pointer).dpi).ok();
                 let _ = SetWindowPos(
                     hwnd,
                     None,
@@ -469,7 +495,9 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 LRESULT(0)
             }
             WM_THEMECHANGED | WM_SETTINGCHANGE => {
-                (*pointer).canvas.dark = super::selection_render::system_dark();
+                if let Some(canvas) = (*pointer).canvas.as_mut() {
+                    canvas.dark = super::selection_render::system_dark();
+                }
                 let _ = InvalidateRect(Some(hwnd), None, false);
                 LRESULT(0)
             }
@@ -627,6 +655,59 @@ pub fn demo() -> Result<()> {
     open(image, PixelPoint { x: 850, y: 300 })
 }
 
+#[cfg(feature = "diagnostics")]
+pub fn demo_4k() -> Result<()> {
+    for index in 0..4 {
+        let mut image = Image::new(crate::core::geometry::PixelRect {
+            left: 0,
+            top: 0,
+            right: 3840,
+            bottom: 2160,
+        })
+        .map_err(|e| fail(&e))?;
+        for (pixel_index, pixel) in image.pixels_mut().chunks_exact_mut(4).enumerate() {
+            let x = pixel_index % 3840;
+            let y = pixel_index / 3840;
+            pixel.copy_from_slice(&[
+                (64 + x / 24) as u8,
+                (64 + y / 16) as u8,
+                64 + index * 40,
+                255,
+            ]);
+        }
+        let anchor = PixelPoint {
+            x: 160 + 1120 * i32::from(index % 2),
+            y: 160 + 700 * i32::from(index / 2),
+        };
+        open_inner(Arc::new(image), anchor, false)?;
+        let hwnd = WINDOWS
+            .with_borrow(|windows| {
+                windows
+                    .last()
+                    .and_then(|entry| entry.life.upgrade())
+                    .and_then(|life| life.get())
+            })
+            .ok_or_else(|| fail("测试贴图已关闭"))?;
+        // SAFETY: explicit diagnostic initial layout on the owning UI thread; the state borrow ends before sizing sends messages.
+        unsafe {
+            let (w, h) = {
+                let s = &mut *(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut State);
+                s.view.scale = 0.25;
+                s.view.dimensions(s.minimum)
+            };
+            SetWindowPos(
+                hwnd,
+                Some(HWND_TOPMOST),
+                anchor.x,
+                anchor.y,
+                w,
+                h,
+                SWP_SHOWWINDOW,
+            )?;
+        }
+    }
+    Ok(())
+}
 /// Explicit diagnostics: independent 4K fixtures, native hidden surfaces, CPU/handle sampling.
 #[cfg(feature = "diagnostics")]
 pub fn stress(path: &std::path::Path) -> Result<()> {
@@ -646,10 +727,21 @@ pub fn stress(path: &std::path::Path) -> Result<()> {
     impl Drop for Cleanup {
         fn drop(&mut self) {
             close_all();
+            super::pinned_render::shutdown();
         }
     }
     let _cleanup = Cleanup;
     super::diagnostics::row(&mut csv, 0, 0.)?;
+    let mut gpu = std::fs::File::create(path.join("gpu.csv")).map_err(|e| fail(&e.to_string()))?;
+    writeln!(gpu, "iteration,local_bytes,nonlocal_bytes").map_err(|e| fail(&e.to_string()))?;
+    let gpu_row = |csv: &mut std::fs::File, index| -> Result<()> {
+        match super::pinned_device::memory() {
+            Some((local, nonlocal)) => writeln!(csv, "{index},{local},{nonlocal}"),
+            None => writeln!(csv, "{index},NA,NA"),
+        }
+        .map_err(|e| fail(&e.to_string()))
+    };
+    gpu_row(&mut gpu, 0)?;
     for cycle in 0..10 {
         for index in 0..4 {
             let mut image = Image::new(crate::core::geometry::PixelRect {
@@ -677,14 +769,16 @@ pub fn stress(path: &std::path::Path) -> Result<()> {
                     // SAFETY: live State belongs to this thread; D2D drawing cannot invoke the application message loop.
                     unsafe {
                         let s = &*(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const State);
-                        s.canvas
-                            .paint(s.view, s.minimum, s.dpi, false, None, false)?;
+                        if let Some(canvas) = s.canvas.as_ref() {
+                            canvas.paint(s.view, s.minimum, s.dpi, false, None, false)?;
+                        }
                     }
                 }
             }
             Ok(())
         })?;
         super::diagnostics::row(&mut csv, cycle * 2 + 1, 0.)?;
+        gpu_row(&mut gpu, cycle * 2 + 1)?;
         close_all();
         // Pump release/paint messages for this diagnostics process, without UI input or mouse polling.
         // SAFETY: the current thread owns every message and window in this isolated probe process.
@@ -696,9 +790,19 @@ pub fn stress(path: &std::path::Path) -> Result<()> {
             }
         }
         super::diagnostics::row(&mut csv, cycle * 2 + 2, 0.)?;
+        gpu_row(&mut gpu, cycle * 2 + 2)?;
     }
     std::thread::sleep(std::time::Duration::from_secs(2));
+    // SAFETY: final idle phase pumps the one-shot device cleanup that also runs in the normal application message loop.
+    unsafe {
+        let mut message = MSG::default();
+        while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+            let _ = TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
+    }
     super::diagnostics::row(&mut csv, 21, 0.)?;
+    gpu_row(&mut gpu, 21)?;
     csv.flush().map_err(|e| fail(&e.to_string()))
 }
 
@@ -707,7 +811,16 @@ mod tests {
     use super::*;
     #[test]
     fn independent_windows_release_image_and_lifetimes_without_quitting() {
+        super::super::tests::graphics_runtime();
         let _apartment = super::super::composition::Apartment::enter().unwrap();
+        struct Cleanup;
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                close_all();
+                super::super::pinned_render::shutdown();
+            }
+        }
+        let _cleanup = Cleanup;
         // SAFETY: the test thread creates, inspects and destroys its own hidden native windows.
         unsafe {
             register(GetModuleHandleW(None).unwrap().into()).unwrap();
@@ -734,6 +847,9 @@ mod tests {
                 GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST.0 as isize,
                 0
             );
+            let state = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut State;
+            (*state).canvas = None;
+            (*state).paint(hwnd).unwrap();
             DestroyWindow(hwnd).unwrap();
             assert!(lives[0].get().is_none());
             assert!(lives[1].get().is_some());
@@ -743,6 +859,11 @@ mod tests {
             assert_eq!(Arc::strong_count(&image), 1);
             let mut message = MSG::default();
             assert!(!PeekMessageW(&mut message, None, WM_QUIT, WM_QUIT, PM_REMOVE).as_bool());
+            open_inner(image.clone(), PixelPoint { x: 0, y: 0 }, false).unwrap();
+            open_inner(image.clone(), PixelPoint { x: 200, y: 200 }, false).unwrap();
+            drop(super::super::AppStateGuard);
+            assert_eq!(Arc::strong_count(&image), 1);
+            assert!(WINDOWS.with_borrow(|windows| windows.is_empty()));
         }
     }
 }

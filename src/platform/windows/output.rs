@@ -114,7 +114,13 @@ fn launch(
     Ok(Job { receiver, cancel })
 }
 thread_local! {static LAST_DIRECTORY:std::cell::RefCell<Option<PathBuf>>=const {std::cell::RefCell::new(None)};}
+#[cfg(test)]
+thread_local! {pub(super) static TEST_DIALOG:std::cell::RefCell<Option<Option<PathBuf>>>=const{std::cell::RefCell::new(None)};}
 pub fn save_dialog(owner: HWND) -> Result<Option<PathBuf>> {
+    #[cfg(test)]
+    if let Some(path) = TEST_DIALOG.with_borrow_mut(Option::take) {
+        return Ok(path);
+    }
     let _apartment = super::composition::Apartment::enter()?;
     // SAFETY: called on the UI STA, with no application-state borrow. Dialog owns strings during calls; returned shell path is freed with CoTaskMemFree.
     unsafe {

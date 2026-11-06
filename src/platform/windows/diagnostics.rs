@@ -168,3 +168,51 @@ pub fn start_readiness_probe(
     }).map_err(io_error)?;
     Ok(Some(worker))
 }
+
+thread_local! {static PIN_OBSERVER:std::cell::RefCell<Option<(std::fs::File,u32,bool)>>=const{std::cell::RefCell::new(None)};}
+pub fn start_pin_observer(hwnd: HWND) -> Result<()> {
+    let args: Vec<_> = std::env::args_os().collect();
+    let Some(index) = args.iter().position(|arg| arg == "--pin-sample") else {
+        return Ok(());
+    };
+    let path = args
+        .get(index + 1)
+        .map(PathBuf::from)
+        .ok_or_else(|| Error::new(E_FAIL, "需要贴图采样目录"))?;
+    std::fs::create_dir_all(&path).map_err(io_error)?;
+    let mut file = std::fs::File::create(path.join("visible.csv")).map_err(io_error)?;
+    writeln!(file,"count,gpu_local,gpu_nonlocal,iteration,unused_capture_ms,private_bytes,total_working_set,handles,gdi,user").map_err(io_error)?;
+    PIN_OBSERVER.with_borrow_mut(|slot| *slot = Some((file, 0, false)));
+    pin_observer_tick(hwnd);
+    // SAFETY: explicit diagnostics only; bounded one-second sampling on the owning UI thread, stopped after closing all pins or 600 samples.
+    unsafe {
+        if SetTimer(Some(hwnd), 77, 1000, None) == 0 {
+            return Err(Error::from_win32());
+        }
+    }
+    Ok(())
+}
+pub fn pin_observer_tick(hwnd: HWND) {
+    let state = PIN_OBSERVER.with_borrow_mut(Option::take);
+    let Some((mut file, index, seen)) = state else {
+        return;
+    };
+    let count = super::pinned::count();
+    let result = (|| -> Result<()> {
+        match super::pinned_device::memory() {
+            Some((local, nonlocal)) => write!(file, "{count},{local},{nonlocal},"),
+            None => write!(file, "{count},NA,NA,"),
+        }
+        .map_err(io_error)?;
+        row(&mut file, index, 0.)?;
+        file.flush().map_err(io_error)
+    })();
+    if result.is_ok() && index < 600 && !(seen && count == 0) {
+        PIN_OBSERVER.with_borrow_mut(|slot| *slot = Some((file, index + 1, seen || count > 0)));
+    } else {
+        // SAFETY: balances this diagnostic observer's timer; closing the file releases all observer resources.
+        unsafe {
+            let _ = KillTimer(Some(hwnd), 77);
+        }
+    }
+}

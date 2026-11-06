@@ -12,31 +12,19 @@ use windows::{
     core::{Result, w},
 };
 
-thread_local! {static FACTORY:std::cell::RefCell<Option<ID2D1Factory>>=const {std::cell::RefCell::new(None)};}
-fn factory() -> Result<ID2D1Factory> {
-    FACTORY.with_borrow_mut(|slot| {
-        if let Some(factory) = slot {
-            return Ok(factory.clone());
-        }
-        // SAFETY: one UI-thread factory shares its device/resource cache among every pinned surface.
-        let factory: ID2D1Factory =
-            unsafe { D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)? };
-        *slot = Some(factory.clone());
-        Ok(factory)
-    })
-}
 pub fn shutdown() {
-    FACTORY.with_borrow_mut(|slot| {
-        *slot = None;
-    });
+    super::pinned_device::shutdown();
 }
 pub struct Canvas {
-    target: ID2D1HwndRenderTarget,
+    target: ID2D1RenderTarget,
+    context: ID2D1DeviceContext,
+    swap: windows::Win32::Graphics::Dxgi::IDXGISwapChain1,
     bitmap: ID2D1Bitmap,
     brush: ID2D1SolidColorBrush,
     text: IDWriteTextFormat,
     icons: IDWriteTextFormat,
     pub dark: bool,
+    _device: std::rc::Rc<super::pinned_device::Device>,
 }
 pub fn button(width: i32, p: (i32, i32), scale: f32) -> Option<usize> {
     let left = width as f32 - 124. * scale;
@@ -56,23 +44,38 @@ impl Canvas {
                 .bounds()
                 .size()
                 .ok_or_else(windows::core::Error::from_win32)?;
-            let factory = factory()?;
-            let target = factory.CreateHwndRenderTarget(
-                &D2D1_RENDER_TARGET_PROPERTIES {
-                    r#type: D2D1_RENDER_TARGET_TYPE_SOFTWARE,
-                    dpiX: 96.,
-                    dpiY: 96.,
+            use windows::{Win32::Graphics::Dxgi::*, core::Interface};
+            let device = super::pinned_device::get()?;
+            let context = device
+                .d2d
+                .CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE)?;
+            context.SetDpi(96., 96.);
+            let swap = device.factory.CreateSwapChainForHwnd(
+                &device.d3d,
+                hwnd,
+                &DXGI_SWAP_CHAIN_DESC1 {
+                    Width: width.max(1) as u32,
+                    Height: height.max(1) as u32,
+                    Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                    SampleDesc: DXGI_SAMPLE_DESC {
+                        Count: 1,
+                        Quality: 0,
+                    },
+                    BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
+                    BufferCount: 2,
+                    Scaling: DXGI_SCALING_STRETCH,
+                    SwapEffect: DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
+                    AlphaMode: DXGI_ALPHA_MODE_IGNORE,
                     ..Default::default()
                 },
-                &D2D1_HWND_RENDER_TARGET_PROPERTIES {
-                    hwnd,
-                    pixelSize: D2D_SIZE_U {
-                        width: width.max(1) as u32,
-                        height: height.max(1) as u32,
-                    },
-                    presentOptions: D2D1_PRESENT_OPTIONS_NONE,
-                },
+                None,
+                None,
             )?;
+            device
+                .factory
+                .MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER)?;
+            bind(&context, &swap)?;
+            let target: ID2D1RenderTarget = context.cast()?;
             let mut pixels = Vec::new();
             pixels
                 .try_reserve_exact(image.pixels().len())
@@ -104,6 +107,7 @@ impl Canvas {
                     dpiY: 96.,
                 },
             )?;
+            drop(pixels);
             let brush = target.CreateSolidColorBrush(&color(0., 1.), None)?;
             let dw: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let scale = dpi as f32 / 96.;
@@ -127,6 +131,9 @@ impl Canvas {
             };
             Ok(Self {
                 target,
+                context,
+                swap,
+                _device: device,
                 bitmap,
                 brush,
                 text: format(false)?,
@@ -136,12 +143,18 @@ impl Canvas {
         }
     }
     pub fn resize(&self, width: i32, height: i32) -> Result<()> {
-        // SAFETY: the target belongs to this UI thread; dimensions are positive client pixels.
+        use windows::Win32::Graphics::Dxgi::DXGI_SWAP_CHAIN_FLAG;
+        // SAFETY: draw has ended, the context releases its only back-buffer reference before ResizeBuffers.
         unsafe {
-            self.target.Resize(&D2D_SIZE_U {
-                width: width.max(1) as u32,
-                height: height.max(1) as u32,
-            })
+            self.context.SetTarget(None::<&ID2D1Image>);
+            self.swap.ResizeBuffers(
+                2,
+                width.max(1) as u32,
+                height.max(1) as u32,
+                DXGI_FORMAT_B8G8R8A8_UNORM,
+                DXGI_SWAP_CHAIN_FLAG(0),
+            )?;
+            bind(&self.context, &self.swap)
         }
     }
     pub fn paint(
@@ -242,7 +255,10 @@ impl Canvas {
                     DWRITE_MEASURING_MODE_NATURAL,
                 );
             }
-            self.target.EndDraw(None, None)
+            self.target.EndDraw(None, None)?;
+            self.swap
+                .Present(0, windows::Win32::Graphics::Dxgi::DXGI_PRESENT(0))
+                .ok()
         }
     }
     fn panel(&self, rect: D2D_RECT_F, scale: f32) {
@@ -261,6 +277,39 @@ impl Canvas {
             self.target
                 .DrawRoundedRectangle(&rounded, &self.brush, 1., None);
         }
+    }
+}
+impl Drop for Canvas {
+    fn drop(&mut self) {
+        // SAFETY: owning UI thread, outside BeginDraw. Detach the swap-chain back buffer before resource destruction.
+        unsafe {
+            self.context.SetTarget(None::<&ID2D1Image>);
+            let _ = self.context.Flush(None, None);
+        }
+    }
+}
+fn bind(
+    context: &ID2D1DeviceContext,
+    swap: &windows::Win32::Graphics::Dxgi::IDXGISwapChain1,
+) -> Result<()> {
+    // SAFETY: buffer zero belongs to this live swap chain; context retains its bitmap until resize or drop.
+    unsafe {
+        let surface: windows::Win32::Graphics::Dxgi::IDXGISurface = swap.GetBuffer(0)?;
+        let bitmap = context.CreateBitmapFromDxgiSurface(
+            &surface,
+            Some(&D2D1_BITMAP_PROPERTIES1 {
+                pixelFormat: D2D1_PIXEL_FORMAT {
+                    format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                    alphaMode: D2D1_ALPHA_MODE_IGNORE,
+                },
+                dpiX: 96.,
+                dpiY: 96.,
+                bitmapOptions: D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+                ..Default::default()
+            }),
+        )?;
+        context.SetTarget(&bitmap);
+        Ok(())
     }
 }
 fn color(v: f32, a: f32) -> D2D1_COLOR_F {

@@ -7,6 +7,7 @@ mod display;
 mod icon;
 mod output;
 mod pinned;
+mod pinned_device;
 mod pinned_render;
 mod png;
 mod preview;
@@ -122,15 +123,20 @@ impl Drop for Hotkey {
 }
 
 pub fn show_error(message: &str) {
-    let text: Vec<u16> = message.encode_utf16().chain(Some(0)).collect();
-    // SAFETY: NUL-terminated strings remain live for the modal call.
-    unsafe {
-        MessageBoxW(
-            None,
-            windows::core::PCWSTR(text.as_ptr()),
-            w!("kiki"),
-            MB_OK | MB_ICONERROR,
-        );
+    #[cfg(test)]
+    tests::record_ui_error(message);
+    #[cfg(not(test))]
+    {
+        let text: Vec<u16> = message.encode_utf16().chain(Some(0)).collect();
+        // SAFETY: NUL-terminated strings remain live for the modal call.
+        unsafe {
+            MessageBoxW(
+                None,
+                windows::core::PCWSTR(text.as_ptr()),
+                w!("kiki"),
+                MB_OK | MB_ICONERROR,
+            );
+        }
     }
 }
 
@@ -279,7 +285,13 @@ pub fn run() -> Result<()> {
             pinned::demo()?;
         }
         #[cfg(feature = "diagnostics")]
+        if std::env::args_os().any(|a| a == "--pin-4k-demo") {
+            pinned::demo_4k()?;
+        }
+        #[cfg(feature = "diagnostics")]
         let readiness_probe = diagnostics::start_readiness_probe(hwnd, _hotkey.is_some())?;
+        #[cfg(feature = "diagnostics")]
+        diagnostics::start_pin_observer(hwnd)?;
         if std::env::args_os().any(|arg| arg == "--capture") {
             PostMessageW(Some(hwnd), WM_HOTKEY, WPARAM(1), LPARAM(0))?;
         }
@@ -506,6 +518,11 @@ fn dispatch(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         match msg {
             WM_HOTKEY => {
                 begin_capture(hwnd);
+                LRESULT(0)
+            }
+            #[cfg(feature = "diagnostics")]
+            WM_TIMER if wparam.0 == 77 => {
+                diagnostics::pin_observer_tick(hwnd);
                 LRESULT(0)
             }
             WM_TIMER => {

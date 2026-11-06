@@ -205,3 +205,24 @@ fn native_failure_paths_release_state_and_allow_retry() {
         .join()
         .unwrap();
 }
+
+thread_local! {static UI_ERRORS:RefCell<Vec<String>>=const{RefCell::new(Vec::new())};}
+pub(super) fn record_ui_error(message: &str) {
+    UI_ERRORS.with_borrow_mut(|errors| errors.push(message.into()));
+}
+pub(super) fn take_ui_errors() -> Vec<String> {
+    UI_ERRORS.with_borrow_mut(std::mem::take)
+}
+
+// Match the production Runtime: keep the driver and agile COM factories alive across separate Rust test threads.
+pub(super) fn graphics_runtime() {
+    static FACTORY: std::sync::OnceLock<windows::Win32::Graphics::Dxgi::IDXGIFactory1> =
+        std::sync::OnceLock::new();
+    FACTORY.get_or_init(|| {
+        // SAFETY: initialized once for the test process. The MTA usage cookie and DXGI factory intentionally live until process exit, as production Runtime does.
+        unsafe {
+            let _cookie = windows::Win32::System::Com::CoIncrementMTAUsage().unwrap();
+            windows::Win32::Graphics::Dxgi::CreateDXGIFactory1().unwrap()
+        }
+    });
+}
