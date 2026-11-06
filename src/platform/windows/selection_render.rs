@@ -1,4 +1,5 @@
 use crate::core::{
+    annotation::{Editor, Shape, Tool, arrow_head},
     display::DisplayInfo,
     geometry::PixelRect,
     image::Image,
@@ -20,9 +21,20 @@ use windows_numerics::Vector2;
 
 pub struct Layout {
     pub bounds: PixelRect,
+    pub toolbar: PixelRect,
+    pub parameters: Option<PixelRect>,
     pub screen: PixelRect,
     pub buttons: [PixelRect; 11],
     pub scale: f32,
+}
+pub struct PaintInput<'a> {
+    pub selection: &'a Selection,
+    pub editor: &'a Editor,
+    pub hover: Option<PixelRect>,
+    pub screens: &'a [DisplayInfo],
+    pub pointer: PixelPoint,
+    pub focus: usize,
+    pub pressed: Option<usize>,
 }
 pub struct Canvas {
     target: ID2D1HwndRenderTarget,
@@ -97,7 +109,7 @@ impl Canvas {
             })
         }
     }
-    pub fn layout(&self, rect: PixelRect, screens: &[DisplayInfo]) -> Layout {
+    pub fn layout(&self, rect: PixelRect, screens: &[DisplayInfo], parameters: bool) -> Layout {
         let (screen, preferred) = self.display(rect, screens);
         let scale = preferred
             .min((i64::from(screen.right) - i64::from(screen.left)) as f32 / 520.)
@@ -106,7 +118,7 @@ impl Canvas {
             rect,
             screen,
             (520. * scale).round() as i32,
-            (48. * scale).round() as i32,
+            (if parameters { 104. } else { 48. } * scale).round() as i32,
             (10. * scale).round() as i32,
         );
         let mut x = bounds.left as f32 + 8. * scale;
@@ -125,6 +137,16 @@ impl Canvas {
             r
         });
         Layout {
+            toolbar: PixelRect {
+                bottom: bounds.top + (48. * scale).round() as i32,
+                ..bounds
+            },
+            parameters: parameters.then(|| PixelRect {
+                left: bounds.left + (64. * scale).round() as i32,
+                top: bounds.top + (56. * scale).round() as i32,
+                right: bounds.right - (64. * scale).round() as i32,
+                bottom: bounds.bottom,
+            }),
             bounds,
             screen,
             buttons,
@@ -152,19 +174,20 @@ impl Canvas {
             (s.bounds, s.scale_percent as f32 / 100.)
         })
     }
-    pub fn paint(
-        &mut self,
-        selection: &Selection,
-        hover: Option<PixelRect>,
-        screens: &[DisplayInfo],
-        pointer: PixelPoint,
-        focus: usize,
-        pressed: Option<usize>,
-    ) -> Result<()> {
+    pub fn paint(&mut self, input: PaintInput<'_>) -> Result<()> {
+        let PaintInput {
+            selection,
+            editor,
+            hover,
+            screens,
+            pointer,
+            focus,
+            pressed,
+        } = input;
         let layout = selection
             .rect
             .filter(|_| !selection.active())
-            .map(|r| self.layout(r, screens));
+            .map(|r| self.layout(r, screens, editor.tool != Tool::Select));
         let anchor = selection.rect.or(hover).unwrap_or(PixelRect {
             left: pointer.x,
             top: pointer.y,
@@ -264,8 +287,10 @@ impl Canvas {
                     color(24, 28, 36, 0.50),
                 );
             }
+            self.paint_annotations(editor, selection.rect);
             if let Some(layout) = layout {
-                self.paint_toolbar(&layout, pointer, focus, pressed);
+                self.paint_toolbar(&layout, editor, pointer, focus, pressed);
+                self.paint_parameters(&layout, editor);
             }
             let hint = D2D_RECT_F {
                 left: 16. * scale,
@@ -285,13 +310,14 @@ impl Canvas {
     fn paint_toolbar(
         &self,
         layout: &Layout,
+        editor: &Editor,
         pointer: PixelPoint,
         focus: usize,
         pressed: Option<usize>,
     ) {
         // SAFETY: synchronous UI-thread drawing; all brushes and formats are retained by Canvas.
         unsafe {
-            let r = self.local(layout.bounds);
+            let r = self.local(layout.toolbar);
             let s = layout.scale;
             self.round(
                 D2D_RECT_F {
@@ -342,8 +368,8 @@ impl Canvas {
                 "箭头",
                 "画笔",
                 "文字",
-                "撤销",
-                "重做",
+                "撤销 · Ctrl+Z",
+                "重做 · Ctrl+Y",
                 "贴图",
                 "保存",
                 "复制",
@@ -352,12 +378,12 @@ impl Canvas {
             let mut hovered = None;
             for (i, button) in layout.buttons.iter().enumerate() {
                 let b = self.local(*button);
-                let active = i == 0 || i == 10;
+                let active = editor.enabled(i);
                 let over = contains(*button, pointer);
                 if over {
                     hovered = Some(i);
                 }
-                if i == 0 {
+                if i == editor.tool.button() {
                     self.round(
                         b,
                         6. * s,
@@ -393,7 +419,7 @@ impl Canvas {
                 if i == 9 {
                     self.round(b, 6. * s, color(0, 120, 212, 0.65));
                 }
-                let foreground = if i == 0 {
+                let foreground = if i == editor.tool.button() {
                     if self.dark {
                         color(235, 246, 255, 1.)
                     } else {
@@ -449,6 +475,165 @@ impl Canvas {
                     },
                 );
             }
+        }
+    }
+    pub fn parameter_at(&self, layout: &Layout, p: PixelPoint) -> Option<usize> {
+        let r = layout.parameters?;
+        if !contains(r, p) {
+            return None;
+        }
+        let x = (p.x - r.left) as f32 / layout.scale;
+        if (8. ..232.).contains(&x) {
+            Some(((x - 8.) / 28.) as usize)
+        } else if (240. ..384.).contains(&x) {
+            Some(8 + ((x - 240.) / 48.) as usize)
+        } else {
+            None
+        }
+    }
+    fn paint_parameters(&self, layout: &Layout, editor: &Editor) {
+        let Some(bounds) = layout.parameters else {
+            return;
+        };
+        let r = self.local(bounds);
+        let s = layout.scale;
+        self.round(
+            r,
+            10. * s,
+            if self.dark {
+                color(44, 47, 53, 0.98)
+            } else {
+                color(249, 250, 253, 0.98)
+            },
+        );
+        // SAFETY: all drawing objects are owned by Canvas on the UI thread.
+        unsafe {
+            for (i, rgb) in ANNOTATION_COLORS.iter().enumerate() {
+                let x = r.left + (22. + i as f32 * 28.) * s;
+                let y = (r.top + r.bottom) / 2.;
+                self.brush.SetColor(&color(rgb[0], rgb[1], rgb[2], 1.));
+                let circle = D2D1_ELLIPSE {
+                    point: Vector2 { X: x, Y: y },
+                    radiusX: 8. * s,
+                    radiusY: 8. * s,
+                };
+                self.target.FillEllipse(&circle, &self.brush);
+                self.brush.SetColor(&if *rgb == editor.style().color {
+                    color(0, 120, 212, 1.)
+                } else {
+                    color(136, 143, 155, 1.)
+                });
+                self.target.DrawEllipse(
+                    &D2D1_ELLIPSE {
+                        radiusX: 10. * s,
+                        radiusY: 10. * s,
+                        ..circle
+                    },
+                    &self.brush,
+                    if *rgb == editor.style().color { 2. } else { 1. },
+                    None,
+                );
+            }
+            for (i, width) in [1., 3., 6.].iter().enumerate() {
+                let b = D2D_RECT_F {
+                    left: r.left + (240. + i as f32 * 48.) * s,
+                    top: r.top + 6. * s,
+                    right: r.left + (284. + i as f32 * 48.) * s,
+                    bottom: r.bottom - 6. * s,
+                };
+                if *width == editor.style().width {
+                    self.round(
+                        b,
+                        6. * s,
+                        if self.dark {
+                            color(41, 87, 129, 1.)
+                        } else {
+                            color(211, 233, 255, 1.)
+                        },
+                    );
+                }
+                self.brush.SetColor(&if self.dark {
+                    color(245, 246, 250, 1.)
+                } else {
+                    color(34, 40, 49, 1.)
+                });
+                self.target.DrawLine(
+                    Vector2 {
+                        X: b.left + 10. * s,
+                        Y: (b.top + b.bottom) / 2.,
+                    },
+                    Vector2 {
+                        X: b.right - 10. * s,
+                        Y: (b.top + b.bottom) / 2.,
+                    },
+                    &self.brush,
+                    width * s,
+                    None,
+                );
+            }
+        }
+    }
+    fn paint_annotations(&self, editor: &Editor, clip: Option<PixelRect>) {
+        let Some(clip) = clip else {
+            return;
+        };
+        let point = |p: PixelPoint| Vector2 {
+            X: (i64::from(p.x) - i64::from(self.source.bounds().left)) as f32,
+            Y: (i64::from(p.y) - i64::from(self.source.bounds().top)) as f32,
+        };
+        // SAFETY: retained UI-thread resources; clip is balanced before returning.
+        unsafe {
+            self.target
+                .PushAxisAlignedClip(&self.local(clip), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            for object in editor.objects() {
+                let c = object.style.color;
+                self.brush.SetColor(&color(c[0], c[1], c[2], 1.));
+                let width = object.style.width;
+                match &object.shape {
+                    Shape::Rectangle(r) => {
+                        self.target
+                            .DrawRectangle(&self.local(*r), &self.brush, width, None)
+                    }
+                    Shape::Arrow(start, end) => {
+                        let a = point(*start);
+                        let b = point(*end);
+                        self.target.DrawLine(a, b, &self.brush, width, None);
+                        for wing in arrow_head(*start, *end, width) {
+                            self.target
+                                .DrawLine(b, point(wing), &self.brush, width, None);
+                        }
+                    }
+                    Shape::Pen(points) => {
+                        for pair in points.windows(2) {
+                            self.target.DrawLine(
+                                point(pair[0]),
+                                point(pair[1]),
+                                &self.brush,
+                                width,
+                                None,
+                            );
+                        }
+                    }
+                }
+            }
+            if let Some(object) = editor.selected.and_then(|i| editor.objects().get(i)) {
+                self.brush.SetColor(&color(239, 153, 44, 1.));
+                self.target
+                    .DrawRectangle(&self.local(object.bounds()), &self.brush, 1., None);
+                for p in object.handles() {
+                    let p = point(p);
+                    let r = D2D_RECT_F {
+                        left: p.X - 4.,
+                        top: p.Y - 4.,
+                        right: p.X + 4.,
+                        bottom: p.Y + 4.,
+                    };
+                    self.fill(r, color(255, 255, 255, 1.));
+                    self.brush.SetColor(&color(239, 153, 44, 1.));
+                    self.target.DrawRectangle(&r, &self.brush, 1., None);
+                }
+            }
+            self.target.PopAxisAlignedClip();
         }
     }
     fn icon(&self, index: usize, r: D2D_RECT_F, c: D2D1_COLOR_F, s: f32) {
@@ -642,3 +827,14 @@ fn color(r: u8, g: u8, b: u8, a: f32) -> D2D1_COLOR_F {
         a,
     }
 }
+
+pub const ANNOTATION_COLORS: [[u8; 3]; 8] = [
+    [255, 59, 64],
+    [255, 149, 0],
+    [255, 204, 0],
+    [52, 199, 89],
+    [0, 122, 255],
+    [175, 82, 222],
+    [255, 255, 255],
+    [20, 20, 20],
+];

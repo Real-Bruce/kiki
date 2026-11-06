@@ -1,9 +1,10 @@
 //! Native frozen-desktop selection window. Annotation/output controls are staged for P4/P5.
 use super::{
     capture::CaptureResult,
-    selection_render::{Canvas, system_dark},
+    selection_render::{Canvas, PaintInput, system_dark},
 };
 use crate::core::{
+    annotation::{Editor, Shape, Tool},
     display::DisplayInfo,
     geometry::PixelRect,
     selection::{PixelPoint, Selection, contains},
@@ -62,6 +63,8 @@ impl Preview {
                 lifetime,
                 canvas,
                 selection: Selection::new(bounds),
+                editor: Editor::default(),
+                parameter_down: false,
                 screens: capture.screens,
                 windows: capture
                     .windows
@@ -108,6 +111,8 @@ struct State {
     lifetime: Rc<Cell<Option<HWND>>>,
     canvas: Canvas,
     selection: Selection,
+    editor: Editor,
+    parameter_down: bool,
     screens: Vec<DisplayInfo>,
     windows: Vec<PixelRect>,
     pointer: PixelPoint,
@@ -117,6 +122,53 @@ struct State {
     focus: usize,
 }
 impl State {
+    fn activate(&mut self, index: usize) -> bool {
+        if !self.editor.enabled(index) {
+            return false;
+        }
+        match index {
+            0..=3 => {
+                self.editor.cancel();
+                let tool = [Tool::Select, Tool::Rectangle, Tool::Arrow, Tool::Pen][index];
+                if tool != Tool::Select {
+                    let matching = self
+                        .editor
+                        .selected
+                        .and_then(|i| self.editor.objects().get(i))
+                        .filter(|o| {
+                            matches!(
+                                (&o.shape, tool),
+                                (Shape::Rectangle(_), Tool::Rectangle)
+                                    | (Shape::Arrow(_, _), Tool::Arrow)
+                                    | (Shape::Pen(_), Tool::Pen)
+                            )
+                        })
+                        .map(|o| o.style);
+                    if let Some(mut style) = matching {
+                        style.width /= self.scale();
+                        self.editor.styles[index - 1] = style;
+                    } else {
+                        self.editor.selected = None;
+                    }
+                }
+                self.editor.tool = tool;
+            }
+            5 => self.editor.undo(),
+            6 => self.editor.redo(),
+            10 => return true,
+            _ => {}
+        }
+        false
+    }
+    fn parameter_at(&self, p: PixelPoint) -> Option<usize> {
+        let rect = self.selection.rect?;
+        self.canvas.parameter_at(
+            &self
+                .canvas
+                .layout(rect, &self.screens, self.editor.tool != Tool::Select),
+            p,
+        )
+    }
     fn window_at(&self, p: PixelPoint) -> Option<PixelRect> {
         self.windows.iter().copied().find(|r| contains(*r, p))
     }
@@ -126,11 +178,17 @@ impl State {
             .filter(|_| !self.selection.active())
             .and_then(|r| {
                 self.canvas
-                    .layout(r, &self.screens)
+                    .layout(r, &self.screens, self.editor.tool != Tool::Select)
                     .buttons
                     .iter()
                     .position(|b| contains(*b, p))
             })
+    }
+    fn scale(&self) -> f32 {
+        self.screens
+            .iter()
+            .find(|s| contains(s.bounds, self.pointer))
+            .map_or(1., |s| s.scale_percent as f32 / 100.)
     }
     fn radius(&self) -> i32 {
         self.screens
@@ -193,14 +251,15 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 let _ = BeginPaint(hwnd, &mut ps);
                 let result = {
                     let state = &mut *pointer;
-                    state.canvas.paint(
-                        &state.selection,
-                        state.hover,
-                        &state.screens,
-                        state.pointer,
-                        state.focus,
-                        state.down_button,
-                    )
+                    state.canvas.paint(PaintInput {
+                        selection: &state.selection,
+                        editor: &state.editor,
+                        hover: state.hover,
+                        screens: &state.screens,
+                        pointer: state.pointer,
+                        focus: state.focus,
+                        pressed: state.down_button,
+                    })
                 };
                 let _ = EndPaint(hwnd, &ps);
                 if let Err(error) = result {
@@ -213,42 +272,92 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     let state = &mut *pointer;
                     state.pointer = position().unwrap_or(state.pointer);
                     state.selection.update(state.pointer);
+                    state.editor.update(state.pointer);
                     state.hover = state.window_at(state.pointer);
                 }
                 let _ = InvalidateRect(Some(hwnd), None, false);
                 LRESULT(0)
             }
             WM_LBUTTONDOWN => {
+                let mut error = None;
                 {
                     let state = &mut *pointer;
                     state.pointer = position().unwrap_or(state.pointer);
                     state.pressed_window = state.window_at(state.pointer);
-                    if let Some(button) = state.button_at(state.pointer) {
+                    state.parameter_down = false;
+                    if let Some(parameter) = state.parameter_at(state.pointer) {
+                        state.parameter_down = true;
+                        let mut style = state.editor.style();
+                        if parameter < 8 {
+                            style.color = super::selection_render::ANNOTATION_COLORS[parameter];
+                        } else {
+                            style.width = [1., 3., 6.][parameter - 8];
+                        }
+                        state.editor.set_style(style, state.scale());
+                    } else if let Some(button) = state.button_at(state.pointer) {
                         state.down_button = Some(button);
-                        if button == 0 || button == 10 {
+                        if state.editor.enabled(button) {
                             state.focus = button;
                         }
                     } else {
                         state.focus = usize::MAX;
-                        state.selection.begin(state.pointer, state.radius());
+                        let object = if state
+                            .selection
+                            .rect
+                            .is_some_and(|r| contains(r, state.pointer))
+                        {
+                            match state
+                                .editor
+                                .begin(state.pointer, state.radius(), state.scale())
+                            {
+                                Ok(active) => active,
+                                Err(message) => {
+                                    error = Some(message);
+                                    true
+                                }
+                            }
+                        } else {
+                            false
+                        };
+                        if !object && state.editor.tool == Tool::Select {
+                            state.selection.begin(state.pointer, state.radius());
+                        }
                     }
                 }
-                SetCapture(hwnd);
+                if let Some(message) = error {
+                    super::show_error(message);
+                } else {
+                    SetCapture(hwnd);
+                }
                 let _ = InvalidateRect(Some(hwnd), None, false);
                 LRESULT(0)
             }
             WM_LBUTTONUP => {
+                let warning;
                 let close = {
                     let state = &mut *pointer;
                     state.pointer = position().unwrap_or(state.pointer);
+                    warning = state.editor.take_warning();
                     if let Some(button) = state.down_button.take() {
-                        button == 10 && state.button_at(state.pointer) == Some(10)
+                        if state.button_at(state.pointer) == Some(button) {
+                            state.activate(button)
+                        } else {
+                            false
+                        }
                     } else {
-                        state.selection.finish(state.pointer, state.pressed_window);
+                        if state.editor.active() {
+                            state.editor.finish(state.pointer);
+                        } else if !state.parameter_down {
+                            state.selection.finish(state.pointer, state.pressed_window);
+                        }
+                        state.parameter_down = false;
                         false
                     }
                 };
                 let _ = ReleaseCapture();
+                if let Some(message) = warning {
+                    super::show_error(message);
+                }
                 if close {
                     let _ = DestroyWindow(hwnd);
                 } else {
@@ -260,6 +369,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 {
                     let state = &mut *pointer;
                     state.selection.cancel_drag();
+                    state.editor.cancel();
                     state.down_button = None;
                 }
                 let _ = InvalidateRect(Some(hwnd), None, false);
@@ -275,12 +385,13 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                             if state.down_button.take().is_some() {
                                 false
                             } else {
-                                !state.selection.cancel_drag()
+                                !state.editor.cancel() && !state.selection.cancel_drag()
                             }
                         }
                         70 => {
                             release = true;
                             state.down_button = None;
+                            state.editor.cancel();
                             state.pointer = position().unwrap_or(state.pointer);
                             if let Some(screen) = state
                                 .screens
@@ -292,10 +403,40 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                             false
                         }
                         9 => {
-                            state.focus = if state.focus == 0 { 10 } else { 0 };
+                            let backwards = GetKeyState(VK_SHIFT.0 as i32) < 0;
+                            let mut next = if state.focus < 11 {
+                                state.focus
+                            } else if backwards {
+                                0
+                            } else {
+                                10
+                            };
+                            for _ in 0..11 {
+                                next = if backwards {
+                                    (next + 10) % 11
+                                } else {
+                                    (next + 1) % 11
+                                };
+                                if state.editor.enabled(next) {
+                                    break;
+                                }
+                            }
+                            state.focus = next;
                             false
                         }
-                        13 | 32 => state.focus == 10,
+                        13 | 32 => state.activate(state.focus),
+                        46 => {
+                            state.editor.delete();
+                            false
+                        }
+                        90 if GetKeyState(VK_CONTROL.0 as i32) < 0 => {
+                            state.editor.undo();
+                            false
+                        }
+                        89 if GetKeyState(VK_CONTROL.0 as i32) < 0 => {
+                            state.editor.redo();
+                            false
+                        }
                         _ => false,
                     }
                 };
@@ -311,8 +452,12 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             }
             WM_SETCURSOR => {
                 let state = &*pointer;
-                let cursor = if state.button_at(state.pointer).is_some() {
+                let cursor = if state.button_at(state.pointer).is_some()
+                    || state.parameter_at(state.pointer).is_some()
+                {
                     IDC_ARROW
+                } else if state.editor.tool != Tool::Select {
+                    IDC_CROSS
                 } else if let Some(handle) =
                     state.selection.handle_at(state.pointer, state.radius())
                 {
