@@ -2,6 +2,7 @@
 use super::{
     capture::CaptureResult,
     selection_render::{Canvas, PaintInput, system_dark},
+    text_input::TextInput,
 };
 use crate::core::{
     annotation::{Editor, Shape, Tool},
@@ -65,6 +66,7 @@ impl Preview {
                 selection: Selection::new(bounds),
                 editor: Editor::default(),
                 parameter_down: false,
+                text_input: None,
                 screens: capture.screens,
                 windows: capture
                     .windows
@@ -113,6 +115,7 @@ struct State {
     selection: Selection,
     editor: Editor,
     parameter_down: bool,
+    text_input: Option<TextInput>,
     screens: Vec<DisplayInfo>,
     windows: Vec<PixelRect>,
     pointer: PixelPoint,
@@ -127,9 +130,15 @@ impl State {
             return false;
         }
         match index {
-            0..=3 => {
+            0..=4 => {
                 self.editor.cancel();
-                let tool = [Tool::Select, Tool::Rectangle, Tool::Arrow, Tool::Pen][index];
+                let tool = [
+                    Tool::Select,
+                    Tool::Rectangle,
+                    Tool::Arrow,
+                    Tool::Pen,
+                    Tool::Text,
+                ][index];
                 if tool != Tool::Select {
                     let matching = self
                         .editor
@@ -141,6 +150,7 @@ impl State {
                                 (Shape::Rectangle(_), Tool::Rectangle)
                                     | (Shape::Arrow(_, _), Tool::Arrow)
                                     | (Shape::Pen(_), Tool::Pen)
+                                    | (Shape::Text { .. }, Tool::Text)
                             )
                         })
                         .map(|o| o.style);
@@ -152,6 +162,21 @@ impl State {
                     }
                 }
                 self.editor.tool = tool;
+                if tool == Tool::Text {
+                    if let Some(Shape::Text { size, .. }) = self
+                        .editor
+                        .selected
+                        .and_then(|i| self.editor.objects().get(i))
+                        .map(|o| &o.shape)
+                    {
+                        self.editor.text_size = *size / self.scale();
+                    }
+                }
+            }
+            11..=21 => {
+                if let Err(message) = self.apply_parameter(index - 11) {
+                    self.editor.warn(message);
+                }
             }
             5 => self.editor.undo(),
             6 => self.editor.redo(),
@@ -159,6 +184,26 @@ impl State {
             _ => {}
         }
         false
+    }
+    fn apply_parameter(&mut self, parameter: usize) -> std::result::Result<(), &'static str> {
+        let mut style = self.editor.style();
+        if parameter < 8 {
+            style.color = super::selection_render::ANNOTATION_COLORS[parameter];
+        } else if parameter < 11 {
+            if self.editor.tool == Tool::Text {
+                self.editor.text_size = [18., 24., 36.][parameter - 8];
+            } else {
+                style.width = [1., 3., 6.][parameter - 8];
+            }
+        } else {
+            return Ok(());
+        }
+        if self.editor.tool == Tool::Text {
+            restyle_text(self, style, parameter >= 8)
+        } else {
+            self.editor.set_style(style, self.scale());
+            Ok(())
+        }
     }
     fn parameter_at(&self, p: PixelPoint) -> Option<usize> {
         let rect = self.selection.rect?;
@@ -208,6 +253,7 @@ pub fn register(instance: HINSTANCE) -> Result<()> {
     // SAFETY: static class name/callback, system-owned cursor; all visible windows use the main UI thread.
     unsafe {
         let class = WNDCLASSW {
+            style: CS_DBLCLKS,
             lpfnWndProc: Some(proc),
             hInstance: instance,
             hIcon: super::icon::application(instance, false)?,
@@ -254,6 +300,8 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     state.canvas.paint(PaintInput {
                         selection: &state.selection,
                         editor: &state.editor,
+                        editing: state.text_input.as_ref().and_then(|input| input.index),
+                        text_active: state.text_input.is_some(),
                         hover: state.hover,
                         screens: &state.screens,
                         pointer: state.pointer,
@@ -267,6 +315,49 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 }
                 LRESULT(0)
             }
+            super::text_input::COMMIT | super::text_input::CANCEL => {
+                let current = (*pointer).text_input.as_ref().and_then(TextInput::hwnd);
+                if current.is_some_and(|child| child.0 as usize == wp.0) {
+                    if msg == super::text_input::COMMIT {
+                        if let Err(error) = finish_text(hwnd, pointer) {
+                            super::show_error(&error.to_string());
+                        }
+                    } else {
+                        let input = (*pointer).text_input.take();
+                        drop(input);
+                        let _ = SetFocus(Some(hwnd));
+                    }
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                }
+                LRESULT(0)
+            }
+            WM_LBUTTONDBLCLK => {
+                (*pointer).pointer = position().unwrap_or((*pointer).pointer);
+                if (*pointer).editor.text_at((*pointer).pointer).is_some() {
+                    if let Err(error) = start_text(hwnd, pointer) {
+                        super::show_error(&error.to_string());
+                    }
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                }
+                LRESULT(0)
+            }
+            WM_CTLCOLOREDIT => {
+                if let Some(input) = (*pointer).text_input.as_ref() {
+                    let color = input.style.color;
+                    let dc = HDC(wp.0 as *mut _);
+                    SetTextColor(
+                        dc,
+                        COLORREF(
+                            u32::from(color[0])
+                                | (u32::from(color[1]) << 8)
+                                | (u32::from(color[2]) << 16),
+                        ),
+                    );
+                    SetBkColor(dc, input.background);
+                    return LRESULT(input.brush.0 as isize);
+                }
+                DefWindowProcW(hwnd, msg, wp, lp)
+            }
             WM_MOUSEMOVE => {
                 {
                     let state = &mut *pointer;
@@ -279,6 +370,11 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 LRESULT(0)
             }
             WM_LBUTTONDOWN => {
+                if let Err(error) = finish_text(hwnd, pointer) {
+                    super::show_error(&error.to_string());
+                    return LRESULT(0);
+                }
+                let mut request_text = false;
                 let mut error = None;
                 {
                     let state = &mut *pointer;
@@ -287,13 +383,10 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     state.parameter_down = false;
                     if let Some(parameter) = state.parameter_at(state.pointer) {
                         state.parameter_down = true;
-                        let mut style = state.editor.style();
-                        if parameter < 8 {
-                            style.color = super::selection_render::ANNOTATION_COLORS[parameter];
-                        } else {
-                            style.width = [1., 3., 6.][parameter - 8];
+                        state.focus = 11 + parameter;
+                        if let Err(message) = state.apply_parameter(parameter) {
+                            error = Some(message);
                         }
-                        state.editor.set_style(style, state.scale());
                     } else if let Some(button) = state.button_at(state.pointer) {
                         state.down_button = Some(button);
                         if state.editor.enabled(button) {
@@ -306,14 +399,20 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                             .rect
                             .is_some_and(|r| contains(r, state.pointer))
                         {
-                            match state
-                                .editor
-                                .begin(state.pointer, state.radius(), state.scale())
-                            {
-                                Ok(active) => active,
-                                Err(message) => {
-                                    error = Some(message);
-                                    true
+                            if state.editor.tool == Tool::Text {
+                                request_text = true;
+                                true
+                            } else {
+                                match state.editor.begin(
+                                    state.pointer,
+                                    state.radius(),
+                                    state.scale(),
+                                ) {
+                                    Ok(active) => active,
+                                    Err(message) => {
+                                        error = Some(message);
+                                        true
+                                    }
                                 }
                             }
                         } else {
@@ -323,6 +422,13 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                             state.selection.begin(state.pointer, state.radius());
                         }
                     }
+                }
+                if request_text {
+                    if let Err(e) = start_text(hwnd, pointer) {
+                        super::show_error(&e.to_string());
+                    }
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                    return LRESULT(0);
                 }
                 if let Some(message) = error {
                     super::show_error(message);
@@ -376,6 +482,18 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 LRESULT(0)
             }
             WM_KEYDOWN => {
+                if (*pointer).text_input.is_some() {
+                    if wp.0 == 27 {
+                        let input = (*pointer).text_input.take();
+                        drop(input);
+                        let _ = SetFocus(Some(hwnd));
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                        return LRESULT(0);
+                    } else if let Err(error) = finish_text(hwnd, pointer) {
+                        super::show_error(&error.to_string());
+                        return LRESULT(0);
+                    }
+                }
                 let mut release = false;
                 let close = {
                     let state = &mut *pointer;
@@ -404,18 +522,18 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                         }
                         9 => {
                             let backwards = GetKeyState(VK_SHIFT.0 as i32) < 0;
-                            let mut next = if state.focus < 11 {
+                            let mut next = if state.focus < 22 {
                                 state.focus
                             } else if backwards {
                                 0
                             } else {
-                                10
+                                21
                             };
-                            for _ in 0..11 {
+                            for _ in 0..22 {
                                 next = if backwards {
-                                    (next + 10) % 11
+                                    (next + 21) % 22
                                 } else {
-                                    (next + 1) % 11
+                                    (next + 1) % 22
                                 };
                                 if state.editor.enabled(next) {
                                     break;
@@ -442,6 +560,9 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 };
                 if release {
                     let _ = ReleaseCapture();
+                }
+                if let Some(message) = (*pointer).editor.take_warning() {
+                    super::show_error(message);
                 }
                 if close {
                     let _ = DestroyWindow(hwnd);
@@ -489,4 +610,174 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             _ => DefWindowProcW(hwnd, msg, wp, lp),
         }
     }
+}
+
+fn start_text(hwnd: HWND, pointer: *mut State) -> Result<()> {
+    // SAFETY: caller is this live preview's UI-thread dispatch. Native creation occurs after the state borrow ends.
+    let (index, content, anchor, edit_bounds, size, style, desktop, wrap) = unsafe {
+        let state = &mut *pointer;
+        if state.text_input.is_some() {
+            return Ok(());
+        }
+        state.editor.cancel();
+        let selection = state
+            .selection
+            .rect
+            .ok_or_else(|| Error::new(E_FAIL, "请先选择截图范围"))?;
+        let desktop = state.canvas.bounds();
+        if let Some(index) = state.editor.text_at(state.pointer) {
+            let object = &state.editor.objects()[index];
+            if let Shape::Text {
+                bounds,
+                content,
+                size,
+                wrap_width,
+            } = &object.shape
+            {
+                let width = (*wrap_width as i32)
+                    .saturating_add(64)
+                    .max(32)
+                    .min(desktop.right.saturating_sub(bounds.left).max(32));
+                let height = (180. * state.scale()).round() as i32;
+                let edit_bounds = crate::core::selection::fit_panel(
+                    PixelPoint {
+                        x: bounds.left,
+                        y: bounds.top,
+                    },
+                    desktop,
+                    width,
+                    height,
+                );
+                (
+                    Some(index),
+                    content.clone(),
+                    *bounds,
+                    edit_bounds,
+                    *size,
+                    object.style,
+                    desktop,
+                    *wrap_width,
+                )
+            } else {
+                return Ok(());
+            }
+        } else {
+            let edit_bounds = crate::core::selection::fit_panel(
+                state.pointer,
+                selection,
+                (480. * state.scale()).round() as i32,
+                (180. * state.scale()).round() as i32,
+            );
+            let mut style = state.editor.styles[3];
+            style.width *= state.scale();
+            (
+                None,
+                String::new(),
+                edit_bounds,
+                edit_bounds,
+                state.editor.text_size * state.scale(),
+                style,
+                desktop,
+                (edit_bounds.right - edit_bounds.left) as f32,
+            )
+        }
+    };
+    let mut input = TextInput::open(hwnd, index, edit_bounds, desktop, &content, size, style)?;
+    input.origin = anchor;
+    // SAFETY: synchronous read of the live parent state; theme setup owns only child resources.
+    let dark = unsafe { (*pointer).canvas.dark };
+    input.set_theme(dark)?;
+    if index.is_some() {
+        input.set_wrap_width(Some(wrap));
+    }
+    // SAFETY: parent is retained through synchronous creation; the independent native child owns no State pointer.
+    unsafe {
+        (*pointer).editor.selected = index;
+        (*pointer).text_input = Some(input);
+    }
+    Ok(())
+}
+fn finish_text(hwnd: HWND, pointer: *mut State) -> Result<()> {
+    // SAFETY: UI thread takes ownership before native calls, so EDIT messages cannot alias a State borrow.
+    let input = unsafe { (*pointer).text_input.take() };
+    let Some(input) = input else {
+        return Ok(());
+    };
+    let result = (|| {
+        input.complete_composition()?;
+        let content = input.content()?;
+        // SAFETY: synchronous DirectWrite calls do not dispatch window messages; parent State is live.
+        unsafe {
+            let state = &mut *pointer;
+            let object = state.canvas.text_object(
+                PixelPoint {
+                    x: input.origin.left,
+                    y: input.origin.top,
+                },
+                content,
+                input.size,
+                input.wrap_width,
+                input.style,
+            )?;
+            state
+                .editor
+                .commit_text(input.index, object)
+                .map_err(|message| Error::new(E_FAIL, message))
+        }
+    })();
+    match result {
+        Ok(()) => {
+            drop(input); // SAFETY: borrow ended before focus can cause callbacks.
+            unsafe {
+                let _ = SetFocus(Some(hwnd));
+            }
+            Ok(())
+        }
+        Err(error) => {
+            // SAFETY: restore the still-owned input; failure must retain the user's draft.
+            unsafe {
+                (*pointer).text_input = Some(input);
+            }
+            Err(error)
+        }
+    }
+}
+fn restyle_text(
+    state: &mut State,
+    style: crate::core::annotation::Style,
+    resize: bool,
+) -> std::result::Result<(), &'static str> {
+    state.editor.styles[3] = style;
+    if let Some(index) = state.editor.selected {
+        if let Some(object) = state.editor.objects().get(index) {
+            if let Shape::Text {
+                bounds,
+                content,
+                size,
+                wrap_width,
+            } = &object.shape
+            {
+                let size = if resize {
+                    state.editor.text_size * state.scale()
+                } else {
+                    *size
+                };
+                let object = state
+                    .canvas
+                    .text_object(
+                        PixelPoint {
+                            x: bounds.left,
+                            y: bounds.top,
+                        },
+                        content.clone(),
+                        size,
+                        *wrap_width,
+                        style,
+                    )
+                    .map_err(|_| "无法更新文字布局，原文字已保留")?;
+                state.editor.commit_text(Some(index), object)?;
+            }
+        }
+    }
+    Ok(())
 }

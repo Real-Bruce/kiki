@@ -2,7 +2,7 @@
 
 面向 Windows 11 的轻量截图、标注与置顶贴图工具。使用 Rust 原生实现，优先控制体积、响应速度与后台资源占用。
 
-当前状态：已建立 Rust 原生 Windows 工程，正在 P4 可编辑标注阶段，P2/P3 仍有待验收项；P3 按用户要求暂缓。当前程序提供托盘、热键、WGC 捕获和原生选区工具条；已接通矩形、箭头和画笔标注，文字与输出尚未接通，不作为 v0.1.0 成品分发。
+当前状态：已建立 Rust 原生 Windows 工程，正在 P4 可编辑标注阶段，P2/P3 仍有待验收项；P3 按用户要求暂缓。当前程序提供托盘、热键、WGC 捕获和原生选区工具条；已接通矩形、箭头、画笔和文字标注，输出尚未接通，不作为 v0.1.0 成品分发。
 
 ## 开发与验证
 
@@ -15,11 +15,11 @@ cargo test --workspace
 cargo build --release
 ```
 
-构建结果为 `target/x86_64-pc-windows-msvc/release/kiki.exe`。运行后驻留托盘，Ctrl+Alt+A 或托盘开始截图打开冻结桌面选区；拖动框选，内部拖动移动，调整点改变尺寸，F 选择鼠标所在屏幕，Esc 取消操作或会话。当前工具条已接通选择、矩形、箭头、画笔、撤销、重做与取消；文字及输出按钮暂时禁用。选择工具命中对象后可整体移动，矩形八点调整、箭头端点调整；Delete 删除，Ctrl+Z / Ctrl+Y 撤销/重做。重新选择已有对象后切到对应绘图工具可修改颜色和粗细。`--capture` 可在首次启动时直接捕获，`--theme=light` / `--theme=dark` 可选择本阶段主题。
+构建结果为 `target/x86_64-pc-windows-msvc/release/kiki.exe`。运行后驻留托盘，Ctrl+Alt+A 或托盘开始截图打开冻结桌面选区；拖动框选，内部拖动移动，调整点改变尺寸，F 选择鼠标所在屏幕，Esc 取消操作或会话。当前工具条已接通选择、矩形、箭头、画笔、文字、撤销、重做与取消；输出按钮暂时禁用。选择工具命中对象后可整体移动，矩形八点调整、箭头端点调整；Delete 删除，Ctrl+Z / Ctrl+Y 撤销/重做。重新选择已有对象后切到对应绘图工具可修改颜色、粗细或字号。文字工具单击创建/重编，选择工具双击文字也可重编；Enter 换行、Ctrl+Enter 提交，Esc 取消本次文字输入。输入框中的 Ctrl+Z、Delete、F 作用于文本。参数条可用 Tab/Shift+Tab 访问，Enter/空格激活。`--capture` 可在首次启动时直接捕获，`--theme=light` / `--theme=dark` 可选择本阶段主题。
 
 开发探针须用 `cargo build --release --features diagnostics` 单独编译，默认构建不包含它们：`kiki.exe --probe artifacts/p1` 写入真实桌面 PNG 与捕获耗时；`kiki.exe --stress artifacts/p1/stress` 执行 100 次捕获、释放及资源采样；`scripts/Measure-Startup.ps1` 采集 30 次独立进程启动到热键和托盘就绪时间。仅显式调用时运行，结果目录不入库。探针会包含真实屏幕内容，请勿将其作为公开测试数据提交。完成后用默认 `cargo build --release` 恢复不含探针的程序。
 
-当前验证结果和缺项见 [P1](docs/validation/P1.md)、[P2](docs/validation/P2.md)、[P3](docs/validation/P3.md)、[P4](docs/validation/P4.md) 验证报告。`--probe` 还输出中心裁剪 PNG；开发构建的 `--cancel-stress` 验证 100 次实际取消及同进程恢复。电脑操作工具需要时，可在 diagnostics 构建显式使用 `--accessible-capture` 枚举同一画布；默认构建保留 ToolWindow 样式。文字标注、输出操作、贴图、设置、完整主题体验及 ZIP 交付尚待后续阶段。
+当前验证结果和缺项见 [P1](docs/validation/P1.md)、[P2](docs/validation/P2.md)、[P3](docs/validation/P3.md)、[P4](docs/validation/P4.md) 和 [文字标注](docs/validation/P4_TEXT.md) 验证报告。`--probe` 还输出中心裁剪 PNG；开发构建的 `--cancel-stress` 验证 100 次实际取消及同进程恢复。电脑操作工具需要时，可在 diagnostics 构建显式使用 `--accessible-capture` 枚举同一画布；默认构建保留 ToolWindow 样式。完整中文输入验收、输出操作、贴图、设置、完整主题体验及 ZIP 交付尚待后续阶段。
 
 开发构建可显式使用 `--trace-window-targets <文件路径>` 记录窗口类别、样式和边界，用于检查透明辅助层筛选；每次捕获覆盖该文件，不记录窗口标题或输入内容。
 

@@ -10,6 +10,7 @@ mod runtime;
 mod selection_render;
 #[cfg(test)]
 mod tests;
+mod text_input;
 mod window_targets;
 
 use crate::core::session::{SessionGate, SessionId};

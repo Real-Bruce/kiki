@@ -30,6 +30,8 @@ pub struct Layout {
 pub struct PaintInput<'a> {
     pub selection: &'a Selection,
     pub editor: &'a Editor,
+    pub editing: Option<usize>,
+    pub text_active: bool,
     pub hover: Option<PixelRect>,
     pub screens: &'a [DisplayInfo],
     pub pointer: PixelPoint,
@@ -59,6 +61,9 @@ pub fn system_dark() -> bool {
         .is_ok_and(|c| u32::from(c.R) + u32::from(c.G) + u32::from(c.B) < 384)
 }
 impl Canvas {
+    pub fn bounds(&self) -> PixelRect {
+        self.source.bounds()
+    }
     pub fn new(hwnd: HWND, image: Image) -> Result<Self> {
         // SAFETY: UI-thread COM objects, live HWND and call-scoped pixel slice; CreateBitmap copies the source.
         unsafe {
@@ -178,6 +183,8 @@ impl Canvas {
         let PaintInput {
             selection,
             editor,
+            editing,
+            text_active,
             hover,
             screens,
             pointer,
@@ -196,6 +203,19 @@ impl Canvas {
         });
         let (screen, preferred) = self.display(anchor, screens);
         let scale = layout.as_ref().map_or(preferred, |l| l.scale);
+        let text_layouts: Vec<Option<IDWriteTextLayout>> = editor
+            .objects()
+            .iter()
+            .map(|o| match &o.shape {
+                Shape::Text {
+                    content,
+                    size,
+                    wrap_width,
+                    ..
+                } => self.text_layout(content, *size, *wrap_width).map(Some),
+                _ => Ok(None),
+            })
+            .collect::<Result<_>>()?;
         // SAFETY: all drawing resources belong to this UI thread; BeginDraw is always paired with EndDraw.
         unsafe {
             if (scale - self.scale).abs() > 0.001 {
@@ -287,20 +307,24 @@ impl Canvas {
                     color(24, 28, 36, 0.50),
                 );
             }
-            self.paint_annotations(editor, selection.rect);
+            self.paint_annotations(editor, selection.rect, editing, &text_layouts);
             if let Some(layout) = layout {
                 self.paint_toolbar(&layout, editor, pointer, focus, pressed);
-                self.paint_parameters(&layout, editor);
+                self.paint_parameters(&layout, editor, focus);
             }
             let hint = D2D_RECT_F {
                 left: 16. * scale,
                 top: h - 44. * scale,
-                right: 350. * scale,
+                right: (if text_active { 480. } else { 350. }) * scale,
                 bottom: h - 12. * scale,
             };
             self.round(hint, 6. * scale, color(30, 36, 46, 0.88));
             self.label(
-                "拖动框选　F 当前屏幕　Esc 取消",
+                if text_active {
+                    "Enter 换行　Ctrl+Enter 完成　Esc 取消文字"
+                } else {
+                    "拖动框选　F 当前屏幕　Esc 取消"
+                },
                 hint,
                 color(255, 255, 255, 1.),
             );
@@ -477,6 +501,65 @@ impl Canvas {
             }
         }
     }
+    fn text_layout(&self, content: &str, size: f32, width: f32) -> Result<IDWriteTextLayout> {
+        // SAFETY: UI-thread factory with call-scoped UTF-16 text; DirectWrite copies layout text.
+        unsafe {
+            let format = self.dw.CreateTextFormat(
+                w!("Segoe UI"),
+                None,
+                DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL,
+                size,
+                w!("zh-CN"),
+            )?;
+            let wide: Vec<u16> = content.encode_utf16().collect();
+            self.dw.CreateTextLayout(&wide, &format, width, 1_000_000.)
+        }
+    }
+    pub fn text_object(
+        &self,
+        origin: PixelPoint,
+        content: String,
+        size: f32,
+        width: f32,
+        style: crate::core::annotation::Style,
+    ) -> Result<crate::core::annotation::Object> {
+        let layout = self.text_layout(&content, size, width)?;
+        let mut metrics = DWRITE_TEXT_METRICS::default();
+        // SAFETY: initialized output descriptor and live UI-thread layout.
+        unsafe {
+            layout.GetMetrics(&mut metrics)?;
+        }
+        let w = metrics.widthIncludingTrailingWhitespace.ceil().max(1.);
+        let h = metrics.height.ceil().max(1.);
+        if !w.is_finite() || !h.is_finite() || w > i32::MAX as f32 || h > i32::MAX as f32 {
+            return Err(windows::core::Error::new(
+                windows::Win32::Foundation::E_FAIL,
+                "文字尺寸过大",
+            ));
+        }
+        let right = origin.x.checked_add(w as i32).ok_or_else(|| {
+            windows::core::Error::new(windows::Win32::Foundation::E_FAIL, "文字范围溢出")
+        })?;
+        let bottom = origin.y.checked_add(h as i32).ok_or_else(|| {
+            windows::core::Error::new(windows::Win32::Foundation::E_FAIL, "文字范围溢出")
+        })?;
+        Ok(crate::core::annotation::Object {
+            shape: Shape::Text {
+                bounds: PixelRect {
+                    left: origin.x,
+                    top: origin.y,
+                    right,
+                    bottom,
+                },
+                content,
+                size,
+                wrap_width: width,
+            },
+            style,
+        })
+    }
     pub fn parameter_at(&self, layout: &Layout, p: PixelPoint) -> Option<usize> {
         let r = layout.parameters?;
         if !contains(r, p) {
@@ -491,7 +574,7 @@ impl Canvas {
             None
         }
     }
-    fn paint_parameters(&self, layout: &Layout, editor: &Editor) {
+    fn paint_parameters(&self, layout: &Layout, editor: &Editor, focus: usize) {
         let Some(bounds) = layout.parameters else {
             return;
         };
@@ -518,6 +601,16 @@ impl Canvas {
                     radiusY: 8. * s,
                 };
                 self.target.FillEllipse(&circle, &self.brush);
+                if focus == 11 + i {
+                    let rect = D2D_RECT_F {
+                        left: x - 13. * s,
+                        top: y - 13. * s,
+                        right: x + 13. * s,
+                        bottom: y + 13. * s,
+                    };
+                    self.brush.SetColor(&color(0, 120, 212, 1.));
+                    self.target.DrawRectangle(&rect, &self.brush, 1.5, None);
+                }
                 self.brush.SetColor(&if *rgb == editor.style().color {
                     color(0, 120, 212, 1.)
                 } else {
@@ -534,14 +627,31 @@ impl Canvas {
                     None,
                 );
             }
-            for (i, width) in [1., 3., 6.].iter().enumerate() {
+            for (i, width) in (if editor.tool == Tool::Text {
+                [18., 24., 36.]
+            } else {
+                [1., 3., 6.]
+            })
+            .iter()
+            .enumerate()
+            {
                 let b = D2D_RECT_F {
                     left: r.left + (240. + i as f32 * 48.) * s,
                     top: r.top + 6. * s,
                     right: r.left + (284. + i as f32 * 48.) * s,
                     bottom: r.bottom - 6. * s,
                 };
-                if *width == editor.style().width {
+                if focus == 19 + i {
+                    self.brush.SetColor(&color(0, 120, 212, 1.));
+                    self.target.DrawRectangle(&b, &self.brush, 1.5, None);
+                }
+                if *width
+                    == if editor.tool == Tool::Text {
+                        editor.text_size
+                    } else {
+                        editor.style().width
+                    }
+                {
                     self.round(
                         b,
                         6. * s,
@@ -557,6 +667,18 @@ impl Canvas {
                 } else {
                     color(34, 40, 49, 1.)
                 });
+                if editor.tool == Tool::Text {
+                    self.label(
+                        &format!("{}", *width as i32),
+                        b,
+                        if self.dark {
+                            color(245, 246, 250, 1.)
+                        } else {
+                            color(34, 40, 49, 1.)
+                        },
+                    );
+                    continue;
+                }
                 self.target.DrawLine(
                     Vector2 {
                         X: b.left + 10. * s,
@@ -573,7 +695,13 @@ impl Canvas {
             }
         }
     }
-    fn paint_annotations(&self, editor: &Editor, clip: Option<PixelRect>) {
+    fn paint_annotations(
+        &self,
+        editor: &Editor,
+        clip: Option<PixelRect>,
+        editing: Option<usize>,
+        layouts: &[Option<IDWriteTextLayout>],
+    ) {
         let Some(clip) = clip else {
             return;
         };
@@ -585,11 +713,27 @@ impl Canvas {
         unsafe {
             self.target
                 .PushAxisAlignedClip(&self.local(clip), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-            for object in editor.objects() {
+            for (index, object) in editor.objects().iter().enumerate() {
+                if editing == Some(index) {
+                    continue;
+                }
                 let c = object.style.color;
                 self.brush.SetColor(&color(c[0], c[1], c[2], 1.));
                 let width = object.style.width;
                 match &object.shape {
+                    Shape::Text { bounds, .. } => {
+                        if let Some(layout) = &layouts[index] {
+                            self.target.DrawTextLayout(
+                                point(PixelPoint {
+                                    x: bounds.left,
+                                    y: bounds.top,
+                                }),
+                                layout,
+                                &self.brush,
+                                D2D1_DRAW_TEXT_OPTIONS_NONE,
+                            );
+                        }
+                    }
                     Shape::Rectangle(r) => {
                         self.target
                             .DrawRectangle(&self.local(*r), &self.brush, width, None)

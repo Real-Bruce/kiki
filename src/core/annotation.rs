@@ -11,6 +11,7 @@ pub enum Tool {
     Rectangle,
     Arrow,
     Pen,
+    Text,
 }
 impl Tool {
     pub fn button(self) -> usize {
@@ -19,6 +20,7 @@ impl Tool {
             Self::Rectangle => 1,
             Self::Arrow => 2,
             Self::Pen => 3,
+            Self::Text => 4,
         }
     }
 }
@@ -40,6 +42,12 @@ pub enum Shape {
     Rectangle(PixelRect),
     Arrow(PixelPoint, PixelPoint),
     Pen(Vec<PixelPoint>),
+    Text {
+        bounds: PixelRect,
+        content: String,
+        size: f32,
+        wrap_width: f32,
+    },
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Object {
@@ -49,6 +57,7 @@ pub struct Object {
 impl Object {
     pub fn bounds(&self) -> PixelRect {
         match &self.shape {
+            Shape::Text { bounds, .. } => *bounds,
             Shape::Rectangle(r) => *r,
             Shape::Arrow(a, b) => {
                 let mut bounds = rect(*a, *b);
@@ -78,12 +87,13 @@ impl Object {
         match &self.shape {
             Shape::Rectangle(r) => Selection::handles(*r).to_vec(),
             Shape::Arrow(a, b) => vec![*a, *b],
-            Shape::Pen(_) => Vec::new(),
+            Shape::Pen(_) | Shape::Text { .. } => Vec::new(),
         }
     }
     fn hit(&self, p: PixelPoint, tolerance: f64) -> bool {
         let t = tolerance + f64::from(self.style.width) / 2.;
         match &self.shape {
+            Shape::Text { bounds, .. } => super::selection::contains(*bounds, p),
             Shape::Rectangle(r) => {
                 let h = Selection::handles(*r);
                 [(0, 2), (2, 4), (4, 6), (6, 0)]
@@ -165,9 +175,10 @@ struct Drag {
 }
 pub struct Editor {
     pub tool: Tool,
-    pub styles: [Style; 3],
+    pub styles: [Style; 4],
     objects: Vec<Object>,
     pub selected: Option<usize>,
+    pub text_size: f32,
     drag: Option<Drag>,
     undo: VecDeque<Change>,
     redo: Vec<Change>,
@@ -177,9 +188,10 @@ impl Default for Editor {
     fn default() -> Self {
         Self {
             tool: Tool::Select,
-            styles: [Style::default(); 3],
+            styles: [Style::default(); 4],
             objects: Vec::new(),
             selected: None,
+            text_size: 24.,
             drag: None,
             undo: VecDeque::new(),
             redo: Vec::new(),
@@ -188,6 +200,82 @@ impl Default for Editor {
     }
 }
 impl Editor {
+    pub fn text_at(&self, p: PixelPoint) -> Option<usize> {
+        self.objects
+            .iter()
+            .rposition(|o| o.hit(p, 0.))
+            .filter(|i| matches!(self.objects[*i].shape, Shape::Text { .. }))
+    }
+    pub fn commit_text(
+        &mut self,
+        index: Option<usize>,
+        object: Object,
+    ) -> Result<(), &'static str> {
+        let Shape::Text {
+            bounds,
+            ref content,
+            size,
+            wrap_width,
+        } = object.shape
+        else {
+            return Err("无效文字对象");
+        };
+        if bounds.size().is_none()
+            || !size.is_finite()
+            || size <= 0.
+            || !wrap_width.is_finite()
+            || wrap_width <= 0.
+            || content.replace('\n', "\r\n").encode_utf16().count() > 16384
+        {
+            return Err("文字尺寸或长度无效");
+        }
+        if self.active() {
+            return Err("请先结束当前拖动");
+        }
+        if let Some(index) = index {
+            if !self
+                .objects
+                .get(index)
+                .is_some_and(|o| matches!(o.shape, Shape::Text { .. }))
+            {
+                return Err("文字对象已失效");
+            }
+            let before = self.objects[index].clone();
+            let after = if content.is_empty() {
+                self.objects.remove(index);
+                self.selected = None;
+                None
+            } else {
+                self.objects[index] = object.clone();
+                self.selected = Some(index);
+                Some(object)
+            };
+            self.record(Change {
+                index,
+                before: Some(before),
+                after,
+            });
+        } else if !content.is_empty() {
+            if self.objects.len() >= 1024 {
+                return Err("标注数量已达到 1024 个上限");
+            }
+            self.objects
+                .try_reserve(1)
+                .map_err(|_| "没有足够内存保存文字")?;
+            let index = self.objects.len();
+            self.objects.push(object.clone());
+            self.selected = Some(index);
+            self.record(Change {
+                index,
+                before: None,
+                after: Some(object),
+            });
+        }
+        Ok(())
+    }
+    pub fn warn(&mut self, message: &'static str) {
+        self.warning = Some(message);
+    }
     pub fn take_warning(&mut self) -> Option<&'static str> {
         self.warning.take()
     }
@@ -204,18 +292,19 @@ impl Editor {
         !self.redo.is_empty() && !self.active()
     }
     pub fn enabled(&self, index: usize) -> bool {
-        matches!(index, 0..=3 | 10)
+        (matches!(index, 11..=21) && self.tool != Tool::Select)
+            || matches!(index, 0..=4 | 10)
             || (index == 5 && self.can_undo())
             || (index == 6 && self.can_redo())
     }
     pub fn style(&self) -> Style {
-        self.styles[self.tool.button().saturating_sub(1).min(2)]
+        self.styles[self.tool.button().saturating_sub(1).min(3)]
     }
     pub fn set_style(&mut self, style: Style, scale: f32) {
         if self.active() || !style.width.is_finite() || !(1. ..=32.).contains(&style.width) {
             return;
         }
-        self.styles[self.tool.button().saturating_sub(1).min(2)] = style;
+        self.styles[self.tool.button().saturating_sub(1).min(3)] = style;
         if let Some(index) = self.selected {
             let before = self.objects[index].clone();
             self.objects[index].style = Style {
@@ -280,7 +369,7 @@ impl Editor {
             Tool::Rectangle => Shape::Rectangle(rect(p, p)),
             Tool::Arrow => Shape::Arrow(p, p),
             Tool::Pen => Shape::Pen(vec![p]),
-            Tool::Select => return Ok(false),
+            Tool::Select | Tool::Text => return Ok(false),
         };
         let mut style = self.style();
         style.width *= scale.clamp(0.5, 4.);
@@ -302,6 +391,7 @@ impl Editor {
         let object = &mut self.objects[drag.index];
         match &drag.kind {
             DragKind::Create => match &mut object.shape {
+                Shape::Text { .. } => {}
                 Shape::Rectangle(r) => *r = rect(drag.start, p),
                 Shape::Arrow(_, b) => *b = p,
                 Shape::Pen(points) => {
@@ -341,6 +431,26 @@ impl Editor {
                                 y: r.bottom,
                             }),
                         )),
+                        Shape::Text {
+                            bounds,
+                            content,
+                            size,
+                            wrap_width,
+                        } => Shape::Text {
+                            bounds: rect(
+                                shift(PixelPoint {
+                                    x: bounds.left,
+                                    y: bounds.top,
+                                }),
+                                shift(PixelPoint {
+                                    x: bounds.right,
+                                    y: bounds.bottom,
+                                }),
+                            ),
+                            content: content.clone(),
+                            size: *size,
+                            wrap_width: *wrap_width,
+                        },
                         Shape::Arrow(a, b) => Shape::Arrow(shift(*a), shift(*b)),
                         Shape::Pen(points) => {
                             Shape::Pen(points.iter().map(|v| shift(*v)).collect())
@@ -383,7 +493,7 @@ impl Editor {
                                 Shape::Arrow(*a, p)
                             }
                         }
-                        Shape::Pen(_) => {}
+                        Shape::Pen(_) | Shape::Text { .. } => {}
                     }
                 }
             }
@@ -396,6 +506,7 @@ impl Editor {
         };
         let object = &self.objects[drag.index];
         let valid = match &object.shape {
+            Shape::Text { bounds, .. } => bounds.size().is_some(),
             Shape::Rectangle(r) => r.size().is_some(),
             Shape::Arrow(a, b) => a != b,
             Shape::Pen(points) => points.len() > 1,
@@ -481,6 +592,60 @@ mod tests {
     use super::*;
     fn p(x: i32, y: i32) -> PixelPoint {
         PixelPoint { x, y }
+    }
+    fn text(content: &str) -> Object {
+        Object {
+            shape: Shape::Text {
+                bounds: PixelRect {
+                    left: -100,
+                    top: -50,
+                    right: 100,
+                    bottom: 50,
+                },
+                content: content.into(),
+                size: 30.,
+                wrap_width: 200.,
+            },
+            style: Style::default(),
+        }
+    }
+    #[test]
+    fn multiline_text_reedit_delete_and_history_roundtrip() {
+        let mut e = Editor::default();
+        e.commit_text(None, text("中文\n第二行😀")).unwrap();
+        e.commit_text(Some(0), text("修改后的中文")).unwrap();
+        assert_eq!(e.undo.len(), 2);
+        e.undo();
+        assert_eq!(e.objects()[0], text("中文\n第二行😀"));
+        e.redo();
+        assert_eq!(e.objects()[0], text("修改后的中文"));
+        e.commit_text(Some(0), text("")).unwrap();
+        assert!(e.objects().is_empty());
+        e.undo();
+        assert_eq!(e.objects()[0], text("修改后的中文"));
+    }
+    #[test]
+    fn text_validation_failure_preserves_object_and_redo() {
+        let mut e = Editor::default();
+        e.commit_text(None, text("原文")).unwrap();
+        e.commit_text(Some(0), text("新文")).unwrap();
+        e.undo();
+        assert!(e.commit_text(Some(10), text("错误索引")).is_err());
+        assert!(e.commit_text(Some(0), text(&"字".repeat(16385))).is_err());
+        assert_eq!(e.objects()[0], text("原文"));
+        assert!(e.can_redo());
+    }
+    #[test]
+    fn text_moves_without_reflow_and_topmost_shape_blocks_text_hit() {
+        let mut e = Editor::default();
+        e.commit_text(None, text("中文\n多行")).unwrap();
+        e.begin(p(0, 0), 6, 1.).unwrap();
+        e.finish(p(50, 20));
+        assert!(
+            matches!(&e.objects()[0].shape,Shape::Text{bounds,wrap_width,content,..} if bounds.left==-50&&*wrap_width==200.&&content=="中文\n多行")
+        );
+        draw(&mut e, Tool::Arrow, p(0, 0), p(100, 0));
+        assert_eq!(e.text_at(p(50, 0)), None);
     }
     fn draw(e: &mut Editor, tool: Tool, a: PixelPoint, b: PixelPoint) {
         e.tool = tool;
