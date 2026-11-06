@@ -14,7 +14,10 @@ use windows::{
 
 pub fn run_if_requested() -> Result<bool> {
     let args: Vec<_> = std::env::args_os().collect();
-    if args.get(1).is_none_or(|arg| arg != "--stress") {
+    if args
+        .get(1)
+        .is_none_or(|arg| arg != "--stress" && arg != "--cancel-stress")
+    {
         return Ok(false);
     }
     let path = args
@@ -22,16 +25,17 @@ pub fn run_if_requested() -> Result<bool> {
         .map(PathBuf::from)
         .ok_or_else(|| Error::new(E_FAIL, "--stress 需要输出目录"))?;
     std::fs::create_dir_all(&path).map_err(io_error)?;
+    let cancel = args.get(1).is_some_and(|arg| arg == "--cancel-stress");
     std::thread::Builder::new()
         .name("stress-probe".into())
-        .spawn(move || stress(path))
+        .spawn(move || stress(path, cancel))
         .map_err(io_error)?
         .join()
         .map_err(|_| Error::new(E_FAIL, "诊断线程意外退出"))??;
     Ok(true)
 }
 
-fn stress(path: PathBuf) -> Result<()> {
+fn stress(path: PathBuf, cancel: bool) -> Result<()> {
     let mut csv = std::fs::File::create(path.join("stress.csv")).map_err(io_error)?;
     writeln!(
         csv,
@@ -41,14 +45,24 @@ fn stress(path: PathBuf) -> Result<()> {
     // Include baseline and every result; no working set trimming or sample filtering.
     row(&mut csv, 0, 0.)?;
     for index in 1..=100 {
-        let image = capture::desktop()?;
-        let elapsed = image.elapsed.as_secs_f64() * 1000.;
-        drop(image);
+        let elapsed = if cancel {
+            let started = std::time::Instant::now();
+            capture::cancel_after_start()?;
+            started.elapsed().as_secs_f64() * 1000.
+        } else {
+            let image = capture::desktop()?;
+            image.elapsed.as_secs_f64() * 1000.
+        };
         row(&mut csv, index, elapsed)?;
     }
     std::thread::sleep(std::time::Duration::from_secs(2));
     row(&mut csv, 101, 0.)?;
     csv.flush().map_err(io_error)?;
+    if cancel {
+        // Recovery must work in the same worker/process after all canceled sessions release.
+        let recovered = capture::desktop()?;
+        super::png::save(&recovered.image, &path.join("recovered.png"))?;
+    }
     Ok(())
 }
 

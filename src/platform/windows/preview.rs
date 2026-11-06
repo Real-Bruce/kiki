@@ -109,13 +109,13 @@ impl Surface {
             )?;
             let (width, height) = capture
                 .image
-                .bounds
+                .bounds()
                 .size()
                 .ok_or_else(|| Error::new(E_FAIL, "无效图像"))?;
             let bitmap = target.CreateBitmap(
                 D2D_SIZE_U { width, height },
-                Some(capture.image.pixels.as_ptr().cast()),
-                capture.image.stride,
+                Some(capture.image.pixels().as_ptr().cast()),
+                capture.image.stride(),
                 &D2D1_BITMAP_PROPERTIES {
                     pixelFormat: D2D1_PIXEL_FORMAT {
                         format: DXGI_FORMAT_B8G8R8A8_UNORM,
@@ -165,10 +165,14 @@ impl Surface {
                 None,
             )?;
             let status = format!(
-                "WGC · {} 屏 · {} × {} 物理像素 · 首帧及读回 {:.1} ms · Esc 关闭预览",
+                "WGC · {} 屏 · {} × {} 物理像素 · {}% 缩放 · 首帧及读回 {:.1} ms",
                 capture.monitors,
                 width,
                 height,
+                capture
+                    .screens
+                    .first()
+                    .map_or(100, |screen| screen.scale_percent),
                 capture.elapsed.as_secs_f64() * 1000.
             )
             .encode_utf16()

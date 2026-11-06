@@ -1,13 +1,22 @@
 mod capture;
 #[cfg(feature = "diagnostics")]
 mod diagnostics;
+mod display;
 #[cfg(any(feature = "diagnostics", test))]
 mod png;
 mod preview;
 mod runtime;
 
 use crate::core::session::{SessionGate, SessionId};
-use std::{cell::RefCell, sync::mpsc, thread::JoinHandle};
+use std::{
+    cell::RefCell,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
+    thread::JoinHandle,
+};
 use windows::{
     Win32::{
         Foundation::*,
@@ -22,6 +31,7 @@ thread_local! { static APP: RefCell<Option<App>> = const { RefCell::new(None) };
 struct App {
     receiver: Option<mpsc::Receiver<(SessionId, Result<capture::CaptureResult>)>>,
     gate: SessionGate,
+    cancel: Option<Arc<AtomicBool>>,
     worker: Option<JoinHandle<()>>,
     preview: Option<preview::Preview>,
 }
@@ -87,11 +97,29 @@ pub fn run() -> Result<()> {
             .join()
             .map_err(|_| Error::new(E_FAIL, "诊断线程意外退出"))??;
         png::save(&result.image, &folder.join("capture.png"))?;
+        let bounds = result.image.bounds();
+        let quarter = |a: i32, b: i32, n: i64| {
+            i32::try_from(i64::from(a) + (i64::from(b) - i64::from(a)) * n / 4)
+                .map_err(|_| Error::new(E_FAIL, "裁剪坐标溢出"))
+        };
+        let region = result
+            .image
+            .region(crate::core::geometry::PixelRect {
+                left: quarter(bounds.left, bounds.right, 1)?,
+                top: quarter(bounds.top, bounds.bottom, 1)?,
+                right: quarter(bounds.left, bounds.right, 3)?,
+                bottom: quarter(bounds.top, bounds.bottom, 3)?,
+            })
+            .map_err(|e| Error::new(E_FAIL, e))?;
+        png::save(&region, &folder.join("capture-region.png"))?;
         std::fs::write(
             folder.join("capture.txt"),
             format!(
-                "WGC首帧及读回合计: {:?}\n显示器: {}\n范围: {:?}\n",
-                result.elapsed, result.monitors, result.image.bounds
+                "WGC首帧及读回合计: {:?}\n显示器: {}\n范围: {:?}\n屏幕信息: {:#?}\n",
+                result.elapsed,
+                result.monitors,
+                result.image.bounds(),
+                result.screens
             ),
         )
         .map_err(|e| Error::new(E_FAIL, e.to_string()))?;
@@ -171,6 +199,7 @@ pub fn run() -> Result<()> {
             *app = Some(App {
                 receiver: None,
                 gate: SessionGate::default(),
+                cancel: None,
                 worker: None,
                 preview: None,
             })
@@ -196,6 +225,9 @@ pub fn run() -> Result<()> {
         APP.with_borrow_mut(|app| {
             if let Some(mut state) = app.take() {
                 state.gate.cancel();
+                if let Some(cancel) = state.cancel.take() {
+                    cancel.store(true, Ordering::Release);
+                }
                 if let Some(worker) = state.worker.take() {
                     let _ = worker.join();
                 }
@@ -230,14 +262,17 @@ fn begin_capture(hwnd: HWND) {
             }
         };
         let (tx, rx) = mpsc::sync_channel(1);
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_cancel = cancel.clone();
         match std::thread::Builder::new()
             .name("capture".into())
             .spawn(move || {
-                let result = capture::desktop();
+                let result = capture::desktop_with_cancel(&worker_cancel);
                 let _ = tx.send((ticket, result));
             }) {
             Ok(worker) => {
                 state.receiver = Some(rx);
+                state.cancel = Some(cancel);
                 state.worker = Some(worker);
                 // SAFETY: hwnd belongs to this UI thread; timer exists only during capture.
                 unsafe {
@@ -260,6 +295,7 @@ fn poll(hwnd: HWND) {
             Err(mpsc::TryRecvError::Empty) => return None,
             Err(_) => {
                 state.receiver = None;
+                state.cancel = None;
                 state.gate.cancel();
                 if let Some(worker) = state.worker.take() {
                     let _ = worker.join();
@@ -268,6 +304,7 @@ fn poll(hwnd: HWND) {
             }
         };
         state.receiver = None;
+        state.cancel = None;
         if let Some(worker) = state.worker.take() {
             let _ = worker.join();
         }
@@ -335,6 +372,9 @@ fn dispatch(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
                 let preview = APP.with_borrow_mut(|app| {
                     let state = app.as_mut()?;
                     state.gate.cancel();
+                    if let Some(cancel) = state.cancel.as_ref() {
+                        cancel.store(true, Ordering::Release);
+                    }
                     state.preview.take()
                 });
                 // Destroy outside RefCell borrow because window destruction can reenter dispatch.

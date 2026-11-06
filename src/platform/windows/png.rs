@@ -26,7 +26,7 @@ pub fn save(image: &Image, path: &Path) -> Result<()> {
             let frame = frame.ok_or_else(|| Error::new(E_FAIL, "无法创建 PNG 帧"))?;
             frame.Initialize(None)?;
             let (width, height) = image
-                .bounds
+                .bounds()
                 .size()
                 .ok_or_else(|| Error::new(E_FAIL, "无效图像"))?;
             frame.SetSize(width, height)?;
@@ -35,7 +35,7 @@ pub fn save(image: &Image, path: &Path) -> Result<()> {
             if format != GUID_WICPixelFormat32bppBGRA {
                 return Err(Error::new(E_FAIL, "PNG 编码格式不匹配"));
             }
-            frame.WritePixels(height, image.stride, &image.pixels)?;
+            frame.WritePixels(height, image.stride(), image.pixels())?;
             frame.Commit()?;
             encoder.Commit()
         })();
@@ -65,7 +65,7 @@ mod tests {
         })
         .unwrap();
         image
-            .pixels
+            .pixels_mut()
             .copy_from_slice(&[0, 0, 255, 255, 0, 0, 0, 0, 255, 0, 0, 255, 0, 255, 0, 255]);
         save(&image, &file).unwrap();
         use std::os::windows::ffi::OsStrExt;
@@ -103,7 +103,7 @@ mod tests {
                 converter
                     .CopyPixels(std::ptr::null(), 8, &mut pixels)
                     .unwrap();
-                assert_eq!(pixels, image.pixels);
+                assert_eq!(pixels, image.pixels());
             }
             CoUninitialize();
         }

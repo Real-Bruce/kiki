@@ -1,6 +1,10 @@
+use super::display;
 use crate::core::{geometry::PixelRect, image::Image};
 use std::{
-    sync::mpsc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     time::{Duration, Instant},
 };
 use windows::{
@@ -11,7 +15,7 @@ use windows::{
     },
     Win32::{
         Foundation::*,
-        Graphics::{Direct3D::*, Direct3D11::*, Dxgi::*, Gdi::*},
+        Graphics::{Direct3D::*, Direct3D11::*, Dxgi::*},
         System::{
             Com::*,
             WinRT::{
@@ -20,7 +24,7 @@ use windows::{
             },
         },
     },
-    core::{BOOL, Interface, Result, factory},
+    core::{Interface, Result, factory},
 };
 
 fn fail(message: &str) -> windows::core::Error {
@@ -50,36 +54,68 @@ pub struct CaptureResult {
     pub image: Image,
     pub elapsed: Duration,
     pub monitors: usize,
+    pub screens: Vec<crate::core::display::DisplayInfo>,
 }
 
+#[cfg(feature = "diagnostics")]
 pub fn desktop() -> Result<CaptureResult> {
+    desktop_with_cancel(&AtomicBool::new(false))
+}
+
+fn check_cancel(cancel: &AtomicBool) -> Result<()> {
+    if cancel.load(Ordering::Acquire) {
+        return Err(windows::core::Error::new(E_ABORT, "截图已取消"));
+    }
+    Ok(())
+}
+
+pub fn desktop_with_cancel(cancel: &AtomicBool) -> Result<CaptureResult> {
+    desktop_inner(cancel, || {})
+}
+
+#[cfg(feature = "diagnostics")]
+pub fn cancel_after_start() -> Result<()> {
+    let cancel = AtomicBool::new(false);
+    match desktop_inner(&cancel, || cancel.store(true, Ordering::Release)) {
+        Err(error) if error.code() == E_ABORT => Ok(()),
+        Err(error) => Err(error),
+        Ok(_) => Err(fail("取消后仍返回了捕获结果")),
+    }
+}
+
+fn desktop_inner(cancel: &AtomicBool, on_started: impl FnOnce()) -> Result<CaptureResult> {
     let start = Instant::now();
+    let mut on_started = Some(on_started);
+    check_cancel(cancel)?;
     // SAFETY: capture is called only on a fresh dedicated worker thread.
     unsafe {
         CoInitializeEx(None, COINIT_MULTITHREADED).ok()?;
     }
     let _apartment = Apartment;
-    ensure_sdr()?;
+    let screens = display::enumerate()?;
+    for screen in &screens {
+        if screen.info.color != crate::core::display::ColorMode::Sdr {
+            return Err(fail(
+                "当前显示器使用 HDR 或高级色彩模式；SDR 色彩路径尚未验证，已停止截图以避免错误颜色。",
+            ));
+        }
+    }
     if !GraphicsCaptureSession::IsSupported()? {
         return Err(fail("系统不支持 Windows Graphics Capture"));
     }
-    let mut screens: Vec<(HMONITOR, PixelRect)> = Vec::new();
-    // SAFETY: callback receives a live exclusive Vec for this synchronous enumeration.
-    unsafe {
-        EnumDisplayMonitors(
-            None,
-            None,
-            Some(enumerate),
-            LPARAM((&mut screens as *mut Vec<(HMONITOR, PixelRect)>) as isize),
-        )
-        .ok()?;
-    }
-    let first = screens.first().ok_or_else(|| fail("没有可捕获的显示器"))?.1;
-    let bounds = screens.iter().fold(first, |r, (_, s)| PixelRect {
-        left: r.left.min(s.left),
-        top: r.top.min(s.top),
-        right: r.right.max(s.right),
-        bottom: r.bottom.max(s.bottom),
+    let first = screens
+        .first()
+        .ok_or_else(|| fail("没有可捕获的显示器"))?
+        .info
+        .bounds;
+    let bounds = screens.iter().fold(first, |r, screen| {
+        let s = screen.info.bounds;
+        PixelRect {
+            left: r.left.min(s.left),
+            top: r.top.min(s.top),
+            right: r.right.max(s.right),
+            bottom: r.bottom.max(s.bottom),
+        }
     });
     let mut image = Image::new(bounds).map_err(|e| fail(&e))?;
     let mut device = None;
@@ -105,9 +141,12 @@ pub fn desktop() -> Result<CaptureResult> {
     let rt: IDirect3DDevice = unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi)?.cast()? };
     let interop: IGraphicsCaptureItemInterop =
         factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
-    for (monitor, rect) in &screens {
+    for screen in &screens {
+        check_cancel(cancel)?;
+        let monitor = screen.monitor;
+        let rect = &screen.info.bounds;
         // SAFETY: monitor handle came from current synchronous monitor enumeration.
-        let item: GraphicsCaptureItem = unsafe { interop.CreateForMonitor(*monitor)? };
+        let item: GraphicsCaptureItem = unsafe { interop.CreateForMonitor(monitor)? };
         let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
             &rt,
             DirectXPixelFormat::B8G8R8A8UIntNormalized,
@@ -125,9 +164,28 @@ pub fn desktop() -> Result<CaptureResult> {
                 Ok(())
             }))?;
         guard.session.StartCapture()?;
-        let wait = rx.recv_timeout(Duration::from_secs(3));
+        if let Some(notify) = on_started.take() {
+            notify();
+        }
+        let wait = (|| {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            loop {
+                check_cancel(cancel)?;
+                match rx.recv_timeout(Duration::from_millis(10)) {
+                    Ok(()) => return Ok(()),
+                    Err(mpsc::RecvTimeoutError::Disconnected) => {
+                        return Err(fail("捕获通知已断开"));
+                    }
+                    Err(mpsc::RecvTimeoutError::Timeout) if Instant::now() >= deadline => {
+                        return Err(fail("等待屏幕首帧超时，请重试"));
+                    }
+                    Err(mpsc::RecvTimeoutError::Timeout) => {}
+                }
+            }
+        })();
         guard.pool.RemoveFrameArrived(token)?;
-        wait.map_err(|_| fail("等待屏幕首帧超时，请重试"))?;
+        wait?;
+        check_cancel(cancel)?;
         let frame = guard.pool.TryGetNextFrame()?;
         let result = (|| {
             let size = frame.ContentSize()?;
@@ -161,20 +219,24 @@ pub fn desktop() -> Result<CaptureResult> {
                     let mut screen = Image::new(*rect).map_err(|e| fail(&e))?;
                     let mapped_size = u64::from(mapped.RowPitch) * u64::from(height);
                     if mapped.pData.is_null()
-                        || mapped.RowPitch < screen.stride
+                        || mapped.RowPitch < screen.stride()
                         || mapped_size > isize::MAX as u64
                     {
                         return Err(fail("无效的捕获纹理步长"));
                     }
                     for y in 0..height as usize {
+                        if y % 64 == 0 {
+                            check_cancel(cancel)?;
+                        }
+                        let stride = screen.stride() as usize;
                         let src = std::slice::from_raw_parts(
                             (mapped.pData as *const u8).add(y * mapped.RowPitch as usize),
-                            screen.stride as usize,
+                            screen.stride() as usize,
                         );
-                        let offset = y * screen.stride as usize;
-                        screen.pixels[offset..offset + screen.stride as usize].copy_from_slice(src);
-                        for pixel in screen.pixels[offset..offset + screen.stride as usize]
-                            .chunks_exact_mut(4)
+                        let offset = y * screen.stride() as usize;
+                        screen.pixels_mut()[offset..offset + stride].copy_from_slice(src);
+                        for pixel in
+                            screen.pixels_mut()[offset..offset + stride].chunks_exact_mut(4)
                         {
                             pixel[3] = 255;
                         }
@@ -189,71 +251,14 @@ pub fn desktop() -> Result<CaptureResult> {
         frame.Close()?;
         result?;
     }
+    check_cancel(cancel)?;
+    if display::enumerate()? != screens {
+        return Err(fail("截图期间显示配置已变化，请重新截图"));
+    }
     Ok(CaptureResult {
         image,
         elapsed: start.elapsed(),
         monitors: screens.len(),
+        screens: screens.into_iter().map(|screen| screen.info).collect(),
     })
-}
-
-fn ensure_sdr() -> Result<()> {
-    // SAFETY: local COM objects and output descriptors are used only on this capture thread.
-    unsafe {
-        let factory: IDXGIFactory1 = CreateDXGIFactory1()?;
-        let mut adapter_index = 0;
-        loop {
-            let adapter = match factory.EnumAdapters1(adapter_index) {
-                Ok(adapter) => adapter,
-                Err(error) if error.code() == DXGI_ERROR_NOT_FOUND => break,
-                Err(error) => return Err(error),
-            };
-            let mut output_index = 0;
-            loop {
-                let output = match adapter.EnumOutputs(output_index) {
-                    Ok(output) => output,
-                    Err(error) if error.code() == DXGI_ERROR_NOT_FOUND => break,
-                    Err(error) => return Err(error),
-                };
-                let output: IDXGIOutput6 = output.cast()?;
-                let desc = output.GetDesc1()?;
-                if desc.AttachedToDesktop.as_bool()
-                    && desc.ColorSpace != Common::DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709
-                {
-                    return Err(fail(
-                        "当前显示器使用 HDR 或高级色彩模式；SDR 色彩兼容路径尚未验证，已停止截图以避免错误颜色。",
-                    ));
-                }
-                output_index += 1;
-            }
-            adapter_index += 1;
-        }
-    }
-    Ok(())
-}
-
-unsafe extern "system" fn enumerate(
-    monitor: HMONITOR,
-    _: HDC,
-    rect: *mut RECT,
-    data: LPARAM,
-) -> BOOL {
-    // SAFETY: EnumDisplayMonitors supplies a valid RECT and the caller's exclusive Vec pointer.
-    unsafe {
-        let r = *rect;
-        let screens = &mut *(data.0 as *mut Vec<(HMONITOR, PixelRect)>);
-        // Avoid allocation panic crossing the Win32 callback boundary.
-        if screens.try_reserve(1).is_err() {
-            return FALSE;
-        }
-        screens.push((
-            monitor,
-            PixelRect {
-                left: r.left,
-                top: r.top,
-                right: r.right,
-                bottom: r.bottom,
-            },
-        ));
-    }
-    TRUE
 }
