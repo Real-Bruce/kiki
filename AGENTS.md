@@ -1,4 +1,4 @@
-# iCapture 工作约定
+# kiki 工作约定
 
 本文件约束在此仓库中工作的编码代理。用户已确认产品方案和视觉方向，后续任务是实施 Windows 11 首版。
 
@@ -11,7 +11,7 @@
 
 ## 产品与技术约束
 
-- 产品：iCapture；首版为 Windows 11 x64、ZIP 免安装桌面应用。
+- 产品：kiki；首版为 Windows 11 x64、ZIP 免安装桌面应用。
 - 应用实现语言必须为 Rust，使用 Rust 2024 edition 和经过验证的 stable 工具链。界面文案、交接文档和用户沟通使用简体中文，代码标识符使用英文。
 - 使用 Win32、Direct2D、DirectWrite、WIC 等 Windows 原生能力，通过 windows-rs 接入。核心逻辑与平台实现隔离。
 - 不得自行改用 Electron、Tauri、WebView、HTML/CSS 界面、Qt、WPF、WinUI 或其他大型 GUI 框架。改变技术栈须先提出具体理由并取得用户同意。

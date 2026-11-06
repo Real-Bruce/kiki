@@ -1,4 +1,4 @@
-# iCapture
+# kiki
 
 面向 Windows 11 的轻量截图、标注与置顶贴图工具。使用 Rust 原生实现，优先控制体积、响应速度与后台资源占用。
 
@@ -15,9 +15,9 @@ cargo test --workspace
 cargo build --release
 ```
 
-构建结果为 `target/x86_64-pc-windows-msvc/release/icapture.exe`。运行后驻留托盘，Ctrl+Alt+A 或托盘开始截图打开冻结桌面选区；拖动框选，内部拖动移动，调整点改变尺寸，F 选择鼠标所在屏幕，Esc 取消操作或会话。当前工具条仅选择和取消接通，其他按钮暂时禁用。`--capture` 可在首次启动时直接捕获，`--theme=light` / `--theme=dark` 可选择本阶段主题。
+构建结果为 `target/x86_64-pc-windows-msvc/release/kiki.exe`。运行后驻留托盘，Ctrl+Alt+A 或托盘开始截图打开冻结桌面选区；拖动框选，内部拖动移动，调整点改变尺寸，F 选择鼠标所在屏幕，Esc 取消操作或会话。当前工具条仅选择和取消接通，其他按钮暂时禁用。`--capture` 可在首次启动时直接捕获，`--theme=light` / `--theme=dark` 可选择本阶段主题。
 
-开发探针须用 `cargo build --release --features diagnostics` 单独编译，默认构建不包含它们：`icapture.exe --probe artifacts/p1` 写入真实桌面 PNG 与捕获耗时；`icapture.exe --stress artifacts/p1/stress` 执行 100 次捕获、释放及资源采样；`scripts/Measure-Startup.ps1` 采集 30 次独立进程启动到热键和托盘就绪时间。仅显式调用时运行，结果目录不入库。探针会包含真实屏幕内容，请勿将其作为公开测试数据提交。完成后用默认 `cargo build --release` 恢复不含探针的程序。
+开发探针须用 `cargo build --release --features diagnostics` 单独编译，默认构建不包含它们：`kiki.exe --probe artifacts/p1` 写入真实桌面 PNG 与捕获耗时；`kiki.exe --stress artifacts/p1/stress` 执行 100 次捕获、释放及资源采样；`scripts/Measure-Startup.ps1` 采集 30 次独立进程启动到热键和托盘就绪时间。仅显式调用时运行，结果目录不入库。探针会包含真实屏幕内容，请勿将其作为公开测试数据提交。完成后用默认 `cargo build --release` 恢复不含探针的程序。
 
 当前验证结果和缺项见 [P1](docs/validation/P1.md)、[P2](docs/validation/P2.md)、[P3](docs/validation/P3.md) 验证报告。`--probe` 还输出中心裁剪 PNG；开发构建的 `--cancel-stress` 验证 100 次实际取消及同进程恢复。电脑操作工具需要时，可在 diagnostics 构建显式使用 `--accessible-capture` 枚举同一画布；默认构建保留 ToolWindow 样式。最终标注、输出操作、贴图、设置、完整主题体验及 ZIP 交付尚待后续阶段。
 

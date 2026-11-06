@@ -9,3 +9,5 @@
 `build.rs` 使用已有 Windows SDK 的资源编译器将 `resources/app.rc` 编译并链接到 EXE，不新增 Cargo 依赖或运行依赖。优先使用 `RC` 指定路径，其次 PATH、Windows SDK 环境变量和标准安装目录。非标准 SDK 安装可设置 `RC` 为 `rc.exe` 的完整路径。
 
 平台图标模块从 EXE 资源加载系统尺寸图标，供托盘和窗口类使用。共享图标由 Windows 管理，不调用 `DestroyIcon`。分发程序无需携带外部 ICO。
+
+仓库内图标现命名为 `resources/icons/kiki.ico`；仅更名，内容及上述 SHA-256 保持一致。

@@ -1,6 +1,16 @@
-# iCapture 实施进度
+# kiki 实施进度
 
 更新时间：2026-11-06
+
+## 用户追加：统一更名为 kiki
+
+- 按用户要求将产品名称、Cargo 包与 EXE、窗口类、托盘提示、单实例标识、manifest、资源文件名、开发脚本及当前规格统一为 `kiki`。
+- 仓库目标目录为 `F:\codespace\vibecode\kiki`；原目录被其他进程占用导致直接 Rename-Item 失败，采用同卷完整迁移仓库内容（包含 `.git`、忽略的本地证据和已有未提交修改）。迁移后已确认旧路径没有任何文件，仅残留被其他进程占用的空目录树；请从新目录重新打开项目。Git fsck 完整性检查通过，未删除原有悬空对象。
+- 四张批准设计 PNG 保留原始评审版本；图标仅改名为 `resources/icons/kiki.ico`，SHA-256 与来源记录一致。原始图中的 iCapture 和图标来源压缩包名称属于历史资料。
+- 更名后实际通过 fmt、all-features 严格 Clippy、14 项 all-features 测试与默认 Release 构建，产物为 `target/x86_64-pc-windows-msvc/release/kiki.exe`。首次 Release 构建遇到沙箱临时目录归档更名拒绝访问，改用仓库内忽略的 `artifacts/build-tmp` 后成功。
+- 本轮只做命名与路径调整，未执行新的 GUI 验收；P2/P3 原有验收遗留和后续阶段状态不变。
+- 开始时 `src/main.rs` 和 `src/platform/windows/mod.rs` 已有未提交错误处理修复，保留且不纳入本次更名提交。
+- 关联提交主题：chore(project): rename project to kiki。当前无远端配置，本轮未创建远端或推送。
 
 ## 用户追加：应用图标
 

@@ -121,7 +121,7 @@ pub fn show_error(message: &str) {
         MessageBoxW(
             None,
             windows::core::PCWSTR(text.as_ptr()),
-            w!("iCapture"),
+            w!("kiki"),
             MB_OK | MB_ICONERROR,
         );
     }
@@ -178,7 +178,7 @@ pub fn run() -> Result<()> {
     }
     // SAFETY: window/tray APIs run on the main thread; pointers below are call-scoped.
     unsafe {
-        let mutex = CreateMutexW(None, false, w!("Local\\iCapture.WindowsV1"))?;
+        let mutex = CreateMutexW(None, false, w!("Local\\kiki.WindowsV1"))?;
         let _instance = Instance(mutex);
         if GetLastError() == ERROR_ALREADY_EXISTS {
             return Ok(());
@@ -188,7 +188,7 @@ pub fn run() -> Result<()> {
             lpfnWndProc: Some(window_proc),
             hInstance: module.into(),
             hIcon: icon::application(module.into(), false)?,
-            lpszClassName: w!("iCapture.Tray"),
+            lpszClassName: w!("kiki.Tray"),
             ..Default::default()
         };
         if RegisterClassW(&class) == 0 {
@@ -197,7 +197,7 @@ pub fn run() -> Result<()> {
         let hwnd = CreateWindowExW(
             WINDOW_EX_STYLE::default(),
             class.lpszClassName,
-            w!("iCapture"),
+            w!("kiki"),
             WS_OVERLAPPED,
             0,
             0,
@@ -221,7 +221,7 @@ pub fn run() -> Result<()> {
         for (dst, src) in data
             .szTip
             .iter_mut()
-            .zip("iCapture · Ctrl+Alt+A".encode_utf16())
+            .zip("kiki · Ctrl+Alt+A".encode_utf16())
         {
             *dst = src;
         }

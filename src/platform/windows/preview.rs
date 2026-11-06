@@ -43,8 +43,8 @@ impl Preview {
                 } else {
                     WS_EX_TOPMOST | WS_EX_TOOLWINDOW
                 },
-                w!("iCapture.Preview"),
-                w!("iCapture 截图"),
+                w!("kiki.Preview"),
+                w!("kiki 截图"),
                 WS_POPUP,
                 bounds.left,
                 bounds.top,
@@ -153,7 +153,7 @@ pub fn register(instance: HINSTANCE) -> Result<()> {
             lpfnWndProc: Some(proc),
             hInstance: instance,
             hIcon: super::icon::application(instance, false)?,
-            lpszClassName: w!("iCapture.Preview"),
+            lpszClassName: w!("kiki.Preview"),
             hCursor: LoadCursorW(None, IDC_CROSS)?,
             ..Default::default()
         };

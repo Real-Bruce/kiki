@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "icapture"
+name = "kiki"
 version = "0.1.0"
 dependencies = [
  "windows",

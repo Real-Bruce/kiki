@@ -1,5 +1,5 @@
 param(
-    [string]$Executable = 'target/x86_64-pc-windows-msvc/release/icapture.exe',
+    [string]$Executable = 'target/x86_64-pc-windows-msvc/release/kiki.exe',
     [string]$OutputDirectory = ('artifacts/performance/startup-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 )
 $ErrorActionPreference = 'Stop'
@@ -16,7 +16,7 @@ for ($index = 1; $index -le 30; $index++) {
     $trial = Start-Process -FilePath $resolvedExecutable -ArgumentList '--startup-probe',('"' + $sampleDirectory + '"') -WindowStyle Hidden -PassThru
     if (-not $trial.WaitForExit(5000)) {
         if ($trial.Path -eq $resolvedExecutable) { Stop-Process -Id $trial.Id }
-        throw "第 $index 次启动超时；保留失败目录，不将其计为有效样本。请确认构建启用了 diagnostics 且没有另一 iCapture 实例。"
+        throw "第 $index 次启动超时；保留失败目录，不将其计为有效样本。请确认构建启用了 diagnostics 且没有另一 kiki 实例。"
     }
     $sampleFile = Join-Path $sampleDirectory 'startup.csv'
     if ($trial.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $sampleFile)) {

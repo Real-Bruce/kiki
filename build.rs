@@ -2,7 +2,7 @@ use std::{env, error::Error, path::PathBuf, process::Command};
 
 fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=resources/app.rc");
-    println!("cargo:rerun-if-changed=resources/icons/iCapture.ico");
+    println!("cargo:rerun-if-changed=resources/icons/kiki.ico");
     for name in [
         "RC",
         "WindowsSdkDir",
@@ -15,7 +15,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
     let output =
-        PathBuf::from(env::var_os("OUT_DIR").ok_or("缺少 Cargo OUT_DIR")?).join("icapture.res");
+        PathBuf::from(env::var_os("OUT_DIR").ok_or("缺少 Cargo OUT_DIR")?).join("kiki.res");
     let compiler = resource_compiler()?;
     let status = Command::new(compiler)
         .args(["/nologo", "/fo"])

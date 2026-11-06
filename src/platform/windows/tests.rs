@@ -101,14 +101,14 @@ fn native_failure_paths_release_state_and_allow_retry() {
                 let class = WNDCLASSW {
                     lpfnWndProc: Some(window_proc),
                     hInstance: module.into(),
-                    lpszClassName: w!("iCapture.FailureTest"),
+                    lpszClassName: w!("kiki.FailureTest"),
                     ..Default::default()
                 };
                 assert_ne!(RegisterClassW(&class), 0);
                 let hwnd = CreateWindowExW(
                     WINDOW_EX_STYLE::default(),
                     class.lpszClassName,
-                    w!("iCapture 测试窗口"),
+                    w!("kiki 测试窗口"),
                     WS_OVERLAPPED,
                     0,
                     0,

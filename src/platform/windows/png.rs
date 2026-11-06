@@ -53,8 +53,7 @@ mod tests {
 
     #[test]
     fn wic_png_roundtrip_preserves_size_bgra_and_transparent_gap() {
-        let directory =
-            std::env::temp_dir().join(format!("icapture-wic-test-{}", std::process::id()));
+        let directory = std::env::temp_dir().join(format!("kiki-wic-test-{}", std::process::id()));
         std::fs::create_dir_all(&directory).unwrap();
         let file = directory.join("roundtrip.png");
         let mut image = Image::new(PixelRect {
