@@ -52,9 +52,10 @@ impl Drop for CaptureGuard {
 
 pub struct CaptureResult {
     pub image: Image,
+    #[cfg(feature = "diagnostics")]
     pub elapsed: Duration,
-    pub monitors: usize,
     pub screens: Vec<crate::core::display::DisplayInfo>,
+    pub windows: Vec<PixelRect>,
 }
 
 #[cfg(feature = "diagnostics")]
@@ -84,6 +85,7 @@ pub fn cancel_after_start() -> Result<()> {
 }
 
 fn desktop_inner(cancel: &AtomicBool, on_started: impl FnOnce()) -> Result<CaptureResult> {
+    #[cfg(feature = "diagnostics")]
     let start = Instant::now();
     let mut on_started = Some(on_started);
     check_cancel(cancel)?;
@@ -93,6 +95,7 @@ fn desktop_inner(cancel: &AtomicBool, on_started: impl FnOnce()) -> Result<Captu
     }
     let _apartment = Apartment;
     let screens = display::enumerate()?;
+    let windows = super::window_targets::enumerate()?;
     for screen in &screens {
         if screen.info.color != crate::core::display::ColorMode::Sdr {
             return Err(fail(
@@ -257,8 +260,9 @@ fn desktop_inner(cancel: &AtomicBool, on_started: impl FnOnce()) -> Result<Captu
     }
     Ok(CaptureResult {
         image,
+        #[cfg(feature = "diagnostics")]
         elapsed: start.elapsed(),
-        monitors: screens.len(),
         screens: screens.into_iter().map(|screen| screen.info).collect(),
+        windows,
     })
 }

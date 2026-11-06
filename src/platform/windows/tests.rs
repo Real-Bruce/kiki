@@ -53,9 +53,10 @@ pub(super) fn late_frame(cancel: &AtomicBool) -> Result<capture::CaptureResult> 
     .map_err(|e| Error::new(E_FAIL, e))?;
     Ok(capture::CaptureResult {
         image,
+        #[cfg(feature = "diagnostics")]
         elapsed: Duration::ZERO,
-        monitors: 0,
         screens: Vec::new(),
+        windows: Vec::new(),
     })
 }
 

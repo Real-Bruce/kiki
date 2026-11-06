@@ -1,4 +1,5 @@
 pub mod display;
 pub mod geometry;
 pub mod image;
+pub mod selection;
 pub mod session;

@@ -1,17 +1,20 @@
-//! P1 diagnostic surface; not the final capture editor.
-use super::capture::CaptureResult;
+//! Native frozen-desktop selection window. Annotation/output controls are staged for P4/P5.
+use super::{
+    capture::CaptureResult,
+    selection_render::{Canvas, system_dark},
+};
+use crate::core::{
+    display::DisplayInfo,
+    geometry::PixelRect,
+    selection::{PixelPoint, Selection, contains},
+};
 use std::{cell::Cell, rc::Rc};
 use windows::{
     Win32::{
         Foundation::*,
-        Graphics::{
-            Direct2D::{Common::*, *},
-            DirectWrite::*,
-            Dxgi::Common::*,
-            Gdi::*,
-        },
+        Graphics::Gdi::*,
         System::LibraryLoader::GetModuleHandleW,
-        UI::{HiDpi::GetDpiForWindow, WindowsAndMessaging::*},
+        UI::{Input::KeyboardAndMouse::*, WindowsAndMessaging::*},
     },
     core::{Error, Result, w},
 };
@@ -22,54 +25,74 @@ impl Preview {
         self.0.get().is_some()
     }
     pub fn open(capture: CaptureResult) -> Result<Self> {
-        // SAFETY: UI-thread only; Box ownership transfers to the window after resource creation.
+        let bounds = capture.image.bounds();
+        let (width, height) = bounds
+            .size()
+            .ok_or_else(|| Error::new(E_FAIL, "无效截图范围"))?;
+        let width = i32::try_from(width).map_err(|_| Error::new(E_FAIL, "截图画布过宽"))?;
+        let height = i32::try_from(height).map_err(|_| Error::new(E_FAIL, "截图画布过高"))?;
+        // SAFETY: UI thread creates and owns this popup. The window takes the Box only after initialization succeeds.
         unsafe {
+            #[cfg(feature = "diagnostics")]
+            let accessible = std::env::args_os().any(|a| a == "--accessible-capture");
+            #[cfg(not(feature = "diagnostics"))]
+            let accessible = false;
             let hwnd = CreateWindowExW(
-                WINDOW_EX_STYLE::default(),
+                if accessible {
+                    WS_EX_TOPMOST
+                } else {
+                    WS_EX_TOPMOST | WS_EX_TOOLWINDOW
+                },
                 w!("iCapture.Preview"),
-                w!("iCapture · P1 捕获与中文输入验证（非最终编辑器）"),
-                WS_OVERLAPPEDWINDOW,
-                CW_USEDEFAULT,
-                CW_USEDEFAULT,
-                1000,
-                720,
+                w!("iCapture 截图"),
+                WS_POPUP,
+                bounds.left,
+                bounds.top,
+                width,
+                height,
                 None,
                 None,
                 Some(GetModuleHandleW(None)?.into()),
                 None,
             )?;
             let lifetime = Rc::new(Cell::new(Some(hwnd)));
-            let result = Surface::new(hwnd, capture, lifetime.clone());
-            let surface = match result {
-                Ok(surface) => surface,
-                Err(error) => {
-                    let _ = DestroyWindow(hwnd);
-                    return Err(error);
-                }
+            let owner = Self(lifetime.clone());
+            let canvas = Canvas::new(hwnd, capture.image)?;
+            let state = State {
+                lifetime,
+                canvas,
+                selection: Selection::new(bounds),
+                screens: capture.screens,
+                windows: capture.windows,
+                pointer: position().unwrap_or(PixelPoint {
+                    x: bounds.left,
+                    y: bounds.top,
+                }),
+                hover: None,
+                pressed_window: None,
+                down_button: None,
+                focus: usize::MAX,
             };
-            SetWindowLongPtrW(
-                hwnd,
-                GWLP_USERDATA,
-                Box::into_raw(Box::new(surface)) as isize,
-            );
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(Box::new(state)) as isize);
             let _ = ShowWindow(hwnd, SW_SHOW);
             SetWindowPos(
                 hwnd,
-                None,
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW,
+                Some(HWND_TOPMOST),
+                bounds.left,
+                bounds.top,
+                width,
+                height,
+                SWP_SHOWWINDOW,
             )?;
             let _ = SetForegroundWindow(hwnd);
-            Ok(Self(lifetime))
+            let _ = SetFocus(Some(hwnd));
+            Ok(owner)
         }
     }
 }
 impl Drop for Preview {
     fn drop(&mut self) {
-        // SAFETY: Preview is UI-thread-owned; a previously closed window is ignored.
+        // SAFETY: NCDESTROY clears the UI-thread lifetime cell before the HWND may be reused.
         unsafe {
             if let Some(hwnd) = self.0.get() {
                 let _ = DestroyWindow(hwnd);
@@ -77,187 +100,56 @@ impl Drop for Preview {
         }
     }
 }
-
-struct Surface {
+struct State {
     lifetime: Rc<Cell<Option<HWND>>>,
-    target: ID2D1HwndRenderTarget,
-    bitmap: ID2D1Bitmap,
-    text: IDWriteTextFormat,
-    brush: ID2D1SolidColorBrush,
-    edit: HWND,
-    status: Vec<u16>,
+    canvas: Canvas,
+    selection: Selection,
+    screens: Vec<DisplayInfo>,
+    windows: Vec<PixelRect>,
+    pointer: PixelPoint,
+    hover: Option<PixelRect>,
+    pressed_window: Option<PixelRect>,
+    down_button: Option<usize>,
+    focus: usize,
 }
-impl Surface {
-    fn new(hwnd: HWND, capture: CaptureResult, lifetime: Rc<Cell<Option<HWND>>>) -> Result<Self> {
-        // SAFETY: all COM objects remain on this UI thread; bitmap data copied during CreateBitmap.
-        unsafe {
-            let factory: ID2D1Factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
-            let target = factory.CreateHwndRenderTarget(
-                &D2D1_RENDER_TARGET_PROPERTIES {
-                    dpiX: 96.,
-                    dpiY: 96.,
-                    ..Default::default()
-                },
-                &D2D1_HWND_RENDER_TARGET_PROPERTIES {
-                    hwnd,
-                    pixelSize: D2D_SIZE_U {
-                        width: 1000,
-                        height: 720,
-                    },
-                    presentOptions: D2D1_PRESENT_OPTIONS_NONE,
-                },
-            )?;
-            let (width, height) = capture
-                .image
-                .bounds()
-                .size()
-                .ok_or_else(|| Error::new(E_FAIL, "无效图像"))?;
-            let bitmap = target.CreateBitmap(
-                D2D_SIZE_U { width, height },
-                Some(capture.image.pixels().as_ptr().cast()),
-                capture.image.stride(),
-                &D2D1_BITMAP_PROPERTIES {
-                    pixelFormat: D2D1_PIXEL_FORMAT {
-                        format: DXGI_FORMAT_B8G8R8A8_UNORM,
-                        alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
-                    },
-                    dpiX: 96.,
-                    dpiY: 96.,
-                },
-            )?;
-            let dw: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
-            let text = dw.CreateTextFormat(
-                w!("Segoe UI"),
-                None,
-                DWRITE_FONT_WEIGHT_NORMAL,
-                DWRITE_FONT_STYLE_NORMAL,
-                DWRITE_FONT_STRETCH_NORMAL,
-                16.,
-                w!("zh-CN"),
-            )?;
-            let brush = target.CreateSolidColorBrush(
-                &D2D1_COLOR_F {
-                    r: 0.12,
-                    g: 0.15,
-                    b: 0.2,
-                    a: 1.,
-                },
-                None,
-            )?;
-            let edit = CreateWindowExW(
-                WS_EX_CLIENTEDGE,
-                w!("EDIT"),
-                w!("中文输入验证：可在这里输入多行文字"),
-                WS_CHILD
-                    | WS_VISIBLE
-                    | WS_TABSTOP
-                    | WS_VSCROLL
-                    | WINDOW_STYLE(
-                        ES_MULTILINE as u32 | ES_AUTOVSCROLL as u32 | ES_WANTRETURN as u32,
-                    ),
-                20,
-                590,
-                940,
-                70,
-                Some(hwnd),
-                None,
-                Some(GetModuleHandleW(None)?.into()),
-                None,
-            )?;
-            let status = format!(
-                "WGC · {} 屏 · {} × {} 物理像素 · {}% 缩放 · 首帧及读回 {:.1} ms",
-                capture.monitors,
-                width,
-                height,
-                capture
-                    .screens
-                    .first()
-                    .map_or(100, |screen| screen.scale_percent),
-                capture.elapsed.as_secs_f64() * 1000.
-            )
-            .encode_utf16()
-            .collect();
-            Ok(Self {
-                lifetime,
-                target,
-                bitmap,
-                text,
-                brush,
-                edit,
-                status,
+impl State {
+    fn window_at(&self, p: PixelPoint) -> Option<PixelRect> {
+        self.windows.iter().copied().find(|r| contains(*r, p))
+    }
+    fn button_at(&self, p: PixelPoint) -> Option<usize> {
+        self.selection
+            .rect
+            .filter(|_| !self.selection.active())
+            .and_then(|r| {
+                self.canvas
+                    .layout(r, &self.screens)
+                    .buttons
+                    .iter()
+                    .position(|b| contains(*b, p))
             })
-        }
     }
-    fn paint(&self, hwnd: HWND) -> Result<()> {
-        // SAFETY: render target and child HWND belong to this UI thread; all structs are initialized.
-        unsafe {
-            let mut rect = RECT::default();
-            GetClientRect(hwnd, &mut rect)?;
-            let scale = GetDpiForWindow(hwnd) as f32 / 96.;
-            self.target.Resize(&D2D_SIZE_U {
-                width: rect.right.max(1) as u32,
-                height: rect.bottom.max(1) as u32,
-            })?;
-            self.target.SetDpi(96. * scale, 96. * scale);
-            let width = rect.right as f32 / scale;
-            let height = rect.bottom as f32 / scale;
-            let _ = MoveWindow(
-                self.edit,
-                (20. * scale) as i32,
-                ((height - 90.) * scale) as i32,
-                ((width - 40.).max(1.) * scale) as i32,
-                (70. * scale) as i32,
-                true,
-            );
-            self.target.BeginDraw();
-            self.target.Clear(Some(&D2D1_COLOR_F {
-                r: 0.94,
-                g: 0.96,
-                b: 0.98,
-                a: 1.,
-            }));
-            self.target.DrawText(
-                &self.status,
-                &self.text,
-                &D2D_RECT_F {
-                    left: 20.,
-                    top: 16.,
-                    right: width - 20.,
-                    bottom: 64.,
-                },
-                &self.brush,
-                D2D1_DRAW_TEXT_OPTIONS_NONE,
-                DWRITE_MEASURING_MODE_NATURAL,
-            );
-            let size = self.bitmap.GetSize();
-            let ratio = ((width - 40.) / size.width)
-                .min((height - 180.) / size.height)
-                .max(0.01);
-            self.target.DrawBitmap(
-                &self.bitmap,
-                Some(&D2D_RECT_F {
-                    left: 20.,
-                    top: 70.,
-                    right: 20. + size.width * ratio,
-                    bottom: 70. + size.height * ratio,
-                }),
-                1.,
-                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
-                None,
-            );
-            self.target.EndDraw(None, None)
-        }
+    fn radius(&self) -> i32 {
+        self.screens
+            .iter()
+            .find(|s| contains(s.bounds, self.pointer))
+            .map_or(6, |s| (6 * s.scale_percent / 100).max(4))
     }
 }
-
+fn position() -> Option<PixelPoint> {
+    let mut p = POINT::default(); // SAFETY: call-scoped output pointer; PMv2 returns physical global desktop coordinates.
+    unsafe {
+        GetCursorPos(&mut p).ok()?;
+    }
+    Some(PixelPoint { x: p.x, y: p.y })
+}
 pub fn register(instance: HINSTANCE) -> Result<()> {
-    // SAFETY: class strings are static; callback is valid for the process lifetime.
+    // SAFETY: static class name/callback, system-owned cursor; all visible windows use the main UI thread.
     unsafe {
         let class = WNDCLASSW {
             lpfnWndProc: Some(proc),
             hInstance: instance,
             lpszClassName: w!("iCapture.Preview"),
-            hCursor: LoadCursorW(None, IDC_ARROW)?,
+            hCursor: LoadCursorW(None, IDC_CROSS)?,
             ..Default::default()
         };
         if RegisterClassW(&class) == 0 {
@@ -266,43 +158,164 @@ pub fn register(instance: HINSTANCE) -> Result<()> {
     }
     Ok(())
 }
-
 unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match std::panic::catch_unwind(|| dispatch(hwnd, msg, wp, lp)) {
-        Ok(result) => result,
+        Ok(value) => value,
         Err(_) => {
-            super::show_error("预览操作失败，请关闭后重新截图。");
+            super::show_error("选区操作失败，请取消后重新截图。");
             LRESULT(0)
         }
     }
 }
 fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
-    // SAFETY: userdata is the Box installed by open; cleared before it is reclaimed exactly once.
+    // SAFETY: userdata is this window's unique State Box. Each borrowed state is released before destroy/release-capture or error UI can reenter.
     unsafe {
-        let pointer = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut Surface;
+        let pointer = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut State;
+        if msg == WM_NCDESTROY && !pointer.is_null() {
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+            let state = Box::from_raw(pointer);
+            state.lifetime.set(None);
+            drop(state);
+            return DefWindowProcW(hwnd, msg, wp, lp);
+        }
+        if pointer.is_null() {
+            return DefWindowProcW(hwnd, msg, wp, lp);
+        }
         match msg {
-            WM_NCDESTROY if !pointer.is_null() => {
-                (*pointer).lifetime.set(None);
-                SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
-                drop(Box::from_raw(pointer));
-                DefWindowProcW(hwnd, msg, wp, lp)
-            }
-            WM_PAINT if !pointer.is_null() => {
+            WM_ERASEBKGND => LRESULT(1),
+            WM_PAINT => {
                 let mut ps = PAINTSTRUCT::default();
                 let _ = BeginPaint(hwnd, &mut ps);
-                let result = (*pointer).paint(hwnd);
+                let result = {
+                    let state = &mut *pointer;
+                    state.canvas.paint(
+                        &state.selection,
+                        state.hover,
+                        &state.screens,
+                        state.pointer,
+                        state.focus,
+                    )
+                };
                 let _ = EndPaint(hwnd, &ps);
-                if let Err(e) = result {
-                    super::show_error(&format!("预览绘制失败：{e}"));
+                if let Err(error) = result {
+                    super::show_error(&format!("选区绘制失败：{error}"));
                 }
                 LRESULT(0)
             }
-            WM_SIZE | WM_DPICHANGED => {
+            WM_MOUSEMOVE => {
+                {
+                    let state = &mut *pointer;
+                    state.pointer = position().unwrap_or(state.pointer);
+                    state.selection.update(state.pointer);
+                    state.hover = state.window_at(state.pointer);
+                }
                 let _ = InvalidateRect(Some(hwnd), None, false);
                 LRESULT(0)
             }
-            WM_KEYDOWN if wp.0 == 27 => {
-                let _ = DestroyWindow(hwnd);
+            WM_LBUTTONDOWN => {
+                {
+                    let state = &mut *pointer;
+                    state.pointer = position().unwrap_or(state.pointer);
+                    state.pressed_window = state.window_at(state.pointer);
+                    if let Some(button) = state.button_at(state.pointer) {
+                        state.down_button = Some(button);
+                        if button == 0 || button == 10 {
+                            state.focus = button;
+                        }
+                    } else {
+                        state.focus = usize::MAX;
+                        state.selection.begin(state.pointer, state.radius());
+                    }
+                }
+                SetCapture(hwnd);
+                let _ = InvalidateRect(Some(hwnd), None, false);
+                LRESULT(0)
+            }
+            WM_LBUTTONUP => {
+                let close = {
+                    let state = &mut *pointer;
+                    state.pointer = position().unwrap_or(state.pointer);
+                    if let Some(button) = state.down_button.take() {
+                        button == 10 && state.button_at(state.pointer) == Some(10)
+                    } else {
+                        state.selection.finish(state.pointer, state.pressed_window);
+                        false
+                    }
+                };
+                let _ = ReleaseCapture();
+                if close {
+                    let _ = DestroyWindow(hwnd);
+                } else {
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                }
+                LRESULT(0)
+            }
+            WM_CAPTURECHANGED => {
+                {
+                    let state = &mut *pointer;
+                    state.selection.cancel_drag();
+                    state.down_button = None;
+                }
+                let _ = InvalidateRect(Some(hwnd), None, false);
+                LRESULT(0)
+            }
+            WM_KEYDOWN => {
+                let mut release = false;
+                let close = {
+                    let state = &mut *pointer;
+                    match wp.0 as u32 {
+                        27 => {
+                            release = true;
+                            if state.down_button.take().is_some() {
+                                false
+                            } else {
+                                !state.selection.cancel_drag()
+                            }
+                        }
+                        70 => {
+                            state.pointer = position().unwrap_or(state.pointer);
+                            if let Some(screen) = state
+                                .screens
+                                .iter()
+                                .find(|s| contains(s.bounds, state.pointer))
+                            {
+                                state.selection.fullscreen(screen.bounds);
+                            }
+                            false
+                        }
+                        9 => {
+                            state.focus = if state.focus == 0 { 10 } else { 0 };
+                            false
+                        }
+                        13 | 32 => state.focus == 10,
+                        _ => false,
+                    }
+                };
+                if release {
+                    let _ = ReleaseCapture();
+                }
+                if close {
+                    let _ = DestroyWindow(hwnd);
+                } else {
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                }
+                LRESULT(0)
+            }
+            WM_SETCURSOR => {
+                let state = &*pointer;
+                let cursor = if state.button_at(state.pointer).is_some() {
+                    IDC_ARROW
+                } else {
+                    IDC_CROSS
+                };
+                if let Ok(cursor) = LoadCursorW(None, cursor) {
+                    SetCursor(Some(cursor));
+                }
+                LRESULT(1)
+            }
+            WM_SETTINGCHANGE | WM_THEMECHANGED => {
+                (*pointer).canvas.dark = system_dark();
+                let _ = InvalidateRect(Some(hwnd), None, false);
                 LRESULT(0)
             }
             _ => DefWindowProcW(hwnd, msg, wp, lp),

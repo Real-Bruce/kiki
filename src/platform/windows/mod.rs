@@ -6,8 +6,10 @@ mod display;
 mod png;
 mod preview;
 mod runtime;
+mod selection_render;
 #[cfg(test)]
 mod tests;
+mod window_targets;
 
 use crate::core::session::{SessionGate, SessionId};
 use std::{
@@ -165,7 +167,7 @@ pub fn run() -> Result<()> {
             format!(
                 "WGC首帧及读回合计: {:?}\n显示器: {}\n范围: {:?}\n屏幕信息: {:#?}\n",
                 result.elapsed,
-                result.monitors,
+                result.screens.len(),
                 result.image.bounds(),
                 result.screens
             ),
