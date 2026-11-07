@@ -1,9 +1,14 @@
-//! One explicit D3D/D2D resource domain shared by the pinned windows on this UI thread.
+//! One explicit D3D/D2D resource domain shared by preview, settings and pinned windows.
 use std::{cell::RefCell, rc::Rc};
 use windows::{
     Win32::{
         Foundation::*,
-        Graphics::{Direct2D::*, Direct3D::*, Direct3D11::*, Dxgi::*},
+        Graphics::{
+            Direct2D::{Common::*, *},
+            Direct3D::*,
+            Direct3D11::*,
+            Dxgi::*,
+        },
         System::LibraryLoader::GetModuleHandleW,
         UI::WindowsAndMessaging::*,
     },
@@ -72,8 +77,11 @@ pub fn get() -> Result<Rc<Device>> {
 pub fn idle() {
     DEVICE.with_borrow(|slot| {
         if let Some(device) = slot {
+            if Rc::strong_count(device) != 1 {
+                return;
+            }
             device.release_caches();
-            // SAFETY: owning message-only HWND schedules one cleanup after pending GPU work completes.
+            // SAFETY: owning message-only HWND schedules one cache cleanup after pending GPU work completes.
             unsafe {
                 let _ = SetTimer(Some(device.cleanup), 1, 200, None);
             }
@@ -169,5 +177,74 @@ unsafe extern "system" fn cleanup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPA
             return LRESULT(0);
         }
         DefWindowProcW(hwnd, msg, wp, lp)
+    }
+}
+
+pub(super) fn bind(
+    context: &ID2D1DeviceContext,
+    swap: &windows::Win32::Graphics::Dxgi::IDXGISwapChain1,
+) -> Result<()> {
+    // SAFETY: buffer zero belongs to this live swap chain; context retains its bitmap until resize or drop.
+    unsafe {
+        let surface: windows::Win32::Graphics::Dxgi::IDXGISurface = swap.GetBuffer(0)?;
+        let bitmap = context.CreateBitmapFromDxgiSurface(
+            &surface,
+            Some(&D2D1_BITMAP_PROPERTIES1 {
+                pixelFormat: D2D1_PIXEL_FORMAT {
+                    format: windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM,
+                    alphaMode: D2D1_ALPHA_MODE_IGNORE,
+                },
+                dpiX: 96.,
+                dpiY: 96.,
+                bitmapOptions: D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+                ..Default::default()
+            }),
+        )?;
+        context.SetTarget(&bitmap);
+        Ok(())
+    }
+}
+
+impl Device {
+    /// Create an independent HWND surface while sharing the bounded device caches.
+    pub fn surface(
+        &self,
+        hwnd: HWND,
+        width: u32,
+        height: u32,
+    ) -> Result<(ID2D1DeviceContext, IDXGISwapChain1)> {
+        // SAFETY: this device and live HWND belong to the calling UI thread; the context retains the back buffer until detach/drop.
+        unsafe {
+            use windows::Win32::Graphics::Dxgi::Common::*;
+            let context = self
+                .d2d
+                .CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE)?;
+            context.SetDpi(96., 96.);
+            let swap = self.factory.CreateSwapChainForHwnd(
+                &self.d3d,
+                hwnd,
+                &DXGI_SWAP_CHAIN_DESC1 {
+                    Width: width.max(1),
+                    Height: height.max(1),
+                    Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                    SampleDesc: DXGI_SAMPLE_DESC {
+                        Count: 1,
+                        Quality: 0,
+                    },
+                    BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
+                    BufferCount: 2,
+                    Scaling: DXGI_SCALING_STRETCH,
+                    SwapEffect: DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
+                    AlphaMode: DXGI_ALPHA_MODE_IGNORE,
+                    ..Default::default()
+                },
+                None,
+                None,
+            )?;
+            self.factory
+                .MakeWindowAssociation(hwnd, DXGI_MWA_NO_WINDOW_CHANGES | DXGI_MWA_NO_ALT_ENTER)?;
+            bind(&context, &swap)?;
+            Ok((context, swap))
+        }
     }
 }

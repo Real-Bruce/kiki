@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.88"
 
 [features]
-diagnostics = ["windows/Win32_System_ProcessStatus", "windows/Win32_System_SystemInformation"]
+diagnostics = ["windows/Win32_System_ProcessStatus", "windows/Win32_System_SystemInformation", "windows/Win32_System_Diagnostics_ToolHelp"]
 
 [dependencies]
 windows-numerics = "=0.2.0"

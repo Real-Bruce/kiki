@@ -57,7 +57,7 @@ impl Preview {
                 },
                 w!("kiki.Preview"),
                 w!("kiki 截图"),
-                WS_POPUP,
+                WS_POPUP | WS_CLIPCHILDREN,
                 bounds.left,
                 bounds.top,
                 width,
@@ -69,6 +69,12 @@ impl Preview {
             )?;
             let lifetime = Rc::new(Cell::new(Some(hwnd)));
             let owner = Self(lifetime.clone());
+            // Non-text surfaces handle command keys; text composition belongs exclusively to the native EDIT.
+            let _ = windows::Win32::UI::Input::Ime::ImmAssociateContextEx(
+                hwnd,
+                windows::Win32::UI::Input::Ime::HIMC::default(),
+                0,
+            );
             let canvas = Canvas::new(hwnd, capture.image)?;
             let mut selection = Selection::new(bounds);
             if screen {
@@ -331,6 +337,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             let state = Box::from_raw(pointer);
             state.lifetime.set(None);
             drop(state);
+            super::pinned_device::idle();
             return DefWindowProcW(hwnd, msg, wp, lp);
         }
         if pointer.is_null() {
@@ -1020,6 +1027,44 @@ fn begin_output(hwnd: HWND, pointer: *mut State) -> Result<()> {
         let _ = InvalidateRect(Some(hwnd), None, false);
     }
     Ok(())
+}
+
+#[cfg(feature = "diagnostics")]
+pub(super) fn performance_display(hwnd: HWND) -> Result<String> {
+    // SAFETY: the owning App provided this live UI-thread Preview; no window calls or callbacks while reading.
+    unsafe {
+        let p = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const State;
+        if p.is_null() {
+            return Err(Error::new(E_FAIL, "画布已关闭"));
+        }
+        Ok(format!(
+            "Desktop: {:?}\nDisplays: {:#?}\n",
+            (*p).canvas.bounds(),
+            (*p).screens
+        ))
+    }
+}
+
+/// Drives the ordinary cancel / asynchronous composition-to-pin path in explicit performance probes.
+#[cfg(feature = "diagnostics")]
+pub(super) fn performance_finish(hwnd: HWND, pin: bool) -> Result<()> {
+    // SAFETY: the diagnostic UI thread receives this live Preview HWND from its owning App.
+    unsafe {
+        let pointer = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut State;
+        if pointer.is_null() {
+            return Err(Error::new(E_FAIL, "性能采样画布已关闭"));
+        }
+        if pin {
+            (*pointer).selection.rect = Some((*pointer).canvas.bounds());
+            let (_, editor) = super::composition::fixture()?;
+            (*pointer).editor = editor;
+            (*pointer).pending_output = Some(7);
+            begin_output(hwnd, pointer)
+        } else {
+            SendMessageW(hwnd, WM_KEYDOWN, Some(WPARAM(VK_ESCAPE.0 as usize)), None);
+            Ok(())
+        }
+    }
 }
 
 #[cfg(test)]

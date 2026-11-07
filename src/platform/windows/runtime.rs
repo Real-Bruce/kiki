@@ -39,6 +39,8 @@ impl Runtime {
 }
 impl Drop for Runtime {
     fn drop(&mut self) {
+        // All UI/worker guards have dropped; release the shared device before COM.
+        super::pinned_device::shutdown();
         self.factory = None;
         // SAFETY: all UI objects and joined capture workers are released before this guard.
         unsafe {

@@ -6,6 +6,7 @@ use super::{
 use crate::core::config::{Config, Theme};
 use std::{cell::RefCell, path::PathBuf};
 use windows::{
+    UI::ViewManagement::{UIColorType, UISettings},
     Win32::{Foundation::*, UI::WindowsAndMessaging::*},
     core::{Error, Result},
 };
@@ -28,6 +29,7 @@ struct Session {
     writer: Writer,
     registration: Registration,
     owner: HWND,
+    system_theme: Option<UISettings>,
 }
 thread_local! {static SESSION:RefCell<Option<Session>>=const{RefCell::new(None)};}
 pub struct Guard;
@@ -71,6 +73,7 @@ pub(super) fn initialize_at(owner: HWND, path: PathBuf) -> Result<(Guard, Option
             writer,
             registration,
             owner,
+            system_theme: None,
         })
     });
     Ok((Guard, warning))
@@ -80,6 +83,28 @@ pub fn current() -> Config {
 }
 pub fn theme() -> Option<Theme> {
     SESSION.with_borrow(|slot| slot.as_ref().map(|s| s.config.theme))
+}
+/// Reuse the UI-thread provider, but read its live value on every theme refresh.
+pub fn system_is_dark() -> bool {
+    let provider = SESSION.with_borrow(|slot| slot.as_ref().and_then(|s| s.system_theme.clone()));
+    let provider = match provider {
+        Some(provider) => provider,
+        None => {
+            let Ok(provider) = UISettings::new() else {
+                return false;
+            };
+            // COM activation and reads happen outside the preference borrow: either can dispatch native messages.
+            SESSION.with_borrow_mut(|slot| {
+                if let Some(session) = slot {
+                    session.system_theme.get_or_insert_with(|| provider.clone());
+                }
+            });
+            provider
+        }
+    };
+    provider
+        .GetColorValue(UIColorType::Background)
+        .is_ok_and(|c| u32::from(c.R) + u32::from(c.G) + u32::from(c.B) < 384)
 }
 pub fn hints() -> bool {
     SESSION.with_borrow(|slot| slot.as_ref().is_none_or(|s| s.config.show_hints))

@@ -2,7 +2,7 @@
 
 面向 Windows 11 的轻量截图、标注与置顶贴图工具。使用 Rust 原生实现，优先控制体积、响应速度与后台资源占用。
 
-当前状态：已建立 Rust 原生 Windows 工程，P5 输出与贴图已完成单屏 SDR 验收，P6 配置与热键基础验证已开始，P2/P3 仍有待验收项；P3 按用户要求暂缓。当前程序提供托盘、热键、WGC 捕获和原生选区工具条；已接通矩形、箭头、画笔和文字标注，已接通复制和 PNG 保存，多张贴图已接通，不作为 v0.1.0 成品分发。
+当前状态：P5 输出与贴图、P6 设置与主题已完成本机单屏 SDR 验收；P7 正在进行性能、生命周期和真实 GUI 回归。截图、四类标注、撤销重做、复制 / PNG / 多张贴图、六页设置均已接入。使用后的闲置私有工作集与内核句柄尚未收口，跨环境矩阵和 P8 打包未完成，当前不作为 v0.1.0 成品分发。
 
 ## 开发与验证
 
@@ -19,7 +19,7 @@ cargo build --release
 
 开发探针须用 `cargo build --release --features diagnostics` 单独编译，默认构建不包含它们：`kiki.exe --probe artifacts/p1` 写入真实桌面 PNG 与捕获耗时；`kiki.exe --stress artifacts/p1/stress` 执行 100 次捕获、释放及资源采样；`scripts/Measure-Startup.ps1` 采集 30 次独立进程启动到热键和托盘就绪时间。仅显式调用时运行，结果目录不入库。探针会包含真实屏幕内容，请勿将其作为公开测试数据提交。完成后用默认 `cargo build --release` 恢复不含探针的程序。
 
-当前验证结果和缺项见 [P1](docs/validation/P1.md)、[P2](docs/validation/P2.md)、[P3](docs/validation/P3.md)、[P4](docs/validation/P4.md) 、[文字标注](docs/validation/P4_TEXT.md) 和 [P5 输出](docs/validation/P5.md) 验证报告。`--probe` 还输出中心裁剪 PNG；开发构建的 `--cancel-stress` 验证 100 次实际取消及同进程恢复。电脑操作工具需要时，可在 diagnostics 构建显式使用 `--accessible-capture` 枚举同一画布；默认构建保留 ToolWindow 样式。完整中文输入、多屏/HDR、更多应用兼容性、进一步资源优化、设置、完整主题体验及 ZIP 交付尚待后续阶段。
+当前验证结果和缺项见 [P1](docs/validation/P1.md)、[P2](docs/validation/P2.md)、[P3](docs/validation/P3.md)、[P4](docs/validation/P4.md) 、[文字标注](docs/validation/P4_TEXT.md) 和 [P5 输出](docs/validation/P5.md) 验证报告。`--probe` 还输出中心裁剪 PNG；开发构建的 `--cancel-stress` 验证 100 次实际取消及同进程恢复。电脑操作工具需要时，可在 diagnostics 构建显式使用 `--accessible-capture` 枚举同一画布；默认构建保留 ToolWindow 样式。完整输入法 / 高 DPI / 多屏 / HDR 矩阵、更多应用兼容性、资源优化及 ZIP 交付仍待完成。设置与手动主题切换已接入。
 
 开发构建可显式使用 `--trace-window-targets <文件路径>` 记录窗口类别、样式和边界，用于检查透明辅助层筛选；每次捕获覆盖该文件，不记录窗口标题或输入内容。
 
@@ -28,9 +28,11 @@ cargo build --release
 
 贴图支持拖动、滚轮缩放、Ctrl+0 恢复原比例、Ctrl+C 复制、Ctrl+S 保存、Esc 关闭。悬停显示复制/保存/关闭，右键提供相同操作及恢复原比例；托盘可关闭所有贴图。缩放只改变显示，输出保持原始图像尺寸。当前最多 64 张、累计原始图像 512 MiB，显示边长/面积另有上限；大图恢复 100% 受限时显示提示。已完成共享设备与缓存回收修正、Word 粘贴及原生失败恢复验收，见 [P5 完成记录](docs/validation/P5_COMPLETION.md)。多屏等原遗留与 P7 的资源指标继续单列。
 
-开发构建另提供 `--pin-demo`（两张明确测试图）、`--pin-stress <目录>`（十轮四张独立 4K 隐藏窗口绘制/关闭及 CPU/GPU 采样）、`--pin-4k-demo`（四张可见 4K 测试图），可加 `--pin-sample <目录>` 记录有界的可见窗口资源采样，普通构建不包含这些入口。
+开发构建另提供 `--pin-demo`（两张明确测试图）、`--pin-stress <目录>`（100 轮，每轮四张独立 4K 渐变图，隐藏窗口绘制/关闭及 CPU/GPU 采样）、`--pin-4k-demo`（四张可见 4K 测试图），可加 `--pin-sample <目录>` 记录有界的可见窗口资源采样，普通构建不包含这些入口。
 
-P6 当前基础模块与后续接入顺序见 [精简交接](docs/P6_HANDOFF.md) 和 [验证记录](docs/validation/P6.md)。设置窗口尚在实施。
+可从托盘或 `--settings` 打开设置；`--capture-screen` 可选择鼠标所在屏幕。设置包括热键冲突回滚、自动保存、主题 / 提示 / 默认样式与显式开机启动。配置位于当前用户 LocalAppData/kiki；开机启动默认关闭，仅在用户开启时写入。详见 [P6 验证](docs/validation/P6.md)。
+
+P7 的采样口径、性能数字和未通过项见 [验证报告](docs/validation/P7.md)。`scripts/Measure-Performance.ps1` 可分别采集 30 个进程首次截图、200 轮真实截图 / 取消 / 贴图 / 关闭和 60 秒闲置 CPU；`scripts/Measure-Idle.ps1` 可对指定进程读取外部闲置指标。时延探针是 diagnostics 构建的应用端基准，不能混称物理键盘全链路时延。
 
 ## 新会话执行入口
 

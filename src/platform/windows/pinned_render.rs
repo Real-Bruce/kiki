@@ -44,37 +44,10 @@ impl Canvas {
                 .bounds()
                 .size()
                 .ok_or_else(windows::core::Error::from_win32)?;
-            use windows::{Win32::Graphics::Dxgi::*, core::Interface};
+            use windows::core::Interface;
             let device = super::pinned_device::get()?;
-            let context = device
-                .d2d
-                .CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE)?;
-            context.SetDpi(96., 96.);
-            let swap = device.factory.CreateSwapChainForHwnd(
-                &device.d3d,
-                hwnd,
-                &DXGI_SWAP_CHAIN_DESC1 {
-                    Width: width.max(1) as u32,
-                    Height: height.max(1) as u32,
-                    Format: DXGI_FORMAT_B8G8R8A8_UNORM,
-                    SampleDesc: DXGI_SAMPLE_DESC {
-                        Count: 1,
-                        Quality: 0,
-                    },
-                    BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
-                    BufferCount: 2,
-                    Scaling: DXGI_SCALING_STRETCH,
-                    SwapEffect: DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
-                    AlphaMode: DXGI_ALPHA_MODE_IGNORE,
-                    ..Default::default()
-                },
-                None,
-                None,
-            )?;
-            device
-                .factory
-                .MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER)?;
-            bind(&context, &swap)?;
+            let (context, swap) =
+                device.surface(hwnd, width.max(1) as u32, height.max(1) as u32)?;
             let target: ID2D1RenderTarget = context.cast()?;
             let mut pixels = Vec::new();
             pixels
@@ -154,7 +127,7 @@ impl Canvas {
                 DXGI_FORMAT_B8G8R8A8_UNORM,
                 DXGI_SWAP_CHAIN_FLAG(0),
             )?;
-            bind(&self.context, &self.swap)
+            super::pinned_device::bind(&self.context, &self.swap)
         }
     }
     pub fn paint(
@@ -286,30 +259,6 @@ impl Drop for Canvas {
             self.context.SetTarget(None::<&ID2D1Image>);
             let _ = self.context.Flush(None, None);
         }
-    }
-}
-fn bind(
-    context: &ID2D1DeviceContext,
-    swap: &windows::Win32::Graphics::Dxgi::IDXGISwapChain1,
-) -> Result<()> {
-    // SAFETY: buffer zero belongs to this live swap chain; context retains its bitmap until resize or drop.
-    unsafe {
-        let surface: windows::Win32::Graphics::Dxgi::IDXGISurface = swap.GetBuffer(0)?;
-        let bitmap = context.CreateBitmapFromDxgiSurface(
-            &surface,
-            Some(&D2D1_BITMAP_PROPERTIES1 {
-                pixelFormat: D2D1_PIXEL_FORMAT {
-                    format: DXGI_FORMAT_B8G8R8A8_UNORM,
-                    alphaMode: D2D1_ALPHA_MODE_IGNORE,
-                },
-                dpiX: 96.,
-                dpiY: 96.,
-                bitmapOptions: D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
-                ..Default::default()
-            }),
-        )?;
-        context.SetTarget(&bitmap);
-        Ok(())
     }
 }
 fn color(v: f32, a: f32) -> D2D1_COLOR_F {

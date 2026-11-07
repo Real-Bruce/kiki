@@ -219,32 +219,40 @@ fn desktop_inner(cancel: &AtomicBool, on_started: impl FnOnce()) -> Result<Captu
                 let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
                 context.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))?;
                 let result = (|| {
-                    let mut screen = Image::new(*rect).map_err(|e| fail(&e))?;
+                    // Copy the mapped monitor directly into its physical desktop region.
+                    // No additional full-monitor CPU image is needed alongside the desktop buffer.
+                    let row_bytes = width as usize * 4;
                     let mapped_size = u64::from(mapped.RowPitch) * u64::from(height);
                     if mapped.pData.is_null()
-                        || mapped.RowPitch < screen.stride()
+                        || (mapped.RowPitch as usize) < row_bytes
                         || mapped_size > isize::MAX as u64
                     {
                         return Err(fail("无效的捕获纹理步长"));
                     }
+                    let dst_x = usize::try_from(i64::from(rect.left) - i64::from(bounds.left))
+                        .map_err(|_| fail("显示器横向范围无效"))?
+                        * 4;
+                    let dst_y = usize::try_from(i64::from(rect.top) - i64::from(bounds.top))
+                        .map_err(|_| fail("显示器纵向范围无效"))?;
+                    let dst_stride = image.stride() as usize;
                     for y in 0..height as usize {
                         if y % 64 == 0 {
                             check_cancel(cancel)?;
                         }
-                        let stride = screen.stride() as usize;
                         let src = std::slice::from_raw_parts(
-                            (mapped.pData as *const u8).add(y * mapped.RowPitch as usize),
-                            screen.stride() as usize,
+                            mapped.pData.cast::<u8>().add(y * mapped.RowPitch as usize),
+                            row_bytes,
                         );
-                        let offset = y * screen.stride() as usize;
-                        screen.pixels_mut()[offset..offset + stride].copy_from_slice(src);
-                        for pixel in
-                            screen.pixels_mut()[offset..offset + stride].chunks_exact_mut(4)
-                        {
+                        let offset = (dst_y + y) * dst_stride + dst_x;
+                        let row = image
+                            .pixels_mut()
+                            .get_mut(offset..offset + row_bytes)
+                            .ok_or_else(|| fail("显示器范围超出桌面图像"))?;
+                        row.copy_from_slice(src);
+                        for pixel in row.chunks_exact_mut(4) {
                             pixel[3] = 255;
                         }
                     }
-                    image.blit(&screen);
                     Ok(())
                 })();
                 context.Unmap(&staging, 0);

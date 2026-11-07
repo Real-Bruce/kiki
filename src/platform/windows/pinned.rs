@@ -184,6 +184,12 @@ fn open_inner(image: Arc<Image>, anchor: PixelPoint, visible: bool) -> Result<()
             None,
         )?;
         let creating = Creating(hwnd);
+        // Non-text surfaces handle command keys; text composition belongs exclusively to the native EDIT.
+        let _ = windows::Win32::UI::Input::Ime::ImmAssociateContextEx(
+            hwnd,
+            windows::Win32::UI::Input::Ime::HIMC::default(),
+            0,
+        );
         let life = Rc::new(Cell::new(Some(hwnd)));
         let canvas = Canvas::new(hwnd, &image, w, h, dpi)?;
         let corner = DWMWCP_ROUNDSMALL;
@@ -748,7 +754,7 @@ pub fn stress(path: &std::path::Path) -> Result<()> {
         .map_err(|e| fail(&e.to_string()))
     };
     gpu_row(&mut gpu, 0)?;
-    for cycle in 0..10 {
+    for cycle in 0..100 {
         for index in 0..4 {
             let mut image = Image::new(crate::core::geometry::PixelRect {
                 left: 0,
@@ -757,8 +763,10 @@ pub fn stress(path: &std::path::Path) -> Result<()> {
                 bottom: 2160,
             })
             .map_err(|e| fail(&e))?;
-            for pixel in image.pixels_mut().chunks_exact_mut(4) {
-                pixel.copy_from_slice(&[96 + index * 20, 180, 220, 255]);
+            for (position, pixel) in image.pixels_mut().chunks_exact_mut(4).enumerate() {
+                let x = position % 3840;
+                let y = position / 3840;
+                pixel.copy_from_slice(&[(x / 16) as u8, (y / 12) as u8, 96 + index * 20, 255]);
             }
             open_inner(
                 Arc::new(image),
@@ -807,8 +815,8 @@ pub fn stress(path: &std::path::Path) -> Result<()> {
             DispatchMessageW(&message);
         }
     }
-    super::diagnostics::row(&mut csv, 21, 0.)?;
-    gpu_row(&mut gpu, 21)?;
+    super::diagnostics::row(&mut csv, 201, 0.)?;
+    gpu_row(&mut gpu, 201)?;
     csv.flush().map_err(|e| fail(&e.to_string()))
 }
 

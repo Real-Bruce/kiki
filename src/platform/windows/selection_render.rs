@@ -6,7 +6,6 @@ use crate::core::{
     selection::{PixelPoint, Selection, contains, fit_panel, selection_label, toolbar},
 };
 use windows::{
-    UI::ViewManagement::{UIColorType, UISettings},
     Win32::{
         Foundation::HWND,
         Graphics::{
@@ -15,7 +14,7 @@ use windows::{
             Dxgi::Common::*,
         },
     },
-    core::{Result, w},
+    core::{Interface, Result, w},
 };
 use windows_numerics::Vector2;
 
@@ -40,7 +39,9 @@ pub struct PaintInput<'a> {
     pub pressed: Option<usize>,
 }
 pub struct Canvas {
-    target: ID2D1HwndRenderTarget,
+    target: ID2D1RenderTarget,
+    context: ID2D1DeviceContext,
+    swap: windows::Win32::Graphics::Dxgi::IDXGISwapChain1,
     bitmap: ID2D1Bitmap,
     brush: ID2D1SolidColorBrush,
     dw: IDWriteFactory,
@@ -49,6 +50,7 @@ pub struct Canvas {
     scale: f32,
     pub dark: bool,
     source: std::sync::Arc<Image>,
+    _device: std::rc::Rc<super::pinned_device::Device>,
 }
 pub fn system_dark() -> bool {
     match super::preferences::theme() {
@@ -64,9 +66,7 @@ pub fn system_dark() -> bool {
             }
         }
     }
-    UISettings::new()
-        .and_then(|settings| settings.GetColorValue(UIColorType::Background))
-        .is_ok_and(|c| u32::from(c.R) + u32::from(c.G) + u32::from(c.B) < 384)
+    super::preferences::system_is_dark()
 }
 impl Canvas {
     pub fn source(&self) -> std::sync::Arc<Image> {
@@ -82,19 +82,9 @@ impl Canvas {
                 .bounds()
                 .size()
                 .ok_or_else(windows::core::Error::from_win32)?;
-            let factory: ID2D1Factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
-            let target = factory.CreateHwndRenderTarget(
-                &D2D1_RENDER_TARGET_PROPERTIES {
-                    dpiX: 96.,
-                    dpiY: 96.,
-                    ..Default::default()
-                },
-                &D2D1_HWND_RENDER_TARGET_PROPERTIES {
-                    hwnd,
-                    pixelSize: D2D_SIZE_U { width, height },
-                    presentOptions: D2D1_PRESENT_OPTIONS_NONE,
-                },
-            )?;
+            let device = super::pinned_device::get()?;
+            let (context, swap) = device.surface(hwnd, width, height)?;
+            let target: ID2D1RenderTarget = context.cast()?;
             let bitmap = target.CreateBitmap(
                 D2D_SIZE_U { width, height },
                 Some(image.pixels().as_ptr().cast()),
@@ -114,6 +104,9 @@ impl Canvas {
             let icons = format(&dw, true, 1.)?;
             Ok(Self {
                 target,
+                context,
+                swap,
+                _device: device,
                 bitmap,
                 brush,
                 dw,
@@ -332,7 +325,10 @@ impl Canvas {
                     color(255, 255, 255, 1.),
                 );
             }
-            self.target.EndDraw(None, None)
+            self.target.EndDraw(None, None)?;
+            self.swap
+                .Present(0, windows::Win32::Graphics::Dxgi::DXGI_PRESENT(0))
+                .ok()
         }
     }
     fn paint_toolbar(
@@ -935,3 +931,13 @@ pub const ANNOTATION_COLORS: [[u8; 3]; 8] = [
     [255, 255, 255],
     [20, 20, 20],
 ];
+
+impl Drop for Canvas {
+    fn drop(&mut self) {
+        // SAFETY: UI-thread surface, outside BeginDraw; detach its back buffer before releasing the swap chain.
+        unsafe {
+            self.context.SetTarget(None::<&ID2D1Image>);
+            let _ = self.context.Flush(None, None);
+        }
+    }
+}

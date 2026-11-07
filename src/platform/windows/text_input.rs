@@ -81,6 +81,8 @@ impl TextInput {
                 Some(GetModuleHandleW(None)?.into()),
                 None,
             )?;
+            // The parent canvas has no IME association; this control explicitly opts into the thread default.
+            let _ = ImmAssociateContextEx(hwnd, HIMC::default(), IACE_DEFAULT);
             let alive = Rc::new(Cell::new(Some(hwnd)));
             let font = CreateFontW(
                 -(size.round() as i32),
@@ -332,6 +334,8 @@ mod tests {
                 None,
             )
             .unwrap();
+            let _ = ImmAssociateContextEx(parent, HIMC::default(), 0);
+            assert!(ImmGetContext(parent).is_invalid());
             let bounds = PixelRect {
                 left: 0,
                 top: 0,
@@ -349,6 +353,12 @@ mod tests {
             )
             .unwrap();
             let child = input.hwnd().unwrap();
+            let context = ImmGetContext(child);
+            assert!(
+                !context.is_invalid(),
+                "text must retain IME when its canvas disables composition"
+            );
+            let _ = ImmReleaseContext(child, context);
             assert_eq!(input.content().unwrap(), "中文\n😀第二行");
             input.flags.suppress_return.set(true);
             SendMessageW(child, WM_KEYUP, Some(WPARAM(13)), None);

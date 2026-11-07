@@ -7,6 +7,8 @@ mod display;
 mod icon;
 mod menu;
 mod output;
+#[cfg(feature = "diagnostics")]
+mod performance;
 mod pinned;
 mod pinned_device;
 mod pinned_render;
@@ -292,6 +294,8 @@ pub fn run() -> Result<()> {
         let readiness_probe = diagnostics::start_readiness_probe(hwnd, preferences::active())?;
         #[cfg(feature = "diagnostics")]
         diagnostics::start_pin_observer(hwnd)?;
+        #[cfg(feature = "diagnostics")]
+        performance::start(hwnd)?;
         if std::env::args_os().any(|arg| arg == "--capture-screen") {
             PostMessageW(Some(hwnd), preferences::FULLSCREEN, WPARAM(0), LPARAM(0))?;
         }
@@ -531,11 +535,19 @@ fn poll(hwnd: HWND) {
             Err(error) => Err(error),
         };
         match result {
-            Ok(preview) => APP.with_borrow_mut(|app| {
-                if let Some(state) = app {
-                    state.preview = Some(preview);
+            Ok(preview) => {
+                #[cfg(feature = "diagnostics")]
+                let opened = preview.hwnd();
+                APP.with_borrow_mut(|app| {
+                    if let Some(state) = app {
+                        state.preview = Some(preview);
+                    }
+                });
+                #[cfg(feature = "diagnostics")]
+                if let Some(opened) = opened {
+                    performance::ready(opened);
                 }
-            }),
+            }
             Err(e) => report_capture_error(&format!("截图失败，已返回托盘：{e}")),
         }
     }
@@ -619,6 +631,11 @@ fn dispatch(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
                     *d = s;
                 }
                 let _ = Shell_NotifyIconW(NIM_MODIFY, &tip);
+                LRESULT(0)
+            }
+            #[cfg(feature = "diagnostics")]
+            WM_TIMER if wparam.0 == 78 => {
+                performance::tick(hwnd);
                 LRESULT(0)
             }
             #[cfg(feature = "diagnostics")]

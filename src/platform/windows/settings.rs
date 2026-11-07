@@ -130,6 +130,16 @@ fn open_impl(visible: bool) -> Result<()> {
         refresh();
         if visible {
             let _ = ShowWindow(hwnd, SW_SHOW);
+            // Explicitly reveal a user-requested settings window even when STARTUPINFO requested SW_HIDE.
+            SetWindowPos(
+                hwnd,
+                None,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW,
+            )?;
             let _ = SetForegroundWindow(hwnd);
         }
         Ok(())
@@ -214,7 +224,6 @@ pub fn refresh() {
             let brush = CreateSolidBrush(rgb(if dark.as_bool() { 0x2b2b2b } else { 0xffffff }));
             let old = std::mem::replace(&mut (*p).brush, brush);
             let _ = DeleteObject(old.into());
-            (*p).canvas = None;
             (*p).suppress = false;
             layout(hwnd);
             let _ = InvalidateRect(Some(hwnd), None, true);
@@ -857,7 +866,21 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             }
             WM_ERASEBKGND => LRESULT(1),
             WM_SIZE => {
-                (*p).canvas = None;
+                let mut client = RECT::default();
+                if GetClientRect(hwnd, &mut client).is_ok() {
+                    if let Some(canvas) = (*p).canvas.as_ref() {
+                        if canvas
+                            .resize(
+                                client.right.max(1) as u32,
+                                client.bottom.max(1) as u32,
+                                (*p).dpi,
+                            )
+                            .is_err()
+                        {
+                            (*p).canvas = None;
+                        }
+                    }
+                }
                 layout(hwnd);
                 LRESULT(0)
             }
@@ -937,6 +960,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 state.life.set(None);
                 WINDOW.set(None);
                 drop(state);
+                super::pinned_device::idle();
                 DefWindowProcW(hwnd, msg, wp, lp)
             }
             _ => DefWindowProcW(hwnd, msg, wp, lp),
@@ -994,6 +1018,14 @@ mod tests {
     fn native_settings_apply_rollback_scroll_retry_and_teardown() {
         super::super::tests::graphics_runtime();
         let _com = composition::Apartment::enter().unwrap();
+        struct Cleanup;
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                close();
+                super::super::pinned_render::shutdown();
+            }
+        }
+        let _cleanup = Cleanup;
         let folder = std::env::temp_dir().join(format!("kiki-p6-native-{}", std::process::id()));
         std::fs::create_dir_all(&folder).unwrap();
         let path = folder.join("settings.ini");
