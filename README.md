@@ -2,7 +2,11 @@
 
 面向 Windows 11 的轻量截图、标注与置顶贴图工具。使用 Rust 原生实现，优先控制体积、响应速度与后台资源占用。
 
-P7 本机单屏 SDR 回归已完成。截图、四类标注、撤销重做、复制 / PNG / 多张贴图和六页设置均已接入。125% 与 200% 的实测结果、200% 时延差距和跨环境待验项目见 [P7 验证报告](docs/validation/P7.md)。P8 为打包与交付阶段。
+## Windows 11 x64 免安装包
+
+从本地 dist 目录解压 **kiki-v0.1.0-windows-x64.zip**，双击 kiki.exe。程序驻留托盘，默认按 **Ctrl+Alt+A** 开始截图。可用 Get-FileHash 核对同目录的 .zip.sha256。
+
+[快速使用说明](docs/QUICK_START.txt) · [版本变更](CHANGELOG.md) · [P8 交付与验收](docs/validation/P8.md)
 
 ## 开发与验证
 
@@ -19,7 +23,7 @@ cargo build --release
 
 开发探针须用 `cargo build --release --features diagnostics` 单独编译，默认构建不包含它们：`kiki.exe --probe artifacts/p1` 写入真实桌面 PNG 与捕获耗时；`kiki.exe --stress artifacts/p1/stress` 执行 100 次捕获、释放及资源采样；`scripts/Measure-Startup.ps1` 采集 30 次独立进程启动到热键和托盘就绪时间。仅显式调用时运行，结果目录不入库。探针会包含真实屏幕内容，请勿将其作为公开测试数据提交。完成后用默认 `cargo build --release` 恢复不含探针的程序。
 
-当前验证结果和缺项见 [P1](docs/validation/P1.md)、[P2](docs/validation/P2.md)、[P3](docs/validation/P3.md)、[P4](docs/validation/P4.md) 、[文字标注](docs/validation/P4_TEXT.md) 和 [P5 输出](docs/validation/P5.md) 验证报告。`--probe` 还输出中心裁剪 PNG；开发构建的 `--cancel-stress` 验证 100 次实际取消及同进程恢复。电脑操作工具需要时，可在 diagnostics 构建显式使用 `--accessible-capture` 枚举同一画布；默认构建保留 ToolWindow 样式。完整输入法 / 高 DPI / 多屏 / HDR 矩阵、更多应用兼容性、资源优化及 ZIP 交付仍待完成。设置与手动主题切换已接入。
+当前验证结果和缺项见 [P1](docs/validation/P1.md)、[P2](docs/validation/P2.md)、[P3](docs/validation/P3.md)、[P4](docs/validation/P4.md) 、[文字标注](docs/validation/P4_TEXT.md) 和 [P5 输出](docs/validation/P5.md) 验证报告。`--probe` 还输出中心裁剪 PNG；开发构建的 `--cancel-stress` 验证 100 次实际取消及同进程恢复。电脑操作工具需要时，可在 diagnostics 构建显式使用 `--accessible-capture` 枚举同一画布；默认构建保留 ToolWindow 样式。完整输入法、高 DPI、多屏、HDR 及更多应用兼容性验收仍待补齐。
 
 开发构建可显式使用 `--trace-window-targets <文件路径>` 记录窗口类别、样式和边界，用于检查透明辅助层筛选；每次捕获覆盖该文件，不记录窗口标题或输入内容。
 
