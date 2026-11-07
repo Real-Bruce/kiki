@@ -85,7 +85,6 @@ fn assert_idle() {
         let state = app.as_ref().unwrap();
         assert!(state.receiver.is_none());
         assert!(state.cancel.is_none());
-        assert!(state.worker.is_none());
         assert!(state.preview.is_none());
     });
 }
@@ -140,6 +139,7 @@ fn native_failure_paths_release_state_and_allow_retry() {
                     // KillTimer may leave one already-queued WM_TIMER; it must not keep generating ticks.
                     assert!(pump_for(Duration::from_millis(120)) <= 1);
                 }
+                let mut capture_thread = None;
                 for fault in [
                     Fault::CaptureError,
                     Fault::Disconnected,
@@ -155,6 +155,17 @@ fn native_failure_paths_release_state_and_allow_retry() {
                         pump_for(Duration::from_millis(10));
                     }
                     assert_idle();
+                    let thread = APP.with_borrow(|app| {
+                        app.as_ref()
+                            .unwrap()
+                            .worker
+                            .as_ref()
+                            .unwrap()
+                            .thread
+                            .thread()
+                            .id()
+                    });
+                    assert_eq!(*capture_thread.get_or_insert(thread), thread);
                     assert!(pump_for(Duration::from_millis(120)) <= 1);
                 }
                 for (message, reason) in [

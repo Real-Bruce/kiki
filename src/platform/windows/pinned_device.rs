@@ -31,7 +31,7 @@ pub fn get() -> Result<Rc<Device>> {
                 return Ok(device.clone());
             }
         }
-        // SAFETY: device resources stay on this UI thread. Hardware failure falls back to WARP using the same rendering path.
+        // SAFETY: WARP drawing resources stay on this UI thread and are separate from the hardware capture device.
         let value = unsafe {
             let create = |driver| -> Result<(ID3D11Device, ID3D11DeviceContext)> {
                 let mut device = None;
@@ -52,8 +52,7 @@ pub fn get() -> Result<Rc<Device>> {
                     context.ok_or_else(|| Error::new(E_FAIL, "贴图设备上下文创建失败"))?,
                 ))
             };
-            let (d3d, immediate) =
-                create(D3D_DRIVER_TYPE_HARDWARE).or_else(|_| create(D3D_DRIVER_TYPE_WARP))?;
+            let (d3d, immediate) = create(D3D_DRIVER_TYPE_WARP)?;
             let dxgi: IDXGIDevice3 = d3d.cast()?;
             dxgi.SetMaximumFrameLatency(1)?;
             let factory = dxgi.GetAdapter()?.GetParent::<IDXGIFactory2>()?;
@@ -167,12 +166,17 @@ unsafe extern "system" fn cleanup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPA
         if msg == WM_TIMER && wp.0 == 1 {
             let _ = KillTimer(Some(hwnd), 1);
             let _ = std::panic::catch_unwind(|| {
-                let device = DEVICE.with_borrow(Clone::clone);
-                if let Some(device) = device {
-                    if Rc::strong_count(&device) == 2 {
-                        device.release_caches();
+                let retired = DEVICE.with_borrow_mut(|slot| {
+                    if slot
+                        .as_ref()
+                        .is_some_and(|device| Rc::strong_count(device) == 1)
+                    {
+                        slot.take()
+                    } else {
+                        None
                     }
-                }
+                });
+                drop(retired);
             });
             return LRESULT(0);
         }

@@ -50,7 +50,7 @@ struct App {
     receiver: Option<mpsc::Receiver<(SessionId, Result<capture::CaptureResult>)>>,
     gate: SessionGate,
     cancel: Option<Arc<AtomicBool>>,
-    worker: Option<JoinHandle<()>>,
+    worker: Option<CaptureWorker>,
     preview: Option<preview::Preview>,
     select_screen: bool,
 }
@@ -68,7 +68,7 @@ impl Drop for AppStateGuard {
                 cancel.store(true, Ordering::Release);
             }
             if let Some(worker) = state.worker.take() {
-                let _ = worker.join();
+                worker.stop();
             }
         }
     }
@@ -406,16 +406,15 @@ fn try_begin_capture_mode(hwnd: HWND, select_screen: bool) -> std::result::Resul
             state.gate.cancel();
             return Err("无法接收截图完成通知，请稍后重试。".into());
         }
-        match spawn_capture(ticket, worker_cancel, tx) {
-            Ok(worker) => {
+        match submit_capture(&mut state.worker, ticket, worker_cancel, tx) {
+            Ok(()) => {
                 state.receiver = Some(rx);
                 state.cancel = Some(cancel);
-                state.worker = Some(worker);
                 Ok(())
             }
             Err(e) => {
                 state.gate.cancel();
-                // SAFETY: no worker was started; roll back this UI thread's capture timer.
+                // SAFETY: the request was not queued; roll back this UI thread's capture timer.
                 unsafe {
                     let _ = KillTimer(Some(hwnd), 1);
                 }
@@ -434,34 +433,88 @@ fn start_capture_timer(hwnd: HWND) -> bool {
     unsafe { SetTimer(Some(hwnd), 1, 15, None) != 0 }
 }
 
-fn spawn_capture(
+struct CaptureRequest {
     ticket: SessionId,
     cancel: Arc<AtomicBool>,
-    tx: mpsc::SyncSender<(SessionId, Result<capture::CaptureResult>)>,
-) -> std::io::Result<JoinHandle<()>> {
+    reply: mpsc::SyncSender<(SessionId, Result<capture::CaptureResult>)>,
+    #[cfg(test)]
+    fault: Option<tests::Fault>,
+}
+
+impl CaptureRequest {
+    fn run(self) {
+        #[cfg(test)]
+        if let Some(fault) = self.fault {
+            if fault == tests::Fault::CaptureError {
+                let _ = self
+                    .reply
+                    .send((self.ticket, Err(Error::new(E_FAIL, "测试注入：捕获失败"))));
+            }
+            if fault == tests::Fault::LateFrame {
+                let result = tests::late_frame(&self.cancel);
+                let _ = self.reply.send((self.ticket, result));
+            }
+            return;
+        }
+        let result = capture::desktop_with_cancel(&self.cancel);
+        let _ = self.reply.send((self.ticket, result));
+    }
+}
+
+struct CaptureWorker {
+    requests: mpsc::SyncSender<CaptureRequest>,
+    thread: JoinHandle<()>,
+}
+
+impl CaptureWorker {
+    fn start() -> std::io::Result<Self> {
+        let (requests, queue) = mpsc::sync_channel::<CaptureRequest>(1);
+        let thread = std::thread::Builder::new()
+            .name("capture".into())
+            .spawn(move || {
+                for request in queue {
+                    request.run();
+                }
+            })?;
+        Ok(Self { requests, thread })
+    }
+
+    fn stop(self) {
+        drop(self.requests);
+        let _ = self.thread.join();
+    }
+}
+
+fn submit_capture(
+    worker: &mut Option<CaptureWorker>,
+    ticket: SessionId,
+    cancel: Arc<AtomicBool>,
+    reply: mpsc::SyncSender<(SessionId, Result<capture::CaptureResult>)>,
+) -> std::io::Result<()> {
     #[cfg(test)]
     if tests::take_fault(tests::Fault::Spawn) {
         return Err(std::io::Error::other("测试注入：工作线程创建失败"));
     }
-    #[cfg(test)]
-    let fault = tests::take_worker_fault();
-    std::thread::Builder::new()
-        .name("capture".into())
-        .spawn(move || {
-            #[cfg(test)]
-            if let Some(fault) = fault {
-                if fault == tests::Fault::CaptureError {
-                    let _ = tx.send((ticket, Err(Error::new(E_FAIL, "测试注入：捕获失败"))));
-                }
-                if fault == tests::Fault::LateFrame {
-                    let result = tests::late_frame(&cancel);
-                    let _ = tx.send((ticket, result));
-                }
-                return;
-            }
-            let result = capture::desktop_with_cancel(&cancel);
-            let _ = tx.send((ticket, result));
-        })
+    let request = CaptureRequest {
+        ticket,
+        cancel,
+        reply,
+        #[cfg(test)]
+        fault: tests::take_worker_fault(),
+    };
+    if let Some(active) = worker.as_ref().filter(|w| !w.thread.is_finished()) {
+        return active
+            .requests
+            .try_send(request)
+            .map_err(std::io::Error::other);
+    }
+    let new_worker = CaptureWorker::start()?;
+    let result = new_worker
+        .requests
+        .try_send(request)
+        .map_err(std::io::Error::other);
+    *worker = Some(new_worker);
+    result
 }
 
 fn cancel_session() {
@@ -498,17 +551,11 @@ fn poll(hwnd: HWND) {
                 state.receiver = None;
                 state.cancel = None;
                 state.gate.cancel();
-                if let Some(worker) = state.worker.take() {
-                    let _ = worker.join();
-                }
                 return Some(Err(Error::new(E_FAIL, "捕获线程意外退出")));
             }
         };
         state.receiver = None;
         state.cancel = None;
-        if let Some(worker) = state.worker.take() {
-            let _ = worker.join();
-        }
         if !state.gate.accept_frame(ticket) {
             // A display cancellation invalidates this generation; dropping releases pixels.
             return Some(Ok(None));

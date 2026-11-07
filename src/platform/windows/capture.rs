@@ -89,7 +89,7 @@ fn desktop_inner(cancel: &AtomicBool, on_started: impl FnOnce()) -> Result<Captu
     let start = Instant::now();
     let mut on_started = Some(on_started);
     check_cancel(cancel)?;
-    // SAFETY: capture is called only on a fresh dedicated worker thread.
+    // SAFETY: capture runs on the dedicated MTA worker or a diagnostics capture thread.
     unsafe {
         CoInitializeEx(None, COINIT_MULTITHREADED).ok()?;
     }
