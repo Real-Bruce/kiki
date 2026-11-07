@@ -29,7 +29,7 @@ struct Session {
     writer: Writer,
     registration: Registration,
     owner: HWND,
-    system_theme: Option<UISettings>,
+    system_dark: Option<bool>,
 }
 thread_local! {static SESSION:RefCell<Option<Session>>=const{RefCell::new(None)};}
 pub struct Guard;
@@ -73,7 +73,7 @@ pub(super) fn initialize_at(owner: HWND, path: PathBuf) -> Result<(Guard, Option
             writer,
             registration,
             owner,
-            system_theme: None,
+            system_dark: None,
         })
     });
     Ok((Guard, warning))
@@ -84,27 +84,27 @@ pub fn current() -> Config {
 pub fn theme() -> Option<Theme> {
     SESSION.with_borrow(|slot| slot.as_ref().map(|s| s.config.theme))
 }
-/// Reuse the UI-thread provider, but read its live value on every theme refresh.
+/// Cache the resolved color mode until the tray host receives a system theme notification.
 pub fn system_is_dark() -> bool {
-    let provider = SESSION.with_borrow(|slot| slot.as_ref().and_then(|s| s.system_theme.clone()));
-    let provider = match provider {
-        Some(provider) => provider,
-        None => {
-            let Ok(provider) = UISettings::new() else {
-                return false;
-            };
-            // COM activation and reads happen outside the preference borrow: either can dispatch native messages.
-            SESSION.with_borrow_mut(|slot| {
-                if let Some(session) = slot {
-                    session.system_theme.get_or_insert_with(|| provider.clone());
-                }
-            });
-            provider
-        }
+    if let Some(dark) = SESSION.with_borrow(|slot| slot.as_ref().and_then(|s| s.system_dark)) {
+        return dark;
+    }
+    // Query outside the preference borrow because the OS can dispatch native messages.
+    let Ok(color) = UISettings::new().and_then(|s| s.GetColorValue(UIColorType::Background)) else {
+        return false;
     };
-    provider
-        .GetColorValue(UIColorType::Background)
-        .is_ok_and(|c| u32::from(c.R) + u32::from(c.G) + u32::from(c.B) < 384)
+    let dark = u32::from(color.R) + u32::from(color.G) + u32::from(color.B) < 384;
+    SESSION.with_borrow_mut(|slot| {
+        slot.as_mut()
+            .map_or(dark, |s| *s.system_dark.get_or_insert(dark))
+    })
+}
+pub fn invalidate_system_theme() {
+    SESSION.with_borrow_mut(|slot| {
+        if let Some(session) = slot {
+            session.system_dark = None;
+        }
+    });
 }
 pub fn hints() -> bool {
     SESSION.with_borrow(|slot| slot.as_ref().is_none_or(|s| s.config.show_hints))
@@ -142,6 +142,9 @@ pub fn update(config: Config) -> std::result::Result<(), String> {
                 .map_err(|e| format!("热键已被占用或系统拒绝注册：{e}；原热键已保留"))?;
         }
         session.revision = revision;
+        if config.theme != session.config.theme {
+            session.system_dark = None;
+        }
         session.config = config;
         session.status = SaveStatus::Saving;
         session

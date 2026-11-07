@@ -605,6 +605,9 @@ fn dispatch(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
                 LRESULT(0)
             }
             preferences::CHANGED | WM_THEMECHANGED | WM_SETTINGCHANGE => {
+                if msg != preferences::CHANGED {
+                    preferences::invalidate_system_theme();
+                }
                 settings::refresh();
                 pinned::theme_changed();
                 text_viewer::theme_changed();
