@@ -313,26 +313,15 @@ pub fn handle(msg: u32, lp: LPARAM) -> Option<LRESULT> {
         None
     }
 }
-/// The tray owner receives the native popup HWND in WM_ENTERIDLE.
-pub fn round_tray_popup(owner: HWND, popup: HWND) {
+/// Style the live tray menu delivered by WM_ENTERIDLE without changing system settings.
+pub fn style_tray_popup(owner: HWND, popup: HWND) {
     if popup.is_invalid() || popup == owner {
         return;
     }
     // SAFETY: this is the live HWND from the synchronous menu notification. Only
     // the system popup class is eligible, and DWM copies the preference values.
     unsafe {
-        let mut class = [0u16; 16];
-        let len = GetClassNameW(popup, &mut class) as usize;
-        if class[..len]
-            != [
-                b'#' as u16,
-                b'3' as u16,
-                b'2' as u16,
-                b'7' as u16,
-                b'6' as u16,
-                b'8' as u16,
-            ]
-        {
+        if !is_class(popup, "#32768") {
             return;
         }
         let corner = DWMWCP_ROUND;
@@ -342,6 +331,45 @@ pub fn round_tray_popup(owner: HWND, popup: HWND) {
             (&corner as *const DWM_WINDOW_CORNER_PREFERENCE).cast(),
             std::mem::size_of_val(&corner) as u32,
         );
+        hide_tray_shadow(popup);
+    }
+}
+
+fn hide_tray_shadow(popup: HWND) {
+    // SAFETY: work only on the native shadow immediately behind the live popup on
+    // its owning UI thread. The shadow is owned and destroyed by Windows.
+    unsafe {
+        let Ok(shadow) = GetWindow(popup, GW_HWNDNEXT) else {
+            return;
+        };
+        let thread = GetWindowThreadProcessId(popup, None);
+        if thread == 0
+            || GetWindowThreadProcessId(shadow, None) != thread
+            || !is_class(shadow, "SysShadow")
+            || !IsWindowVisible(shadow).as_bool()
+        {
+            return;
+        }
+        let mut menu_bounds = RECT::default();
+        let mut shadow_bounds = RECT::default();
+        if GetWindowRect(popup, &mut menu_bounds).is_ok()
+            && GetWindowRect(shadow, &mut shadow_bounds).is_ok()
+            && shadow_bounds.left == menu_bounds.left
+            && shadow_bounds.top == menu_bounds.top
+            && shadow_bounds.right >= menu_bounds.right
+            && shadow_bounds.bottom >= menu_bounds.bottom
+        {
+            let _ = ShowWindow(shadow, SW_HIDE);
+        }
+    }
+}
+
+fn is_class(window: HWND, expected: &str) -> bool {
+    // SAFETY: GetClassNameW writes only within the local buffer and returns its length.
+    unsafe {
+        let mut class = [0u16; 16];
+        let len = GetClassNameW(window, &mut class) as usize;
+        len != 0 && class[..len].iter().copied().eq(expected.encode_utf16())
     }
 }
 
