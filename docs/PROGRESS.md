@@ -303,3 +303,11 @@
 - 设置窗口调整为蓝灰分栏、带图标的导航、粗体页标题与细边框卡片。通用页对齐三组设置，开机启动保留原生操作并绘制为开关。
 - 核对 125% 下的浅色通用页与贴图页。全特性 43 项测试、严格 Clippy、rustfmt 和两种 Release 构建通过。深色实际界面和其他缩放比例继续待验。
 - 已重新打包并验证全部 16 个解压文件。产物和截图见 [P6 验证](validation/P6.md)。关联提交主题：fix(settings): align settings window with approved design。
+
+## P6 设置页按 05-settings-layout.png 重新设计
+
+- 六页采用无外框布局，通过标题、对齐和间距组织信息。仅在大功能模块间加入细分割线。侧栏与标题栏、托盘共用软件图标。
+- 截图页使用开关、色点、线宽示例与字号选项，外观页使用真实主题预览按钮。共享布局计算控制滚动范围及原生控件位置。
+- 125% 单屏检查浅色通用、截图及浅深色外观。最终桌面复查由用户停止。默认与全特性各 43 项测试、严格 Clippy、rustfmt 和两种 Release 构建通过。
+- 已打包并核对全部 16 个解压文件。证据、SHA-256 和待验环境见 [P6 验证](validation/P6.md)。
+- 关联提交主题：fix(settings): redesign settings layout and reuse app icon。

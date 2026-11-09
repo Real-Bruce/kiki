@@ -4,7 +4,7 @@
 
 ## Windows 11 x64 免安装包
 
-从本地 dist 目录解压 **kiki-v0.1.0-windows-x64-settings-reference.zip**，双击 kiki.exe。程序驻留托盘，默认按 **Ctrl+Alt+A** 开始截图。可用 Get-FileHash 核对同目录的 .zip.sha256。
+从本地 dist 目录解压 **kiki-v0.1.0-windows-x64-settings-redesign.zip**，双击 kiki.exe。程序驻留托盘，默认按 **Ctrl+Alt+A** 开始截图。可用 Get-FileHash 核对同目录的 .zip.sha256。
 
 [快速使用说明](docs/QUICK_START.txt) · [版本变更](CHANGELOG.md) · [P8 交付与验收](docs/validation/P8.md)
 
@@ -64,7 +64,7 @@ P7 的采样口径、性能数字和未通过项见 [验证报告](docs/validati
 
 ![浅色与深色工具条](docs/design/02-toolbars.png)
 
-![功能设置](docs/design/03-settings.png)
+![功能设置](docs/design/05-settings-layout.png)
 
 ![多张贴图](docs/design/04-pinned.png)
 

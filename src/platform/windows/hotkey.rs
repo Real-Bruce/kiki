@@ -148,7 +148,7 @@ unsafe extern "system" fn themed_proc(
     use windows::Win32::{
         Foundation::*,
         Graphics::Gdi::*,
-        UI::{Shell::*, WindowsAndMessaging::*},
+        UI::{HiDpi::GetDpiForWindow, Shell::*, WindowsAndMessaging::*},
     };
     // SAFETY: the native hotkey control still owns focus, caret and keyboard processing. Paint uses only call-scoped GDI resources.
     unsafe {
@@ -158,18 +158,14 @@ unsafe extern "system" fn themed_proc(
             let mut rect = RECT::default();
             let _ = GetClientRect(hwnd, &mut rect);
             let dark = super::selection_render::system_dark();
-            let bg = CreateSolidBrush(ref_color(if dark { 0x333333 } else { 0xffffff }));
+            let bg = CreateSolidBrush(ref_color(if dark { 0x343538 } else { 0xeff2f6 }));
             FillRect(dc, &rect, bg);
             let _ = DeleteObject(bg.into());
-            let border = CreateSolidBrush(ref_color(if GetFocus() == hwnd {
-                0x0078d4
-            } else if dark {
-                0x666666
-            } else {
-                0x999999
-            }));
-            FrameRect(dc, &rect, border);
-            let _ = DeleteObject(border.into());
+            if GetFocus() == hwnd {
+                let border = CreateSolidBrush(ref_color(super::settings_render::accent(dark)));
+                FrameRect(dc, &rect, border);
+                let _ = DeleteObject(border.into());
+            }
             SetBkMode(dc, TRANSPARENT);
             SetTextColor(dc, ref_color(if dark { 0xf2f2f2 } else { 0x202020 }));
             let font = HFONT(SendMessageW(hwnd, WM_GETFONT, None, None).0 as *mut _);
@@ -178,7 +174,7 @@ unsafe extern "system" fn themed_proc(
                 .map(|key| key.label())
                 .unwrap_or_else(|_| "按 Ctrl 或 Alt 加按键…".into());
             let mut text: Vec<_> = label.encode_utf16().collect();
-            rect.left += 8;
+            rect.left += (12 * GetDpiForWindow(hwnd) / 96) as i32;
             DrawTextW(
                 dc,
                 &mut text,

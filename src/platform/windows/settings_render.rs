@@ -1,4 +1,4 @@
-//! Small retained Direct2D surface for settings cards and text.
+//! Retained Direct2D surface and palette for the settings window.
 use windows::{
     Win32::{
         Foundation::HWND,
@@ -10,22 +10,25 @@ use windows::{
     core::{Interface, Result, w},
 };
 pub const fn background(dark: bool) -> u32 {
-    if dark { 0x202733 } else { 0xeef3fb }
+    if dark { 0x242527 } else { 0xfcfcfd }
 }
 pub const fn sidebar(dark: bool) -> u32 {
-    if dark { 0x252e3c } else { 0xe7eef9 }
+    if dark { 0x2d2e31 } else { 0xf1f3f6 }
 }
 pub const fn foreground(dark: bool) -> u32 {
-    if dark { 0xf1f5fb } else { 0x181e27 }
+    if dark { 0xf2f3f5 } else { 0x202226 }
 }
 pub const fn muted(dark: bool) -> u32 {
-    if dark { 0xb8c4d5 } else { 0x526070 }
-}
-pub const fn card_body(dark: bool) -> u32 {
-    if dark { 0x2b3544 } else { 0xf9fbff }
+    if dark { 0xb7bbc2 } else { 0x585d66 }
 }
 pub const fn divider(dark: bool) -> u32 {
-    if dark { 0x445166 } else { 0xd8e0eb }
+    if dark { 0x47494e } else { 0xdce0e6 }
+}
+pub const fn accent(dark: bool) -> u32 {
+    if dark { 0x82c1ff } else { 0x006ac0 }
+}
+pub const fn warning(dark: bool) -> u32 {
+    if dark { 0xffbd85 } else { 0x974311 }
 }
 
 pub struct Canvas {
@@ -102,67 +105,14 @@ impl Canvas {
             );
         }
     }
-    pub fn card(&self, x: f32, y: f32, w: f32, h: f32, dark: bool) {
-        let shape = D2D1_ROUNDED_RECT {
-            rect: D2D_RECT_F {
-                left: x,
-                top: y,
-                right: x + w,
-                bottom: y + h,
-            },
-            radiusX: 9.,
-            radiusY: 9.,
-        };
-        // SAFETY: the target and brush are local to this active render pass; the clip is balanced.
-        unsafe {
-            self.brush.SetColor(&color(card_body(dark)));
-            self.target.FillRoundedRectangle(&shape, &self.brush);
-            self.target.PushAxisAlignedClip(
-                &D2D_RECT_F {
-                    bottom: y + 36.,
-                    ..shape.rect
-                },
-                D2D1_ANTIALIAS_MODE_ALIASED,
-            );
-            self.brush
-                .SetColor(&color(if dark { 0x303d50 } else { 0xf0f4fb }));
-            self.target.FillRoundedRectangle(&shape, &self.brush);
-            self.target.PopAxisAlignedClip();
-            self.brush.SetColor(&color(divider(dark)));
-            self.target
-                .DrawRoundedRectangle(&shape, &self.brush, 1., None);
-        }
-    }
-    pub fn mark(&self, x: f32, y: f32, size: f32, rgb: u32) {
-        let arm = size / 3.;
-        let stroke = 2.;
-        for ox in [0., size - stroke] {
-            for oy in [0., size - stroke] {
-                self.fill(
-                    x + ox,
-                    y + if oy == 0. { 0. } else { size - arm },
-                    stroke,
-                    arm,
-                    rgb,
-                );
-                self.fill(
-                    x + if ox == 0. { 0. } else { size - arm },
-                    y + oy,
-                    arm,
-                    stroke,
-                    rgb,
-                );
-            }
-        }
-    }
     pub fn heading(&self, text: &str, x: f32, y: f32, width: f32, size: f32, rgb: u32) {
         self.write(
             text,
             [x, y, width, size],
             rgb,
-            DWRITE_FONT_WEIGHT_BOLD,
+            DWRITE_FONT_WEIGHT_SEMI_BOLD,
             DWRITE_TEXT_ALIGNMENT_LEADING,
-            w!("Segoe UI"),
+            text_font(text),
         );
     }
     pub fn value(&self, text: &str, x: f32, y: f32, width: f32, rgb: u32) {
@@ -172,7 +122,7 @@ impl Canvas {
             rgb,
             DWRITE_FONT_WEIGHT_NORMAL,
             DWRITE_TEXT_ALIGNMENT_TRAILING,
-            w!("Segoe UI"),
+            text_font(text),
         );
     }
     pub fn glyph(&self, text: &str, x: f32, y: f32, rgb: u32) {
@@ -192,7 +142,7 @@ impl Canvas {
             rgb,
             DWRITE_FONT_WEIGHT_NORMAL,
             DWRITE_TEXT_ALIGNMENT_LEADING,
-            w!("Segoe UI"),
+            text_font(text),
         );
     }
     fn write(
@@ -233,6 +183,13 @@ impl Canvas {
                 );
             }
         }
+    }
+}
+fn text_font(text: &str) -> windows::core::PCWSTR {
+    if text.chars().any(|c| c > '\u{2e7f}') {
+        w!("Microsoft YaHei UI")
+    } else {
+        w!("Segoe UI")
     }
 }
 fn color(rgb: u32) -> D2D1_COLOR_F {

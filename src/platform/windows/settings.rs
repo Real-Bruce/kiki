@@ -7,6 +7,9 @@ use super::{
     startup,
 };
 use crate::core::config::{Config, Hotkey, Theme};
+#[path = "settings_layout.rs"]
+mod settings_layout;
+use settings_layout::{FOOTER, HEADER, Item, Page, Rect, Tone};
 use std::{cell::Cell, rc::Rc};
 use windows::{
     Win32::{
@@ -19,27 +22,21 @@ use windows::{
 };
 pub(super) const RESTORE_HOTKEY: u32 = WM_APP + 62;
 const PAGES: [&str; 6] = ["通用", "快捷键", "截图", "贴图", "外观", "关于"];
-const SIDEBAR: i32 = 216;
-const BODY_X: i32 = 242;
-const BODY_END: i32 = 24;
-const HEADER: i32 = 82;
-const FOOTER: i32 = 46;
-const REPAIR_ROW: i32 = 38;
+const BRAND: u16 = 90;
 const COLORS: [[u8; 3]; 8] = super::selection_render::ANNOTATION_COLORS;
 thread_local! {static WINDOW:Cell<Option<HWND>>=const{Cell::new(None)};}
 struct Control {
     hwnd: HWND,
     id: u16,
-    page: usize,
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
 }
 struct State {
     life: Rc<Cell<Option<HWND>>>,
     page: usize,
     scroll: i32,
+    page_scroll: [i32; 6],
+    hover: Option<HWND>,
+    keyboard_focus: bool,
+    app_icon: HICON,
     dpi: u32,
     controls: Vec<Control>,
     canvas: Option<Canvas>,
@@ -72,10 +69,12 @@ fn open_impl(visible: bool) -> Result<()> {
             return Ok(());
         }
         let module = GetModuleHandleW(None)?;
+        let app_icon = super::icon::application(module.into(), false)?;
+        let small_icon = super::icon::application(module.into(), true)?;
         let class = WNDCLASSW {
             lpfnWndProc: Some(proc),
             hInstance: module.into(),
-            hIcon: super::icon::application(module.into(), false)?,
+            hIcon: app_icon,
             hCursor: LoadCursorW(None, IDC_ARROW)?,
             lpszClassName: w!("kiki.Settings"),
             ..Default::default()
@@ -100,8 +99,8 @@ fn open_impl(visible: bool) -> Result<()> {
         let _ = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi, &mut dpi_y);
         let dpi = dpi.max(96);
         let s = dpi as f32 / 96.;
-        let width = (1040. * s) as i32;
-        let height = (680. * s) as i32;
+        let width = (960. * s) as i32;
+        let height = (820. * s) as i32;
         let work = info.rcWork;
         let width = width.min(work.right - work.left);
         let height = height.min(work.bottom - work.top);
@@ -120,17 +119,27 @@ fn open_impl(visible: bool) -> Result<()> {
             None,
         )?;
         let dpi = GetDpiForWindow(hwnd).max(96);
-        let font = font(dpi, 15, w!("Segoe UI"));
+        SendMessageW(
+            hwnd,
+            WM_SETICON,
+            Some(WPARAM(ICON_SMALL as usize)),
+            Some(LPARAM(small_icon.0 as isize)),
+        );
+        let font = font(dpi, 14, w!("Microsoft YaHei UI"));
         let state = Box::new(State {
             life: Rc::new(Cell::new(Some(hwnd))),
             page: 0,
             scroll: 0,
+            page_scroll: [0; 6],
+            hover: None,
+            keyboard_focus: false,
+            app_icon,
             dpi,
             controls: Vec::new(),
             canvas: None,
             font,
             icon_font: font_for_icons(dpi),
-            brush: CreateSolidBrush(rgb(appearance::card_body(system_dark()))),
+            brush: CreateSolidBrush(rgb(appearance::background(system_dark()))),
             suppress: true,
             error: None,
             startup: startup::state().map_err(|e| e.to_string()),
@@ -167,10 +176,82 @@ pub fn close() {
     }
 }
 pub fn route(message: &MSG) -> bool {
-    WINDOW
-        .get()
-        .is_some_and(|hwnd| unsafe { IsDialogMessageW(hwnd, message).as_bool() })
+    // SAFETY: called by the UI thread with a live message and its settings window.
+    WINDOW.get().is_some_and(|hwnd| unsafe {
+        if message.message == WM_KEYDOWN
+            && message.wParam.0 == usize::from(VK_TAB.0)
+            && GetAncestor(GetFocus(), GA_ROOT) == hwnd
+            && GetKeyState(i32::from(VK_CONTROL.0)) >= 0
+        {
+            focus_next(hwnd, GetKeyState(i32::from(VK_SHIFT.0)) < 0);
+            true
+        } else {
+            IsDialogMessageW(hwnd, message).as_bool()
+        }
+    })
 }
+
+fn focus_next(hwnd: HWND, backwards: bool) {
+    // SAFETY: all handles and geometry are copied before layout and SetFocus send window messages.
+    unsafe {
+        let p = pointer(hwnd);
+        if p.is_null() {
+            return;
+        }
+        let state = &*p;
+        let mut client = RECT::default();
+        if GetClientRect(hwnd, &mut client).is_err() {
+            return;
+        }
+        let dip = |value| (value as f32 * 96. / state.dpi as f32).round() as i32;
+        let page = page_geometry(state, dip(client.right));
+        let target = |id| state.controls.iter().find(|c| c.id == id).map(|c| c.hwnd);
+        let mut stops: Vec<_> = (100..=105)
+            .filter_map(|id| target(id).map(|h| (h, None)))
+            .collect();
+        stops.extend(page.items.iter().filter_map(|item| match item {
+            Item::Control(id, bounds) => target(*id).map(|h| (h, Some(*bounds))),
+            _ => None,
+        }));
+        if matches!(preferences::status(), SaveStatus::Failed(_))
+            && let Some(retry) = target(800)
+        {
+            stops.push((retry, None));
+        }
+        let current = stops.iter().position(|(h, _)| *h == GetFocus());
+        let index = match (current, backwards) {
+            (Some(i), true) => (i + stops.len() - 1) % stops.len(),
+            (Some(i), false) => (i + 1) % stops.len(),
+            (None, true) => stops.len().saturating_sub(1),
+            (None, false) => 0,
+        };
+        if let Some(&(next, bounds)) = stops.get(index) {
+            if let Some(bounds) = bounds {
+                let top = state.scroll + HEADER;
+                let bottom = state.scroll + dip(client.bottom) - FOOTER;
+                (*p).scroll = if bounds.y < top {
+                    bounds.y - HEADER
+                } else if bounds.y + bounds.h > bottom {
+                    bounds.y + bounds.h - dip(client.bottom) + FOOTER
+                } else {
+                    state.scroll
+                };
+                layout(hwnd);
+            }
+            (*p).keyboard_focus = true;
+            SendMessageW(
+                hwnd,
+                WM_CHANGEUISTATE,
+                Some(WPARAM(
+                    UIS_CLEAR as usize | ((UISF_HIDEFOCUS as usize) << 16),
+                )),
+                None,
+            );
+            let _ = SetFocus(Some(next));
+        }
+    }
+}
+
 pub fn hotkey_focused() -> bool {
     WINDOW.get().is_some_and(|hwnd| unsafe {
         let p = pointer(hwnd);
@@ -226,7 +307,7 @@ pub fn refresh() {
                 &dark as *const _ as *const _,
                 std::mem::size_of::<BOOL>() as u32,
             );
-            let caption = rgb(if dark.as_bool() { 0x242e3d } else { 0xdfeafa });
+            let caption = rgb(appearance::sidebar(dark.as_bool()));
             let text = rgb(appearance::foreground(dark.as_bool()));
             let _ = DwmSetWindowAttribute(
                 hwnd,
@@ -235,7 +316,7 @@ pub fn refresh() {
                 4,
             );
             let _ = DwmSetWindowAttribute(hwnd, DWMWA_TEXT_COLOR, &text as *const _ as *const _, 4);
-            let brush = CreateSolidBrush(rgb(appearance::card_body(dark.as_bool())));
+            let brush = CreateSolidBrush(rgb(appearance::background(dark.as_bool())));
             let old = std::mem::replace(&mut (*p).brush, brush);
             let _ = DeleteObject(old.into());
             (*p).suppress = false;
@@ -265,7 +346,7 @@ fn font(dpi: u32, size: u32, face: PCWSTR) -> HFONT {
             DEFAULT_CHARSET,
             OUT_DEFAULT_PRECIS,
             CLIP_DEFAULT_PRECIS,
-            DEFAULT_QUALITY,
+            CLEARTYPE_QUALITY,
             DEFAULT_PITCH.0 as u32,
             face,
         )
@@ -323,44 +404,26 @@ fn create_controls(hwnd: HWND) -> Result<()> {
     // SAFETY: native controls and synchronous messages are owned by this settings window thread.
     unsafe {
         let p = pointer(hwnd);
-        let mut items = Vec::new();
-        for i in 0..6 {
-            items.push((100 + i, 6, 10, 76 + i32::from(i) * 42, SIDEBAR - 20, 35));
-        }
-        items.extend([
-            (200, 0, 0, 135, 52, 32),
-            (201, 0, 0, 177, 154, 30),
-            (300, 1, 244, 160, 280, 36),
-            (301, 1, 544, 160, 120, 36),
-            (400, 2, 244, 138, 220, 36),
-            (500, 3, 244, 332, 196, 36),
-            (600, 4, 244, 160, 136, 40),
-            (601, 4, 396, 160, 120, 40),
-            (602, 4, 532, 160, 120, 40),
-            (700, 5, 244, 230, 180, 36),
-            (701, 5, 244, 290, 180, 36),
-            (702, 5, 444, 290, 180, 36),
-            (800, 6, 0, 0, 100, 32),
-        ]);
-        for i in 0..8 {
-            items.push((410 + i, 2, 244 + i32::from(i) * 56, 270, 48, 36));
-        }
-        for i in 0..4 {
-            items.push((420 + i, 2, 244 + i32::from(i) * 100, 380, 88, 36));
-            items.push((430 + i, 2, 244 + i32::from(i) * 100, 506, 88, 36));
-        }
-        for (id, page, x, y, w, h) in items {
+        let ids = [BRAND]
+            .into_iter()
+            .chain(100..=105)
+            .chain([200, 201, 300, 301, 400, 500, 700, 701, 702, 800])
+            .chain(410..=417)
+            .chain(420..=423)
+            .chain(430..=433)
+            .chain(600..=602);
+        for id in ids {
+            let (class, style) = match id {
+                // SS_OWNERDRAW (WinUser.h) is not exported by the current bindings.
+                BRAND => (w!("STATIC"), WINDOW_STYLE(0x000d)),
+                300 => (HOTKEY_CLASSW, WS_TABSTOP),
+                _ => (w!("BUTTON"), WS_TABSTOP | WINDOW_STYLE(BS_OWNERDRAW as u32)),
+            };
             let child = CreateWindowExW(
                 WINDOW_EX_STYLE::default(),
-                if id == 300 {
-                    HOTKEY_CLASSW
-                } else {
-                    w!("BUTTON")
-                },
+                class,
                 w!(""),
-                WS_CHILD
-                    | WS_TABSTOP
-                    | WINDOW_STYLE(if id == 300 { 0 } else { BS_OWNERDRAW as u32 }),
+                WS_CHILD | style,
                 0,
                 0,
                 1,
@@ -373,106 +436,108 @@ fn create_controls(hwnd: HWND) -> Result<()> {
             SendMessageW(child, WM_SETFONT, Some(WPARAM((*p).font.0 as usize)), None);
             if id == 300 {
                 hotkey::theme_control(child)?;
+            } else if id != BRAND && !SetWindowSubclass(child, Some(button_proc), 1, 0).as_bool() {
+                return Err(windows::core::Error::from_win32());
             }
-            (*p).controls.push(Control {
-                hwnd: child,
-                id,
-                page: page as usize,
-                x,
-                y,
-                w,
-                h,
-            });
+            (*p).controls.push(Control { hwnd: child, id });
         }
         Ok(())
     }
 }
+
+fn page_geometry(state: &State, width: i32) -> Page {
+    Page::new(
+        width,
+        state.page,
+        &preferences::current(),
+        &state.startup,
+        preferences::active(),
+    )
+}
+
 fn layout(hwnd: HWND) {
-    // SAFETY: layout uses the live UI-thread state and snapshots child handles before moving them.
+    // SAFETY: snapshot child handles and bounds before SetWindowPos sends messages to them.
     unsafe {
         let p = pointer(hwnd);
         if p.is_null() {
             return;
         }
-        let mut rect = RECT::default();
-        let _ = GetClientRect(hwnd, &mut rect);
-        let s = (*p).dpi as f32 / 96.;
-        let height = (rect.bottom as f32 / s) as i32;
-        let width = (rect.right as f32 / s) as i32;
-        let page = (*p).page;
-        let extent = match page {
-            0 => {
-                575 + if matches!((*p).startup, Ok(startup::State::Moved)) {
-                    REPAIR_ROW
-                } else {
-                    0
-                }
-            }
-            1 => 350,
-            2 => 570,
-            3 => 420,
-            4 => 330,
-            _ => 400,
-        };
+        let mut client = RECT::default();
+        let _ = GetClientRect(hwnd, &mut client);
+        let scale = (*p).dpi as f32 / 96.;
+        let dip = |v| (v as f32 / scale).round() as i32;
+        let px = |v| (v as f32 * scale).round() as i32;
+        let height = dip(client.bottom);
+        let width = dip(client.right);
+        let geometry = page_geometry(&*p, width);
         let viewport = (height - HEADER - FOOTER).max(1);
-        let maximum = (extent - HEADER - viewport).max(0);
-        (*p).scroll = (*p).scroll.clamp(0, maximum);
+        let max_scroll = (geometry.end - HEADER - viewport).max(0);
+        (*p).scroll = (*p).scroll.clamp(0, max_scroll);
         let scroll = (*p).scroll;
         let info = SCROLLINFO {
             cbSize: std::mem::size_of::<SCROLLINFO>() as u32,
             fMask: SIF_RANGE | SIF_PAGE | SIF_POS,
             nMin: 0,
-            nMax: extent - HEADER - 1,
+            nMax: geometry.end - HEADER - 1,
             nPage: viewport as u32,
             nPos: scroll,
             ..Default::default()
         };
         SetScrollInfo(hwnd, SB_VERT, &info, true);
-        let controls: Vec<_> = (*p)
-            .controls
-            .iter()
-            .map(|c| (c.hwnd, c.id, c.page, c.x, c.y, c.w, c.h))
-            .collect();
+        let controls: Vec<_> = (*p).controls.iter().map(|c| (c.hwnd, c.id)).collect();
         let failed = matches!(preferences::status(), SaveStatus::Failed(_));
-        for (child, id, pag, x, y, w, h) in controls {
-            let (x, y) = if id == 800 {
-                (width - 136, height - 38)
-            } else if pag == 6 {
-                (x, y)
-            } else if matches!(id, 200 | 201) {
-                (width - BODY_END - 20 - w, y - scroll)
-            } else {
-                (x + 18, y - scroll)
+        for (child, id) in controls {
+            let bounds = match id {
+                BRAND => Some(Rect {
+                    x: 20,
+                    y: 20,
+                    w: 32,
+                    h: 32,
+                }),
+                100..=105 => Some(Rect {
+                    x: 10,
+                    y: 76 + i32::from(id - 100) * 46,
+                    w: geometry.sidebar - 20,
+                    h: 40,
+                }),
+                800 if failed => Some(Rect {
+                    x: geometry.left + geometry.width - 108,
+                    y: height - 43,
+                    w: 108,
+                    h: 32,
+                }),
+                _ => geometry.items.iter().find_map(|item| match item {
+                    Item::Control(control_id, r) if *control_id == id => {
+                        let y = r.y - scroll;
+                        (y >= HEADER && y + r.h <= height - FOOTER).then_some(Rect { y, ..*r })
+                    }
+                    _ => None,
+                }),
             };
-            let visible = if id == 201 && !matches!((*p).startup, Ok(startup::State::Moved)) {
-                false
-            } else if id == 800 {
-                failed
+            if let Some(Rect { x, y, w, h }) = bounds {
+                let _ = SetWindowPos(
+                    child,
+                    None,
+                    px(x),
+                    px(y),
+                    px(x + w) - px(x),
+                    px(y + h) - px(y),
+                    SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                );
+                let _ = InvalidateRect(Some(child), None, false);
             } else {
-                pag == 6 || pag == page && y >= HEADER && y + h <= height - FOOTER
-            };
-            let _ = InvalidateRect(Some(child), None, true);
-            let _ = SetWindowPos(
-                child,
-                None,
-                (x as f32 * s) as i32,
-                (y as f32 * s) as i32,
-                (w as f32 * s) as i32,
-                (h as f32 * s) as i32,
-                SWP_NOZORDER
-                    | SWP_NOACTIVATE
-                    | if visible {
-                        SWP_SHOWWINDOW
-                    } else {
-                        SWP_HIDEWINDOW
-                    },
-            );
+                if (*p).hover == Some(child) {
+                    (*p).hover = None;
+                }
+                let _ = ShowWindow(child, SW_HIDE);
+            }
         }
         let _ = InvalidateRect(Some(hwnd), None, false);
     }
 }
+
 fn paint(hwnd: HWND, p: *mut State) -> Result<()> {
-    // SAFETY: the live HWND and settings state belong to this UI-thread paint dispatch.
+    // SAFETY: the HWND and state are live for this UI-thread paint dispatch.
     unsafe {
         let mut rect = RECT::default();
         GetClientRect(hwnd, &mut rect)?;
@@ -488,231 +553,110 @@ fn paint(hwnd: HWND, p: *mut State) -> Result<()> {
         let Some(c) = state.canvas.as_ref() else {
             return Ok(());
         };
+        let scale = state.dpi as f32 / 96.;
+        let width = (rect.right as f32 / scale).round();
+        let height = (rect.bottom as f32 / scale).round();
+        let page = page_geometry(state, width as i32);
+        let x = page.left as f32;
+        let w = page.width as f32;
+        let offset = state.scroll as f32;
         let dark = system_dark();
         let fg = appearance::foreground(dark);
         let sub = appearance::muted(dark);
         let bg = appearance::background(dark);
-        let s = state.dpi as f32 / 96.;
-        let width = rect.right as f32 / s;
-        let height = rect.bottom as f32 / s;
-        let offset = state.scroll as f32;
-        let cfg = preferences::current();
+        let warning = appearance::warning(dark);
         c.begin(dark);
-        c.fill(0., 0., SIDEBAR as f32, height, appearance::sidebar(dark));
-        c.mark(22., 23., 22., if dark { 0x78b8ff } else { 0x006cec });
-        c.heading("kiki", 54., 20., 130., 23., fg);
-        let x = BODY_X as f32;
-        let w = (width - x - BODY_END as f32).max(1.);
-        let card = |y, h| c.card(x, y - offset, w, h, dark);
-        let heading = |label: &str, y| c.heading(label, x + 16., y - offset, w - 32., 17., fg);
-        let text =
-            |label: &str, y, size, rgb| c.text(label, x + 22., y - offset, w - 44., size, rgb);
-        let line = |y: f32| {
-            c.fill(
-                x + 22.,
-                y - offset,
-                (w - 44.).max(0.),
-                1.,
-                appearance::divider(dark),
-            )
-        };
-        let row = |label: &str, value: &str, y: f32, icon: Option<&str>| {
-            let inset = if let Some(icon) = icon {
-                c.glyph(icon, x + 22., y - offset, fg);
-                56.
-            } else {
-                22.
-            };
-            c.text(label, x + inset, y - offset, w * 0.36, 15., fg);
-            c.value(value, x + w * 0.42, y - offset, w * 0.58 - 22., sub);
-        };
-        match state.page {
-            0 => {
-                let repair = if matches!(state.startup, Ok(startup::State::Moved)) {
-                    REPAIR_ROW as f32
-                } else {
-                    0.
-                };
-                card(89., 158. + repair);
-                heading("启动与后台", 96.);
-                text("开机启动", 134., 15., fg);
-                text("登录 Windows 后自动运行", 155., 13., sub);
-                if repair > 0. {
-                    text(
-                        "启动项指向旧路径，可更新或关闭",
-                        182.,
-                        13.,
-                        if dark { 0xffbd7a } else { 0x8d4f1e },
+        c.fill(
+            0.,
+            0.,
+            page.sidebar as f32,
+            height,
+            appearance::sidebar(dark),
+        );
+        c.heading("kiki", 63., 22., 75., 21., fg);
+        for item in &page.items {
+            match item {
+                Item::Heading(label, y) => c.heading(label, x, *y as f32 - offset, w, 16., fg),
+                Item::Text(label, r, tone) => {
+                    let (size, color) = match tone {
+                        Tone::Normal => (14., fg),
+                        Tone::Muted => (12., sub),
+                        Tone::Warning => (12., warning),
+                    };
+                    c.text(
+                        label,
+                        r.x as f32,
+                        r.y as f32 - offset,
+                        r.w as f32,
+                        size,
+                        color,
                     );
                 }
-                line(176. + repair);
-                row("启动方式", "驻留托盘", 184. + repair, None);
-                line(210. + repair);
-                row("关闭设置窗口后", "继续后台运行", 218. + repair, None);
-
-                card(261. + repair, 163.);
-                heading("截图完成后", 268. + repair);
-                row(
-                    "复制",
-                    "复制到剪贴板后退出截图",
-                    303. + repair,
-                    Some("\u{e8c8}"),
-                );
-                line(330. + repair);
-                row(
-                    "保存",
-                    "保存成功后退出截图",
-                    335. + repair,
-                    Some("\u{e74e}"),
-                );
-                line(362. + repair);
-                row(
-                    "贴图",
-                    "生成置顶贴图后退出截图",
-                    367. + repair,
-                    Some("\u{e718}"),
-                );
-                line(394. + repair);
-                text("复制和贴图不会自动保存文件", 398. + repair, 13., sub);
-
-                card(437. + repair, 138.);
-                heading("文件保存", 444. + repair);
-                row("图片格式", "PNG", 480. + repair, None);
-                line(505. + repair);
-                row("保存位置", "每次询问，记住上次目录", 512. + repair, None);
-                line(538. + repair);
-                row("默认文件名", "kiki_年月日_时分秒.png", 545. + repair, None);
-            }
-            1 => {
-                card(104., 216.);
-                heading("开始截图", 111.);
-                text(
-                    &format!(
-                        "当前组合：{}{}",
-                        cfg.hotkey.label(),
-                        if preferences::active() {
-                            ""
-                        } else {
-                            "（注册失败）"
-                        }
-                    ),
-                    216.,
-                    14.,
-                    fg,
-                );
-                text(
-                    "按 Ctrl 或 Alt 加字母、数字、F1–F24；冲突时保留原组合。",
-                    252.,
-                    13.,
-                    sub,
-                );
-                text(
-                    "聚焦输入框时暂停启动截图；更改有效后立即生效。",
-                    280.,
-                    13.,
-                    sub,
-                );
-            }
-            2 => {
-                card(104., 94.);
-                heading("操作提示", 111.);
-                card(214., 110.);
-                heading("新截图的默认颜色", 221.);
-                card(340., 110.);
-                heading(&format!("默认线宽 · 当前 {} px", cfg.stroke_width), 347.);
-                card(466., 96.);
-                heading(&format!("默认字号 · 当前 {} px", cfg.text_size), 473.);
-            }
-            3 => {
-                card(104., 294.);
-                heading("独立贴图窗口", 111.);
-                text("拖动移动；滚轮缩放；Ctrl+0 恢复原始比例", 160., 14., fg);
-                text(
-                    "Ctrl+C 复制 / Ctrl+S 保存 / Esc 关闭当前贴图",
-                    200.,
-                    14.,
-                    sub,
-                );
-                text("右键打开菜单；悬停显示复制、保存、关闭", 240., 14., sub);
-                text("初次显示按原始大小，超出工作区时自动缩小。", 280., 13., sub);
-            }
-            4 => {
-                card(104., 196.);
-                heading("主题", 111.);
-                text("立即应用到设置、截图工具、文字输入和贴图。", 224., 14., sub);
-                text("跟随系统会在 Windows 主题变化时更新。", 258., 13., sub);
-            }
-            _ => {
-                card(104., 244.);
-                heading(&format!("kiki {}", env!("CARGO_PKG_VERSION")), 111.);
-                text("Windows 11 · x64 · 原生截图与贴图", 158., 14., sub);
-                text(&format!("截图热键：{}", cfg.hotkey.label()), 196., 14., fg);
+                Item::Value(label, r) => {
+                    c.value(label, r.x as f32, r.y as f32 - offset, r.w as f32, sub)
+                }
+                Item::Divider(y) => c.fill(x, *y as f32 - offset, w, 1., appearance::divider(dark)),
+                Item::Control(..) => {}
             }
         }
-        // Header and footer cover scrolling content; controls are clipped by visibility rules.
-        c.fill(
-            SIDEBAR as f32,
-            0.,
-            width - SIDEBAR as f32,
-            HEADER as f32,
-            bg,
-        );
-        c.heading(PAGES[state.page], x, 15., w, 28., fg);
+        let sidebar = page.sidebar as f32;
+        c.fill(sidebar, 0., width - sidebar, HEADER as f32, bg);
+        c.heading(PAGES[state.page], x, 19., w, 24., fg);
         c.text(
             [
                 "管理启动方式与截图后的行为",
-                "随时可从系统托盘开始截图或恢复默认。",
+                "设置全局截图快捷键。",
                 "仅影响新截图，不更改已有标注。",
                 "贴图保留原图，缩放只影响显示。",
-                "选择适合当前桌面的颜色。",
-                "轻量截图，随手贴图。",
+                "选择适合当前桌面的主题。",
+                "轻量截图与置顶贴图。",
             ][state.page],
             x,
-            52.,
+            58.,
             w,
-            15.,
+            13.,
             sub,
         );
         c.fill(
-            SIDEBAR as f32,
+            sidebar,
             height - FOOTER as f32,
-            width - SIDEBAR as f32,
+            width - sidebar,
             FOOTER as f32,
             bg,
         );
-        let status = state
-            .error
-            .clone()
-            .unwrap_or_else(|| match preferences::status() {
-                SaveStatus::Ready => "设置更改后自动保存".into(),
-                SaveStatus::Saving => "正在保存设置…".into(),
-                SaveStatus::Saved => "设置已自动保存".into(),
-                SaveStatus::Failed(e) => format!("保存失败：{e}"),
-            });
-        let saved = state.error.is_none() && matches!(preferences::status(), SaveStatus::Saved);
+        let status = preferences::status();
+        let failed = matches!(status, SaveStatus::Failed(_));
+        let saved = state.error.is_none() && matches!(status, SaveStatus::Saved);
+        let message = state.error.clone().unwrap_or_else(|| match status {
+            SaveStatus::Ready => "更改后自动保存".into(),
+            SaveStatus::Saving => "正在保存设置…".into(),
+            SaveStatus::Saved => "设置已自动保存".into(),
+            SaveStatus::Failed(e) => format!("保存失败：{e}"),
+        });
+        let status_color = if saved {
+            if dark { 0x8bdca3 } else { 0x217139 }
+        } else if state.error.is_some() || failed {
+            warning
+        } else {
+            sub
+        };
         if saved {
-            c.glyph(
-                "\u{e73e}",
-                x + 4.,
-                height - 34.,
-                if dark { 0x81dfa5 } else { 0x14863a },
-            );
+            c.glyph("\u{e73e}", x, height - 35., status_color);
         }
+        let indent = if saved { 23. } else { 0. };
+        let reserved = if failed { 120. } else { 0. };
         c.text(
-            &status,
-            x + if saved { 28. } else { 4. },
-            height - 33.,
-            (w - 138.).max(100.),
+            &message,
+            x + indent,
+            height - 36.,
+            (w - indent - reserved).max(1.),
             12.,
-            if state.error.is_some() || matches!(preferences::status(), SaveStatus::Failed(_)) {
-                0xd08030
-            } else {
-                sub
-            },
+            status_color,
         );
         c.end()
     }
 }
+
 fn action(hwnd: HWND, id: u16) {
     unsafe {
         let p = pointer(hwnd);
@@ -720,8 +664,9 @@ fn action(hwnd: HWND, id: u16) {
             return;
         }
         if (100..=105).contains(&id) {
+            (*p).page_scroll[(*p).page] = (*p).scroll;
             (*p).page = usize::from(id - 100);
-            (*p).scroll = 0;
+            (*p).scroll = (*p).page_scroll[(*p).page];
             (*p).error = None;
             refresh();
             return;
@@ -801,150 +746,381 @@ fn action(hwnd: HWND, id: u16) {
         }
     }
 }
+unsafe extern "system" fn button_proc(
+    hwnd: HWND,
+    msg: u32,
+    wp: WPARAM,
+    lp: LPARAM,
+    _: usize,
+    _: usize,
+) -> LRESULT {
+    // SAFETY: the subclass belongs to a live settings child. The parent owns the state and
+    // removes its pointer before freeing it. This callback does not retain a state reference.
+    unsafe {
+        if matches!(msg, WM_MOUSEMOVE | WM_MOUSELEAVE | WM_LBUTTONDOWN)
+            && let Ok(parent) = GetParent(hwnd)
+        {
+            let p = pointer(parent);
+            if !p.is_null() {
+                if msg == WM_LBUTTONDOWN {
+                    (*p).keyboard_focus = false;
+                    let focused = GetFocus();
+                    if GetAncestor(focused, GA_ROOT) == parent {
+                        let _ = InvalidateRect(Some(focused), None, false);
+                    }
+                } else if msg == WM_MOUSEMOVE && (*p).hover != Some(hwnd) {
+                    let previous = (*p).hover.replace(hwnd);
+                    if let Some(previous) = previous {
+                        let _ = InvalidateRect(Some(previous), None, false);
+                    }
+                    let mut track = TRACKMOUSEEVENT {
+                        cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+                        dwFlags: TME_LEAVE,
+                        hwndTrack: hwnd,
+                        dwHoverTime: 0,
+                    };
+                    let _ = TrackMouseEvent(&mut track);
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                } else if msg == WM_MOUSELEAVE && (*p).hover == Some(hwnd) {
+                    (*p).hover = None;
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                }
+            }
+        }
+        if msg == WM_NCDESTROY {
+            let _ = RemoveWindowSubclass(hwnd, Some(button_proc), 1);
+        }
+        DefSubclassProc(hwnd, msg, wp, lp)
+    }
+}
+
 fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
-    // SAFETY: WM_DRAWITEM lends the device context and item bounds on this window thread.
+    // SAFETY: WM_DRAWITEM supplies a borrowed DC and bounds for the live UI-thread control.
     unsafe {
         let state = &*p;
         let dark = system_dark();
         let id = item.CtlID as u16;
-        let dpi = state.dpi;
-        let dip = |value: i32| ((value as f32 * dpi as f32) / 96.).round() as i32;
-        if id == 200 {
-            draw_startup_toggle(
-                item,
-                dip,
-                dark,
-                matches!(
-                    state.startup,
-                    Ok(startup::State::Enabled | startup::State::Moved)
-                ),
+        let dip = |v: i32| (v as f32 * state.dpi as f32 / 96.).round() as i32;
+        let r = item.rcItem;
+        let dc = item.hDC;
+        let nav = (100..=105).contains(&id);
+        let backdrop = if nav || id == BRAND {
+            appearance::sidebar(dark)
+        } else {
+            appearance::background(dark)
+        };
+        fill_rect(dc, &r, backdrop);
+        if id == BRAND {
+            let _ = DrawIconEx(
+                dc,
+                r.left,
+                r.top,
+                state.app_icon,
+                r.right - r.left,
+                r.bottom - r.top,
+                0,
+                None,
+                DI_NORMAL,
             );
             return;
         }
+
         let cfg = preferences::current();
-        let nav = (100..=105).contains(&id);
-        let selected = match id {
-            100..=105 => usize::from(id - 100) == state.page,
-            410..=417 => cfg.color == COLORS[(id - 410) as usize],
-            420..=423 => cfg.stroke_width == [1, 3, 5, 8][(id - 420) as usize],
-            430..=433 => cfg.text_size == [16, 24, 32, 48][(id - 430) as usize],
-            400 => cfg.show_hints,
-            600..=602 => {
-                cfg.theme == [Theme::System, Theme::Light, Theme::Dark][(id - 600) as usize]
-            }
-            _ => false,
-        };
+        let hovered = state.hover == Some(item.hwndItem);
         let pressed = item.itemState.0 & ODS_SELECTED.0 != 0;
-        let backdrop = if nav {
-            appearance::sidebar(dark)
-        } else {
-            appearance::card_body(dark)
-        };
-        let fill = if pressed {
-            if dark { 0x34597f } else { 0xb9d3f6 }
-        } else if selected {
-            if dark { 0x294c70 } else { 0xcbdef8 }
-        } else if nav {
-            backdrop
-        } else if dark {
-            0x344155
-        } else {
-            0xf4f7fc
-        };
-        let dc = item.hDC;
-        let mut rect = item.rcItem;
-        let brush = CreateSolidBrush(rgb(backdrop));
-        FillRect(dc, &rect, brush);
-        let _ = DeleteObject(brush.into());
-        let region = CreateRoundRectRgn(
-            rect.left,
-            rect.top,
-            rect.right + 1,
-            rect.bottom + 1,
-            dip(14),
-            dip(14),
-        );
-        let brush = CreateSolidBrush(rgb(fill));
-        let _ = FillRgn(dc, region, brush);
-        let _ = DeleteObject(brush.into());
-        if !nav {
-            let edge = CreateSolidBrush(rgb(if selected {
-                0x0078d4
+        let disabled = item.itemState.0 & ODS_DISABLED.0 != 0;
+        let focused = state.keyboard_focus
+            && item.itemState.0 & (ODS_FOCUS.0 | ODS_NOFOCUSRECT.0) == ODS_FOCUS.0;
+        let accent = appearance::accent(dark);
+        let fg = appearance::foreground(dark);
+        if matches!(id, 200 | 400) {
+            let on = if id == 400 {
+                cfg.show_hints
             } else {
-                appearance::divider(dark)
-            }));
-            let _ = FrameRgn(dc, region, edge, 1, 1);
-            let _ = DeleteObject(edge.into());
-        }
-        let _ = DeleteObject(region.into());
-        SetBkMode(dc, TRANSPARENT);
-        let fg = if nav && selected {
-            if dark { 0xd5eaff } else { 0x12365c }
-        } else {
-            appearance::foreground(dark)
-        };
-        SetTextColor(dc, rgb(fg));
-        if nav {
-            const ICONS: [u16; 6] = [0xe713, 0xe765, 0xe739, 0xe718, 0xe790, 0xe946];
-            let mut glyph_rect = rect;
-            glyph_rect.left += dip(16);
-            let old = SelectObject(dc, state.icon_font.into());
-            DrawTextW(
-                dc,
-                &mut [ICONS[(id - 100) as usize]],
-                &mut glyph_rect,
-                DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
-            );
-            SelectObject(dc, old);
-            rect.left += dip(49);
-            if selected {
-                let brush = CreateSolidBrush(rgb(if dark { 0x75b7ff } else { 0x006ded }));
-                let mut mark = item.rcItem;
-                mark.left += dip(1);
-                mark.right = mark.left + dip(3);
-                mark.top += dip(4);
-                mark.bottom -= dip(4);
-                FillRect(dc, &mark, brush);
-                let _ = DeleteObject(brush.into());
+                matches!(
+                    state.startup,
+                    Ok(startup::State::Enabled | startup::State::Moved)
+                )
+            };
+            if hovered && !disabled {
+                rounded_fill(dc, r, dip(12), if dark { 0x37393e } else { 0xeff2f6 });
             }
-        }
-        let old = SelectObject(dc, state.font.into());
-        let length = GetWindowTextLengthW(item.hwndItem).max(0) as usize;
-        let mut text = vec![0u16; length + 1];
-        let read = GetWindowTextW(item.hwndItem, &mut text).max(0) as usize;
-        DrawTextW(
-            dc,
-            &mut text[..read],
-            &mut rect,
-            (if nav { DT_LEFT } else { DT_CENTER })
-                | DT_VCENTER
-                | DT_SINGLELINE
-                | DT_NOPREFIX
-                | DT_END_ELLIPSIS,
-        );
-        SelectObject(dc, old);
-        if item.itemState.0 & ODS_FOCUS.0 != 0 {
-            let r = item.rcItem;
-            let _ = DrawFocusRect(
+            draw_toggle(item, dip, dark, on);
+        } else if (410..=417).contains(&id) {
+            let color = COLORS[usize::from(id - 410)];
+            let selected = cfg.color == color;
+            let [red, green, blue] = color.map(u32::from);
+            let color = red << 16 | green << 8 | blue;
+            let size = dip(22).min(r.right - r.left - dip(3)).max(1);
+            let left = (r.left + r.right - size) / 2;
+            let top = (r.top + r.bottom - size) / 2;
+            let swatch = RECT {
+                left,
+                top,
+                right: left + size,
+                bottom: top + size,
+            };
+            if hovered || pressed || color == 0xffffff && !dark || color == 0x000000 && dark {
+                rounded_fill(
+                    dc,
+                    swatch,
+                    size,
+                    if hovered || pressed {
+                        accent
+                    } else {
+                        appearance::muted(dark)
+                    },
+                );
+                let inner = RECT {
+                    left: left + 1,
+                    top: top + 1,
+                    right: left + size - 1,
+                    bottom: top + size - 1,
+                };
+                rounded_fill(dc, inner, size - 2, color);
+            } else {
+                rounded_fill(dc, swatch, size, color);
+            }
+            if selected {
+                let mark = if red * 3 + green * 6 + blue > 1400 {
+                    0x202226
+                } else {
+                    0xffffff
+                };
+                draw_label(dc, state.icon_font, "\u{e73e}", r, mark, DT_CENTER);
+            }
+        } else {
+            let selected = match id {
+                100..=105 => usize::from(id - 100) == state.page,
+                420..=423 => cfg.stroke_width == [1, 3, 5, 8][usize::from(id - 420)],
+                430..=433 => cfg.text_size == [16, 24, 32, 48][usize::from(id - 430)],
+                600..=602 => {
+                    cfg.theme == [Theme::System, Theme::Light, Theme::Dark][usize::from(id - 600)]
+                }
+                _ => false,
+            };
+            let theme = (600..=602).contains(&id);
+            let fill = match (pressed, selected && !theme, hovered && !disabled) {
+                (true, _, _) => Some(if dark { 0x3c5773 } else { 0xc7e0f7 }),
+                (_, true, _) => Some(if dark { 0x334d68 } else { 0xdcecfb }),
+                (_, _, true) => Some(if dark { 0x37393e } else { 0xeff2f6 }),
+                _ if matches!(id, 201 | 301 | 500 | 700..=702 | 800) => {
+                    Some(if dark { 0x303236 } else { 0xf0f2f5 })
+                }
+                _ => None,
+            };
+            if let Some(fill) = fill {
+                rounded_fill(dc, r, dip(12), fill);
+            }
+            let text_color = if disabled {
+                appearance::muted(dark)
+            } else if selected {
+                accent
+            } else {
+                fg
+            };
+            let mut label_bounds = r;
+            let label = match id {
+                100..=105 => {
+                    const ICONS: [&str; 6] = [
+                        "\u{e713}", "\u{e765}", "\u{e739}", "\u{e718}", "\u{e790}", "\u{e946}",
+                    ];
+                    let icon = RECT {
+                        left: r.left + dip(13),
+                        ..r
+                    };
+                    draw_label(
+                        dc,
+                        state.icon_font,
+                        ICONS[usize::from(id - 100)],
+                        icon,
+                        text_color,
+                        DT_LEFT,
+                    );
+                    label_bounds.left += dip(42);
+                    if selected {
+                        let mark = RECT {
+                            left: r.left + dip(1),
+                            top: r.top + dip(6),
+                            right: r.left + dip(4),
+                            bottom: r.bottom - dip(6),
+                        };
+                        rounded_fill(dc, mark, dip(3), accent);
+                    }
+                    PAGES[usize::from(id - 100)].to_owned()
+                }
+                420..=423 => {
+                    let n = [1, 3, 5, 8][usize::from(id - 420)];
+                    let h = dip(n).max(1);
+                    let y = (r.top + r.bottom - h) / 2;
+                    let x = r.left + dip(7);
+                    if r.right - r.left >= dip(56) {
+                        rounded_fill(
+                            dc,
+                            RECT {
+                                left: x,
+                                top: y,
+                                right: x + dip(16),
+                                bottom: y + h,
+                            },
+                            h,
+                            text_color,
+                        );
+                        label_bounds.left += dip(22);
+                    }
+                    format!("{n} px")
+                }
+                430..=433 => [16, 24, 32, 48][usize::from(id - 430)].to_string(),
+                600..=602 => {
+                    draw_preview(dc, r, dip, id);
+                    label_bounds.top = r.bottom - dip(36);
+                    let name = ["跟随系统", "浅色", "深色"][usize::from(id - 600)];
+                    if selected {
+                        format!("✓ {name}")
+                    } else {
+                        name.to_owned()
+                    }
+                }
+                _ => caption(id, &cfg, &state.startup),
+            };
+            draw_label(
                 dc,
-                &RECT {
-                    left: r.left + 3,
-                    top: r.top + 3,
-                    right: r.right - 3,
-                    bottom: r.bottom - 3,
-                },
+                state.font,
+                &label,
+                label_bounds,
+                text_color,
+                if nav { DT_LEFT } else { DT_CENTER },
             );
+        }
+        if focused && !disabled {
+            let mut frame = r;
+            let _ = InflateRect(&mut frame, -dip(2), -dip(2));
+            let brush = CreateSolidBrush(rgb(accent));
+            FrameRect(dc, &frame, brush);
+            let _ = DeleteObject(brush.into());
         }
     }
 }
-fn draw_startup_toggle(item: &DRAWITEMSTRUCT, dip: impl Fn(i32) -> i32, dark: bool, on: bool) {
+
+fn fill_rect(dc: HDC, r: &RECT, color: u32) {
+    // SAFETY: callers provide a live paint DC. FillRect does not retain the temporary brush.
+    unsafe {
+        let brush = CreateSolidBrush(rgb(color));
+        FillRect(dc, r, brush);
+        let _ = DeleteObject(brush.into());
+    }
+}
+
+fn rounded_fill(dc: HDC, r: RECT, corner: i32, color: u32) {
+    // SAFETY: both temporary GDI objects are local to this paint call and are not selected into the DC.
+    unsafe {
+        let region = CreateRoundRectRgn(
+            r.left,
+            r.top,
+            r.right + 1,
+            r.bottom + 1,
+            corner.max(1),
+            corner.max(1),
+        );
+        let brush = CreateSolidBrush(rgb(color));
+        let _ = FillRgn(dc, region, brush);
+        let _ = DeleteObject(brush.into());
+        let _ = DeleteObject(region.into());
+    }
+}
+
+fn draw_label(dc: HDC, font: HFONT, label: &str, mut r: RECT, color: u32, align: DRAW_TEXT_FORMAT) {
+    // SAFETY: the UTF-16 buffer and DC live through DrawTextW; restore the caller's font.
+    unsafe {
+        let mut text: Vec<_> = label.encode_utf16().collect();
+        let old = SelectObject(dc, font.into());
+        SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, rgb(color));
+        DrawTextW(
+            dc,
+            &mut text,
+            &mut r,
+            align | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS,
+        );
+        SelectObject(dc, old);
+    }
+}
+
+fn draw_preview(dc: HDC, r: RECT, dip: impl Fn(i32) -> i32, id: u16) {
+    let thumb = RECT {
+        left: r.left + dip(5),
+        top: r.top + dip(5),
+        right: r.right - dip(5),
+        bottom: r.bottom - dip(44),
+    };
+    let w = thumb.right - thumb.left;
+    let h = thumb.bottom - thumb.top;
+    let split = thumb.left + w / 2;
+    let miniature = |dark| {
+        rounded_fill(dc, thumb, dip(12), if dark { 0x36383d } else { 0xe7edf4 });
+        let x = thumb.left + w / 3;
+        let y = thumb.top + h / 6;
+        let panel = RECT {
+            left: x,
+            top: y,
+            right: thumb.right - w / 14,
+            bottom: thumb.bottom - h / 8,
+        };
+        rounded_fill(dc, panel, dip(6), if dark { 0x26272a } else { 0xffffff });
+        for (index, length) in [(0, 43), (1, 34), (2, 39)] {
+            let top = y + (index + 1) * h / 6;
+            rounded_fill(
+                dc,
+                RECT {
+                    left: x + w / 16,
+                    top,
+                    right: x + w * length / 100,
+                    bottom: top + dip(4),
+                },
+                dip(4),
+                if dark { 0x54575e } else { 0xd8e0ea },
+            );
+        }
+        let left = thumb.left + w / 13;
+        for index in 0..3 {
+            let top = y + (index + 1) * h / 6;
+            rounded_fill(
+                dc,
+                RECT {
+                    left,
+                    top,
+                    right: left + w / 7,
+                    bottom: top + dip(4),
+                },
+                dip(4),
+                match (dark, index) {
+                    (true, 0) => 0x578fc7,
+                    (false, 0) => 0x86b9ee,
+                    (true, _) => 0x686b72,
+                    _ => 0xb7c4d4,
+                },
+            );
+        }
+    };
+    miniature(id == 602);
+    if id == 600 {
+        // SAFETY: the DC is live for this paint. Restore the clip before returning.
+        unsafe {
+            let saved = SaveDC(dc);
+            if saved != 0 {
+                IntersectClipRect(dc, split, thumb.top, thumb.right + 1, thumb.bottom + 1);
+                miniature(true);
+                let _ = RestoreDC(dc, saved);
+            }
+        }
+    }
+}
+
+fn draw_toggle(item: &DRAWITEMSTRUCT, dip: impl Fn(i32) -> i32, dark: bool, on: bool) {
     // SAFETY: the DC is borrowed from WM_DRAWITEM. Restore the original pen and brush before releasing temporary objects.
     unsafe {
         let r = item.rcItem;
         let dc = item.hDC;
-        let body = CreateSolidBrush(rgb(appearance::card_body(dark)));
-        FillRect(dc, &r, body);
-        let _ = DeleteObject(body.into());
         let (width, height) = (dip(42), dip(22));
         let left = r.left + (r.right - r.left - width) / 2;
         let top = r.top + (r.bottom - r.top - height) / 2;
@@ -973,9 +1149,6 @@ fn draw_startup_toggle(item: &DRAWITEMSTRUCT, dip: impl Fn(i32) -> i32, dark: bo
         SelectObject(dc, old_pen);
         let _ = DeleteObject(knob.into());
         let _ = DeleteObject(track.into());
-        if item.itemState.0 & ODS_FOCUS.0 != 0 {
-            let _ = DrawFocusRect(dc, &r);
-        }
     }
 }
 fn rgb(value: u32) -> COLORREF {
@@ -1010,7 +1183,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             WM_CTLCOLORSTATIC | WM_CTLCOLOREDIT => {
                 let dc = HDC(wp.0 as *mut _);
                 SetTextColor(dc, rgb(appearance::foreground(system_dark())));
-                SetBkColor(dc, rgb(appearance::card_body(system_dark())));
+                SetBkColor(dc, rgb(appearance::background(system_dark())));
                 LRESULT((*p).brush.0 as isize)
             }
             WM_PAINT => {
@@ -1070,7 +1243,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             }
             WM_DPICHANGED => {
                 (*p).dpi = (wp.0 & 65535) as u32;
-                let next = font((*p).dpi, 15, w!("Segoe UI"));
+                let next = font((*p).dpi, 14, w!("Microsoft YaHei UI"));
                 let old_icons = std::mem::replace(&mut (*p).icon_font, font_for_icons((*p).dpi));
                 let _ = DeleteObject(old_icons.into());
                 let old = std::mem::replace(&mut (*p).font, next);
@@ -1105,7 +1278,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 let m = &mut *(lp.0 as *mut MINMAXINFO);
                 let s = (*p).dpi as f32 / 96.;
                 m.ptMinTrackSize = POINT {
-                    x: (850. * s) as i32,
+                    x: (660. * s) as i32,
                     y: (480. * s) as i32,
                 };
                 LRESULT(0)
