@@ -290,3 +290,10 @@
 - 用户确认透明输入并提供包含箭头、笔画和多行中文的人工成图。Release 探针 PNG 核对旋转中文字；默认和全特性各 43 项通过，双配置严格 Clippy、rustfmt、Release 构建通过。
 - 修正版 ZIP 和 SHA-256 已生成并验算 16 个文件。单次 WGC 首帧及读回为 67.4654 ms。详见 [界面优化验证](validation/UI_POLISH.md)。
 - 关联提交主题：feat(annotation): add transparent text editing and rotation。下一步实机复测深浅工具条、旋转手柄、拼音候选和高 DPI，延续多屏及 HDR 遗留。
+
+## P3 工具条按 01-capture.png 对照修订
+
+- 主工具条按参考图的面板、按钮与分隔线比例定位。11 个图标改为原生矢量轮廓，普通按钮保留 42×36 DIP 命中区。
+- 125% 单屏在运行中的 Release 诊断版截图上核对浅色与深色主栏。全特性 43 项测试、严格 Clippy、rustfmt 和两种 Release 构建通过。
+- 已重新生成便携 ZIP 与校验文件并验证 16 个解压文件。截图和数据详见 [界面优化验证](validation/UI_POLISH.md)。下轮继续验证高 DPI、跨屏及文字编辑实机遗留。
+- 关联提交主题：fix(selection): match capture toolbar to approved artwork。

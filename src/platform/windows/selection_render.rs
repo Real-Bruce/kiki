@@ -1,4 +1,4 @@
-use super::text_input::TextInput;
+use super::{text_input::TextInput, toolbar_icons::ToolbarIcons};
 use crate::core::{
     annotation::{Editor, Shape, Tool, rotate_point, text_center},
     display::DisplayInfo,
@@ -19,18 +19,24 @@ use windows::{
 };
 use windows_numerics::{Matrix3x2, Vector2};
 
-const BUTTON_WIDTH: f32 = 36.;
-const COPY_WIDTH: f32 = 76.;
-const BUTTON_GAP: f32 = 8.;
-const GROUP_GAP: f32 = 8.;
-const BAR_PADDING: f32 = 10.;
-const GROUP_STARTS: [usize; 3] = [1, 5, 7];
-const BAR_WIDTH: f32 = 10. * BUTTON_WIDTH
-    + COPY_WIDTH
-    + 10. * BUTTON_GAP
-    + GROUP_STARTS.len() as f32 * GROUP_GAP
-    + 2. * BAR_PADDING;
-const PARAM_WIDTH: f32 = 422.;
+const BAR_HEIGHT: f32 = 48.;
+const PARAM_GAP: f32 = 8.;
+const PARAM_HEIGHT: f32 = 42.;
+// 01-capture.png: main panel x=353..1233, y=723..790. Coordinates are
+// offsets from the panel's left edge, normalized to the 48 DIP panel height.
+const REFERENCE_SCALE: f32 = BAR_HEIGHT / 68.;
+const BAR_WIDTH: f32 = 880. * REFERENCE_SCALE;
+const BUTTON_CENTERS: [f32; 11] = [
+    46., 111., 177., 243., 309., 408., 472., 571., 636., 737., 842.,
+];
+const DIVIDER_CENTERS: [f32; 3] = [358., 522., 809.];
+const BUTTON_WIDTH: f32 = 42.;
+const COPY_WIDTH: f32 = 118. * REFERENCE_SCALE;
+const BUTTON_HEIGHT: f32 = 36.;
+const BUTTON_FACE_HEIGHT: f32 = 34.;
+const BUTTON_RADIUS: f32 = 7.;
+const BAR_RADIUS: f32 = 10.;
+const PARAM_WIDTH: f32 = 418.;
 const COLOR_START: f32 = 10.;
 const COLOR_STEP: f32 = 30.;
 const VALUE_START: f32 = 258.;
@@ -65,7 +71,7 @@ pub struct Canvas {
     brush: ID2D1SolidColorBrush,
     dw: IDWriteFactory,
     text: IDWriteTextFormat,
-    icons: IDWriteTextFormat,
+    icons: ToolbarIcons,
     scale: f32,
     pub dark: bool,
     source: std::sync::Arc<Image>,
@@ -121,8 +127,8 @@ impl Canvas {
             )?;
             let brush = target.CreateSolidColorBrush(&color(0, 0, 0, 1.), None)?;
             let dw: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
-            let text = format(&dw, false, 1.)?;
-            let icons = format(&dw, true, 1.)?;
+            let text = format(&dw, 1.)?;
+            let icons = ToolbarIcons::new(&factory)?;
             Ok(Self {
                 target,
                 factory,
@@ -143,44 +149,43 @@ impl Canvas {
     }
     pub fn layout(&self, rect: PixelRect, screens: &[DisplayInfo], parameters: bool) -> Layout {
         let (screen, preferred) = self.display(rect, screens);
+        let height = BAR_HEIGHT
+            + if parameters {
+                PARAM_GAP + PARAM_HEIGHT
+            } else {
+                0.
+            };
         let scale = preferred
             .min((i64::from(screen.right) - i64::from(screen.left)) as f32 / BAR_WIDTH)
-            .min(
-                (i64::from(screen.bottom) - i64::from(screen.top)) as f32
-                    / if parameters { 104. } else { 48. },
-            )
-            .max(0.1);
+            .min((i64::from(screen.bottom) - i64::from(screen.top)) as f32 / height);
         let bounds = toolbar(
             rect,
             screen,
             (BAR_WIDTH * scale).round() as i32,
-            (if parameters { 104. } else { 48. } * scale).round() as i32,
+            (height * scale).round() as i32,
             (10. * scale).round() as i32,
         );
-        let mut x = bounds.left as f32 + BAR_PADDING * scale;
+        let x = |offset: f32| bounds.left.saturating_add((offset * scale).round() as i32);
+        let y = |offset: f32| bounds.top.saturating_add((offset * scale).round() as i32);
         let buttons = std::array::from_fn(|i| {
-            if GROUP_STARTS.contains(&i) {
-                x += GROUP_GAP * scale;
+            let center = BUTTON_CENTERS[i] * REFERENCE_SCALE;
+            let half = if i == 9 { COPY_WIDTH } else { BUTTON_WIDTH } / 2.;
+            PixelRect {
+                left: x(center - half),
+                top: y((BAR_HEIGHT - BUTTON_HEIGHT) / 2.),
+                right: x(center + half),
+                bottom: y((BAR_HEIGHT + BUTTON_HEIGHT) / 2.),
             }
-            let width = if i == 9 { COPY_WIDTH } else { BUTTON_WIDTH };
-            let r = PixelRect {
-                left: x.round() as i32,
-                top: (bounds.top as f32 + 6. * scale).round() as i32,
-                right: (x + width * scale).round() as i32,
-                bottom: (bounds.top as f32 + 42. * scale).round() as i32,
-            };
-            x += (width + BUTTON_GAP) * scale;
-            r
         });
         Layout {
             toolbar: PixelRect {
-                bottom: bounds.top + (48. * scale).round() as i32,
+                bottom: y(BAR_HEIGHT),
                 ..bounds
             },
             parameters: parameters.then(|| PixelRect {
-                left: bounds.left + ((BAR_WIDTH - PARAM_WIDTH) / 2. * scale).round() as i32,
-                top: bounds.top + (56. * scale).round() as i32,
-                right: bounds.right - ((BAR_WIDTH - PARAM_WIDTH) / 2. * scale).round() as i32,
+                left: x((BAR_WIDTH - PARAM_WIDTH) / 2.),
+                top: y(BAR_HEIGHT + PARAM_GAP),
+                right: x((BAR_WIDTH + PARAM_WIDTH) / 2.),
                 bottom: bounds.bottom,
             }),
             bounds,
@@ -241,8 +246,7 @@ impl Canvas {
         // SAFETY: all drawing resources belong to this UI thread; BeginDraw is always paired with EndDraw.
         unsafe {
             if (scale - self.scale).abs() > 0.001 {
-                self.text = format(&self.dw, false, scale)?;
-                self.icons = format(&self.dw, true, scale)?;
+                self.text = format(&self.dw, scale)?;
                 self.scale = scale;
             }
             self.target.BeginDraw();
@@ -405,34 +409,38 @@ impl Canvas {
             let panel = if self.dark {
                 color(44, 47, 53, 0.97)
             } else {
-                color(249, 250, 253, 0.97)
+                color(235, 240, 249, 0.97)
             };
-            self.round(r, 12. * s, panel);
+            self.round(r, BAR_RADIUS * s, panel);
             self.brush.SetColor(&if self.dark {
                 color(98, 103, 114, 1.)
             } else {
-                color(205, 211, 223, 1.)
+                color(255, 255, 255, 0.78)
             });
             self.target.DrawRoundedRectangle(
                 &D2D1_ROUNDED_RECT {
                     rect: r,
-                    radiusX: 12. * s,
-                    radiusY: 12. * s,
+                    radiusX: BAR_RADIUS * s,
+                    radiusY: BAR_RADIUS * s,
                 },
                 &self.brush,
                 1.,
                 None,
             );
-            for i in GROUP_STARTS {
-                let b = self.local(layout.buttons[i]);
+            for center in DIVIDER_CENTERS {
+                let x = r.left + center * REFERENCE_SCALE * s;
                 self.fill(
                     D2D_RECT_F {
-                        left: b.left - 8.5 * s,
-                        top: r.top + 12. * s,
-                        right: b.left - 7.5 * s,
-                        bottom: r.bottom - 12. * s,
+                        left: x - 0.45 * s,
+                        top: r.top + 14. * s,
+                        right: x + 0.45 * s,
+                        bottom: r.bottom - 14. * s,
                     },
-                    color(135, 143, 157, 0.35),
+                    if self.dark {
+                        color(170, 180, 195, 0.55)
+                    } else {
+                        color(118, 132, 154, 0.55)
+                    },
                 );
             }
             let names = [
@@ -451,6 +459,12 @@ impl Canvas {
             let mut hovered = None;
             for (i, button) in layout.buttons.iter().enumerate() {
                 let b = self.local(*button);
+                let inset = (BUTTON_HEIGHT - BUTTON_FACE_HEIGHT) * s / 2.;
+                let face = D2D_RECT_F {
+                    top: b.top + inset,
+                    bottom: b.bottom - inset,
+                    ..b
+                };
                 let active = !busy && editor.enabled(i);
                 let over = contains(*button, pointer);
                 if over {
@@ -458,19 +472,19 @@ impl Canvas {
                 }
                 if i == editor.tool.button() {
                     self.round(
-                        b,
-                        6. * s,
+                        face,
+                        BUTTON_RADIUS * s,
                         if self.dark {
                             color(41, 87, 129, 1.)
                         } else {
-                            color(211, 233, 255, 1.)
+                            color(190, 216, 253, 1.)
                         },
                     );
                 }
                 if over && active {
                     self.round(
-                        b,
-                        6. * s,
+                        face,
+                        BUTTON_RADIUS * s,
                         if self.dark {
                             color(72, 82, 95, 1.)
                         } else {
@@ -480,8 +494,8 @@ impl Canvas {
                 }
                 if over && active && pressed == Some(i) {
                     self.round(
-                        b,
-                        6. * s,
+                        face,
+                        BUTTON_RADIUS * s,
                         if self.dark {
                             color(35, 66, 96, 1.)
                         } else {
@@ -495,11 +509,11 @@ impl Canvas {
                     } else if over {
                         (0, 105, 193)
                     } else {
-                        (0, 120, 212)
+                        (0, 110, 235)
                     };
                     self.round(
-                        b,
-                        6. * s,
+                        face,
+                        BUTTON_RADIUS * s,
                         color(blue.0, blue.1, blue.2, if busy { 0.65 } else { 1. }),
                     );
                 }
@@ -507,7 +521,7 @@ impl Canvas {
                     if self.dark {
                         color(235, 246, 255, 1.)
                     } else {
-                        color(0, 120, 212, 1.)
+                        color(18, 22, 28, 1.)
                     }
                 } else if !active {
                     if self.dark {
@@ -518,7 +532,7 @@ impl Canvas {
                 } else if self.dark {
                     color(244, 246, 250, 1.)
                 } else {
-                    color(34, 40, 49, 1.)
+                    color(18, 22, 28, 1.)
                 };
                 self.icon(i, b, foreground, s);
                 if focus == i {
@@ -851,123 +865,38 @@ impl Canvas {
             }
         }
     }
-    fn icon(&self, index: usize, r: D2D_RECT_F, c: D2D1_COLOR_F, s: f32) {
-        let x = (r.left + r.right) / 2.;
-        let y = (r.top + r.bottom) / 2.;
-        // SAFETY: retained UI-thread rendering resources and bounded icon coordinates.
+    fn icon(&self, index: usize, r: D2D_RECT_F, c: D2D1_COLOR_F, scale: f32) {
+        let center = Vector2 {
+            X: (r.left + r.right) / 2.,
+            Y: (r.top + r.bottom) / 2.,
+        };
+        // SAFETY: the brush is owned by the active canvas on the render thread.
         unsafe {
-            let icon_scale = s * (18. / 21.);
-            let line = |a: (f32, f32), b: (f32, f32)| {
-                self.brush.SetColor(&c);
-                self.target.DrawLine(
-                    Vector2 {
-                        X: x + a.0 * icon_scale,
-                        Y: y + a.1 * icon_scale,
-                    },
-                    Vector2 {
-                        X: x + b.0 * icon_scale,
-                        Y: y + b.1 * icon_scale,
-                    },
-                    &self.brush,
-                    1.5 * s,
-                    None,
-                );
-            };
-            match index {
-                0 => {
-                    for (a, b) in [
-                        ((-7., -10.), (-6., 9.)),
-                        ((-6., 9.), (-1., 4.)),
-                        ((-1., 4.), (3., 11.)),
-                        ((3., 11.), (6., 9.)),
-                        ((6., 9.), (2., 2.)),
-                        ((2., 2.), (9., 1.)),
-                        ((9., 1.), (-7., -10.)),
-                    ] {
-                        line(a, b);
-                    }
-                }
-                1 => {
-                    self.brush.SetColor(&c);
-                    self.target.DrawRectangle(
-                        &D2D_RECT_F {
-                            left: x - 9. * s,
-                            top: y - 7. * s,
-                            right: x + 9. * s,
-                            bottom: y + 7. * s,
-                        },
-                        &self.brush,
-                        1.5 * s,
-                        None,
-                    );
-                }
-                2 => {
-                    line((-9., 9.), (9., -9.));
-                    line((0., -9.), (9., -9.));
-                    line((9., -9.), (9., 0.));
-                }
-                4 => {
-                    line((-8., -9.), (8., -9.));
-                    line((0., -9.), (0., 9.));
-                    line((-4., 9.), (4., 9.));
-                }
-                9 => {
-                    self.brush.SetColor(&color(255, 255, 255, 1.));
-                    self.target.DrawRectangle(
-                        &D2D_RECT_F {
-                            left: r.left + 10. * s,
-                            top: y - 5. * s,
-                            right: r.left + 21. * s,
-                            bottom: y + 8. * s,
-                        },
-                        &self.brush,
-                        1.5 * s,
-                        None,
-                    );
-                    self.target.DrawRectangle(
-                        &D2D_RECT_F {
-                            left: r.left + 13. * s,
-                            top: y - 8. * s,
-                            right: r.left + 24. * s,
-                            bottom: y + 5. * s,
-                        },
-                        &self.brush,
-                        1.5 * s,
-                        None,
-                    );
-                    self.label(
-                        "复制",
-                        D2D_RECT_F {
-                            left: r.left + 29. * s,
-                            ..r
-                        },
-                        color(255, 255, 255, 1.),
-                    );
-                }
-                10 => {
-                    line((-7., -7.), (7., 7.));
-                    line((7., -7.), (-7., 7.));
-                }
-                _ => {
-                    let glyph = match index {
-                        3 => 0xE70F,
-                        5 => 0xE7A7,
-                        6 => 0xE7A6,
-                        7 => 0xE718,
-                        8 => 0xE74E,
-                        _ => 0xE711,
-                    };
-                    self.brush.SetColor(&c);
-                    self.target.DrawText(
-                        &[glyph],
-                        &self.icons,
-                        &r,
-                        &self.brush,
-                        D2D1_DRAW_TEXT_OPTIONS_NONE,
-                        DWRITE_MEASURING_MODE_NATURAL,
-                    );
-                }
+            self.brush.SetColor(&if index == 9 {
+                color(255, 255, 255, 1.)
+            } else {
+                c
+            });
+        }
+        let icon_center = if index == 9 {
+            Vector2 {
+                X: center.X - 18. * scale,
+                ..center
             }
+        } else {
+            center
+        };
+        self.icons
+            .draw(&self.target, &self.brush, index, icon_center, scale);
+        if index == 9 {
+            self.label(
+                "复制",
+                D2D_RECT_F {
+                    left: center.X - 14. * scale,
+                    ..r
+                },
+                color(255, 255, 255, 1.),
+            );
         }
     }
     fn local(&self, r: PixelRect) -> D2D_RECT_F {
@@ -1014,20 +943,16 @@ impl Canvas {
         }
     }
 }
-fn format(factory: &IDWriteFactory, icon: bool, scale: f32) -> Result<IDWriteTextFormat> {
+fn format(factory: &IDWriteFactory, scale: f32) -> Result<IDWriteTextFormat> {
     // SAFETY: formats are created and retained on this UI thread; static system font names are NUL terminated.
     unsafe {
         let text = factory.CreateTextFormat(
-            if icon {
-                w!("Segoe Fluent Icons")
-            } else {
-                w!("Segoe UI")
-            },
+            w!("Segoe UI"),
             None,
             DWRITE_FONT_WEIGHT_NORMAL,
             DWRITE_FONT_STYLE_NORMAL,
             DWRITE_FONT_STRETCH_NORMAL,
-            if icon { 18. * scale } else { 14. * scale },
+            14. * scale,
             w!("zh-CN"),
         )?;
         text.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER)?;

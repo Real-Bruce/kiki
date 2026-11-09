@@ -22,6 +22,7 @@ mod settings_render;
 mod tests;
 mod text_input;
 mod text_viewer;
+mod toolbar_icons;
 mod window_targets;
 
 use crate::core::session::{SessionGate, SessionId};
