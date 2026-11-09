@@ -360,3 +360,11 @@
 - 125% 单屏核对浅深色工具条、参数条和设置图标。同一份测试标注 PNG 前后逐字节一致。默认和全特性各 44 项测试、严格 Clippy、rustfmt 及两种 Release 构建通过。
 - 便携 ZIP 已生成并核对 16 个解压文件，详见 [界面优化验证](validation/UI_POLISH.md)。
 - 关联提交主题：feat(theme): bring pine colors to capture and app icon。
+
+## v0.2.1 版本交付
+
+- 汇总截图工具条、标注、设置、托盘菜单和统一主题的改动。Cargo、关于页、Windows 程序属性和快速使用说明使用 0.2.1，嵌入的 Windows 清单使用 0.2.1.0。
+- Rust 1.88.0 下默认和全特性各 44 项测试通过，两套严格 Clippy、rustfmt、普通 Release 构建及差异检查通过。
+- `dist/kiki-v0.2.1-windows-x64.zip` 为 526,918 字节。解压到含中文和空格的路径，逐一核对全部 16 个文件的 SHA-256，并读取解压后 EXE 的文件版本、产品版本和嵌入清单。
+- ZIP 的 SHA-256 为 `377aa910de2652d1e0e886d94f6ce7afd228e081edd26a68aafe76ea38e35c12`。版本提交主题为 `chore(release): prepare v0.2.1`，主分支版本标签为 `v0.2.1`。
+- 实机界面及成图记录见 [界面优化验证](validation/UI_POLISH.md) 和 [设置与托盘验证](validation/P6.md)。多显示器、混合 DPI、HDR 及完整 IME 验收仍按 [P8 报告](validation/P8.md) 跟踪。

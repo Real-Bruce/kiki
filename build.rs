@@ -2,6 +2,7 @@ use std::{env, error::Error, path::PathBuf, process::Command};
 
 fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=resources/app.rc");
+    println!("cargo:rerun-if-changed=resources/app.manifest");
     println!("cargo:rerun-if-changed=resources/icons/kiki.ico");
     for name in [
         "RC",
@@ -17,13 +18,19 @@ fn main() -> Result<(), Box<dyn Error>> {
     let output =
         PathBuf::from(env::var_os("OUT_DIR").ok_or("缺少 Cargo OUT_DIR")?).join("kiki.res");
     let compiler = resource_compiler()?;
+    let major = env::var("CARGO_PKG_VERSION_MAJOR")?;
+    let minor = env::var("CARGO_PKG_VERSION_MINOR")?;
+    let patch = env::var("CARGO_PKG_VERSION_PATCH")?;
+    let version = env::var("CARGO_PKG_VERSION")?;
     let status = Command::new(compiler)
         .args(["/nologo", "/fo"])
         .arg(&output)
+        .arg(format!("/dKIKI_VERSION_NUMBERS={major},{minor},{patch},0"))
+        .arg(format!("/dKIKI_VERSION_STRING=\"{version}\""))
         .arg("resources/app.rc")
         .status()?;
     if !status.success() {
-        return Err("图标资源编译失败，请检查 Windows SDK 和 resources/app.rc".into());
+        return Err("Windows 资源编译失败，请检查 Windows SDK 和 resources/app.rc".into());
     }
     println!("cargo:rustc-link-arg={}", output.display());
     Ok(())
