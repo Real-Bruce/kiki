@@ -14,6 +14,7 @@ pub const CHANGED: u32 = WM_APP + 61;
 pub const OPEN_SETTINGS: u32 = WM_APP + 70;
 pub const CAPTURE: u32 = WM_APP + 71;
 pub const FULLSCREEN: u32 = WM_APP + 72;
+pub const CAPTURE_FROM_SETTINGS: u32 = WM_APP + 73;
 #[derive(Clone, Debug)]
 pub enum SaveStatus {
     Ready,
@@ -49,7 +50,7 @@ pub(super) fn initialize_at(owner: HWND, path: PathBuf) -> Result<(Guard, Option
     }
     let loaded = Disk::load(path.clone());
     let mut config = loaded.config;
-    let mut warning = loaded.warning;
+    let warning = loaded.warning;
     if std::env::args_os().any(|arg| arg == "--theme=dark") {
         config.theme = Theme::Dark;
     } else if std::env::args_os().any(|arg| arg == "--theme=light") {
@@ -57,13 +58,7 @@ pub(super) fn initialize_at(owner: HWND, path: PathBuf) -> Result<(Guard, Option
     }
     let writer = Writer::new(loaded.disk, Some(owner)).map_err(|e| Error::new(E_FAIL, e))?;
     let mut registration = Registration::new(owner);
-    if let Err(error) = registration.replace(config.hotkey) {
-        let message = format!(
-            "{} 注册失败（{error}），可从托盘进入设置修改。",
-            config.hotkey.label()
-        );
-        warning = Some(warning.map_or(message.clone(), |old| format!("{old}\n{message}")));
-    }
+    let _ = registration.replace(config.hotkey);
     SESSION.with_borrow_mut(|slot| {
         *slot = Some(Session {
             config,
@@ -121,25 +116,62 @@ pub fn path() -> Option<PathBuf> {
 pub fn active() -> bool {
     SESSION.with_borrow(|slot| slot.as_ref().is_some_and(|s| s.registration.active()))
 }
+pub fn active_shortcut() -> Option<String> {
+    SESSION.with_borrow(|slot| {
+        let session = slot.as_ref()?;
+        session
+            .registration
+            .active()
+            .then(|| session.config.hotkey.label())
+    })
+}
+pub fn request_capture_from_settings() -> std::result::Result<(), String> {
+    let owner = SESSION
+        .with_borrow(|slot| slot.as_ref().map(|s| s.owner))
+        .ok_or("截图暂不可用。")?;
+    // SAFETY: the tray owner outlives the UI-thread preferences session.
+    unsafe { PostMessageW(Some(owner), CAPTURE_FROM_SETTINGS, WPARAM(0), LPARAM(0)) }
+        .map_err(|_| "无法开始截图，请重试。".into())
+}
 pub fn matches(id: usize) -> bool {
     SESSION.with_borrow(|slot| slot.as_ref().is_some_and(|s| s.registration.matches(id)))
 }
 pub fn update(config: Config) -> std::result::Result<(), String> {
+    update_with_shortcut_retry(config, false)
+}
+
+pub fn set_shortcut(shortcut: crate::core::config::Hotkey) -> std::result::Result<(), String> {
+    let mut config = current();
+    config.hotkey = shortcut;
+    update_with_shortcut_retry(config, true)
+}
+
+fn update_with_shortcut_retry(config: Config, retry: bool) -> std::result::Result<(), String> {
     config.validate()?;
     let owner = SESSION.with_borrow_mut(|slot| -> std::result::Result<Option<HWND>, String> {
         let session = slot.as_mut().ok_or("设置管理器尚未启动")?;
-        if config == session.config && session.registration.active() {
+        let retry_shortcut = retry && !session.registration.active();
+        if config == session.config && !retry_shortcut {
             return Ok(None);
         }
         let revision = session
             .revision
             .checked_add(1)
             .ok_or("设置版本计数已用尽")?;
-        if config.hotkey != session.config.hotkey || !session.registration.active() {
+        if config.hotkey != session.config.hotkey || retry_shortcut {
             session
                 .registration
                 .replace(config.hotkey)
-                .map_err(|e| format!("热键已被占用或系统拒绝注册：{e}；原热键已保留"))?;
+                .map_err(|error| {
+                    let reason = if error.code()
+                        == windows::core::HRESULT::from_win32(ERROR_HOTKEY_ALREADY_REGISTERED.0)
+                    {
+                        "此快捷键已被占用"
+                    } else {
+                        "Windows 无法使用此快捷键"
+                    };
+                    format!("{reason}，请换一个组合。原设置已保留。")
+                })?;
         }
         session.revision = revision;
         if config.theme != session.config.theme {
@@ -157,6 +189,19 @@ pub fn update(config: Config) -> std::result::Result<(), String> {
     }
     Ok(())
 }
+pub fn record_first_use() {
+    SESSION.with_borrow_mut(|slot| {
+        if let Some(session) = slot.as_mut()
+            && !session.config.first_tip_seen
+            && let Some(revision) = session.revision.checked_add(1)
+        {
+            session.config.first_tip_seen = true;
+            session.revision = revision;
+            session.writer.request(revision, session.config.clone());
+        }
+    });
+}
+
 pub fn retry() {
     let owner = SESSION.with_borrow_mut(|slot| {
         let session = slot.as_mut()?;
@@ -176,6 +221,7 @@ pub fn poll() {
             if let Some(outcome) = session.writer.outcome() {
                 if outcome.revision == session.revision {
                     session.status = match outcome.result {
+                        Ok(()) if matches!(session.status, SaveStatus::Ready) => SaveStatus::Ready,
                         Ok(()) => SaveStatus::Saved,
                         Err(error) => SaveStatus::Failed(error),
                     };

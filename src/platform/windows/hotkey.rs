@@ -181,7 +181,7 @@ unsafe extern "system" fn themed_proc(
                 "请按下新快捷键…".to_owned()
             } else {
                 format!(
-                    "当前 {}　·　点击更改",
+                    "{}（点击更改）",
                     super::preferences::current().hotkey.label()
                 )
             };

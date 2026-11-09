@@ -9,7 +9,9 @@ use super::{
 use crate::core::config::{Config, Hotkey, Theme};
 #[path = "settings_layout.rs"]
 mod settings_layout;
-use settings_layout::{FOOTER, HEADER, Item, Page, Rect, Tone};
+use settings_layout::{
+    FOOTER, HEADER, Item, Page, Rect, START_CAPTURE, STROKE_SIZES, TEXT_SIZES, Tone,
+};
 use std::{cell::Cell, rc::Rc};
 use windows::{
     Win32::{
@@ -189,6 +191,27 @@ pub fn close() {
         }
     }
 }
+
+pub fn hide_for_capture() -> Option<HWND> {
+    let hwnd = WINDOW.get()?;
+    // SAFETY: the settings HWND belongs to this UI thread and remains live while hidden.
+    unsafe {
+        if IsWindowVisible(hwnd).as_bool() {
+            let _ = ShowWindow(hwnd, SW_HIDE);
+            let _ = DwmFlush();
+            Some(hwnd)
+        } else {
+            None
+        }
+    }
+}
+
+pub fn restore_after_capture_failure(window: Option<HWND>) {
+    if window.is_some() && WINDOW.get() == window {
+        let _ = open();
+    }
+}
+
 pub fn route(message: &MSG) -> bool {
     // SAFETY: called by the UI thread with a live message and its settings window.
     WINDOW.get().is_some_and(|hwnd| unsafe {
@@ -288,7 +311,6 @@ pub fn restore_hotkey_input() {
                 (*p).suppress = true;
                 hotkey::set_control(child, preferences::current().hotkey);
                 (*p).suppress = false;
-                (*p).error = None;
                 let _ = InvalidateRect(Some(hwnd), None, false);
             }
         }
@@ -375,9 +397,10 @@ fn caption(id: u16, cfg: &Config, start: &std::result::Result<startup::State, St
             _ => "开机启动：关闭",
         }
         .into(),
-        201 => "更新为当前程序路径".into(),
+        201 => "更新启动位置".into(),
+        START_CAPTURE => "开始截图".into(),
         301 => "恢复默认".into(),
-        400 => format!("操作提示：{}", if cfg.show_hints { "开启" } else { "关闭" }),
+        400 => format!("截图提示：{}", if cfg.show_hints { "开启" } else { "关闭" }),
         410..=417 => {
             let i = (id - 410) as usize;
             format!(
@@ -387,14 +410,14 @@ fn caption(id: u16, cfg: &Config, start: &std::result::Result<startup::State, St
             )
         }
         420..=423 => {
-            let n = [1, 3, 5, 8][(id - 420) as usize];
+            let n = STROKE_SIZES[(id - 420) as usize];
             format!("{n} px{}", if cfg.stroke_width == n { " ✓" } else { "" })
         }
         430..=433 => {
-            let n = [16, 24, 32, 48][(id - 430) as usize];
+            let n = TEXT_SIZES[(id - 430) as usize];
             format!("{n} px{}", if cfg.text_size == n { " ✓" } else { "" })
         }
-        500 => "关闭所有贴图".into(),
+        500 => "关闭贴图".into(),
         600..=602 => {
             let i = (id - 600) as usize;
             format!(
@@ -421,7 +444,19 @@ fn create_controls(hwnd: HWND) -> Result<()> {
         let ids = [BRAND]
             .into_iter()
             .chain(100..=105)
-            .chain([200, 201, 300, 301, 400, 500, 700, 701, 702, 800])
+            .chain([
+                200,
+                201,
+                START_CAPTURE,
+                300,
+                301,
+                400,
+                500,
+                700,
+                701,
+                702,
+                800,
+            ])
             .chain(410..=417)
             .chain(420..=423)
             .chain(430..=433)
@@ -466,6 +501,7 @@ fn page_geometry(state: &State, width: i32) -> Page {
         &preferences::current(),
         &state.startup,
         preferences::active(),
+        state.error.as_deref(),
     )
 }
 
@@ -578,7 +614,7 @@ fn paint(hwnd: HWND, p: *mut State) -> Result<()> {
         let fg = appearance::foreground(dark);
         let sub = appearance::muted(dark);
         let bg = appearance::background(dark);
-        let warning = appearance::warning(dark);
+
         c.begin(dark);
         c.fill(
             0.,
@@ -587,7 +623,7 @@ fn paint(hwnd: HWND, p: *mut State) -> Result<()> {
             height,
             appearance::sidebar(dark),
         );
-        c.heading("kiki", 63., 22., 75., 21., fg);
+        c.heading("kiki", 63., 21., 75., 24., fg);
         for item in &page.items {
             match item {
                 Item::Heading(label, y) => c.heading(label, x, *y as f32 - offset, w, 16., fg),
@@ -595,7 +631,7 @@ fn paint(hwnd: HWND, p: *mut State) -> Result<()> {
                     let (size, color) = match tone {
                         Tone::Normal => (14., fg),
                         Tone::Muted => (12., sub),
-                        Tone::Warning => (12., warning),
+                        Tone::Warning => (12., fg),
                     };
                     c.text(
                         label,
@@ -616,21 +652,14 @@ fn paint(hwnd: HWND, p: *mut State) -> Result<()> {
         let sidebar = page.sidebar as f32;
         c.fill(sidebar, 0., width - sidebar, HEADER as f32, bg);
         c.heading(PAGES[state.page], x, 19., w, 24., fg);
-        c.text(
-            [
-                "管理启动方式与截图后的行为",
-                "设置全局截图快捷键。",
-                "仅影响新截图，不更改已有标注。",
-                "贴图保留原图，缩放只影响显示。",
-                "选择适合当前桌面的主题。",
-                "轻量截图与置顶贴图。",
-            ][state.page],
-            x,
-            58.,
-            w,
-            13.,
-            sub,
-        );
+        let subtitle = match state.page {
+            0 => Some("也可从任务栏右下角的 kiki 图标开始截图。"),
+            2 => Some("默认样式只影响新截图。"),
+            _ => None,
+        };
+        if let Some(subtitle) = subtitle {
+            c.text(subtitle, x, 55., w, 12., sub);
+        }
         c.fill(
             sidebar,
             height - FOOTER as f32,
@@ -641,16 +670,22 @@ fn paint(hwnd: HWND, p: *mut State) -> Result<()> {
         let status = preferences::status();
         let failed = matches!(status, SaveStatus::Failed(_));
         let saved = state.error.is_none() && matches!(status, SaveStatus::Saved);
-        let message = state.error.clone().unwrap_or_else(|| match status {
-            SaveStatus::Ready => "更改后自动保存".into(),
-            SaveStatus::Saving => "正在保存设置…".into(),
-            SaveStatus::Saved => "设置已自动保存".into(),
-            SaveStatus::Failed(e) => format!("保存失败：{e}"),
-        });
+        let footer_error = (state.page != 1)
+            .then_some(state.error.as_deref())
+            .flatten();
+        let message = footer_error
+            .map(str::to_owned)
+            .unwrap_or_else(|| match status {
+                SaveStatus::Ready => String::new(),
+                SaveStatus::Saving => "正在保存设置…".into(),
+                SaveStatus::Saved if saved => "设置已保存".into(),
+                SaveStatus::Saved => String::new(),
+                SaveStatus::Failed(e) => format!("保存失败：{e}"),
+            });
         let status_color = if saved {
-            if dark { 0x8bdca3 } else { 0x217139 }
+            appearance::accent(dark)
         } else if state.error.is_some() || failed {
-            warning
+            fg
         } else {
             sub
         };
@@ -702,19 +737,14 @@ fn action(hwnd: HWND, id: u16) {
                 }
                 result
             }
+            START_CAPTURE => preferences::request_capture_from_settings(),
             300 => {
                 let child = (*p).controls.iter().find(|c| c.id == 300).unwrap().hwnd;
                 hotkey::control_value(child)
-                    .map_err(|_| "请按完整组合：Ctrl 或 Alt 加字母、数字或功能键".to_string())
-                    .and_then(|key| {
-                        cfg.hotkey = key;
-                        preferences::update(cfg)
-                    })
+                    .map_err(|_| "请按 Ctrl 或 Alt，再按字母、数字或功能键。".to_string())
+                    .and_then(preferences::set_shortcut)
             }
-            301 => {
-                cfg.hotkey = Hotkey::default();
-                preferences::update(cfg)
-            }
+            301 => preferences::set_shortcut(Hotkey::default()),
             400 => {
                 cfg.show_hints = !cfg.show_hints;
                 preferences::update(cfg)
@@ -724,11 +754,11 @@ fn action(hwnd: HWND, id: u16) {
                 preferences::update(cfg)
             }
             420..=423 => {
-                cfg.stroke_width = [1, 3, 5, 8][(id - 420) as usize];
+                cfg.stroke_width = STROKE_SIZES[(id - 420) as usize];
                 preferences::update(cfg)
             }
             430..=433 => {
-                cfg.text_size = [16, 24, 32, 48][(id - 430) as usize];
+                cfg.text_size = TEXT_SIZES[(id - 430) as usize];
                 preferences::update(cfg)
             }
             500 => {
@@ -864,7 +894,7 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                     )
                 };
                 if hovered && !disabled {
-                    shapes.rounded(r, dip(12), if dark { 0x37393e } else { 0xeff2f6 });
+                    shapes.rounded(r, dip(12), appearance::hover(dark));
                 }
                 draw_toggle(shapes, r, dip, dark, on, pressed);
             } else if (410..=417).contains(&id) {
@@ -913,8 +943,8 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
             } else {
                 let selected = match id {
                     100..=105 => usize::from(id - 100) == state.page,
-                    420..=423 => cfg.stroke_width == [1, 3, 5, 8][usize::from(id - 420)],
-                    430..=433 => cfg.text_size == [16, 24, 32, 48][usize::from(id - 430)],
+                    420..=423 => cfg.stroke_width == STROKE_SIZES[usize::from(id - 420)],
+                    430..=433 => cfg.text_size == TEXT_SIZES[usize::from(id - 430)],
                     600..=602 => {
                         cfg.theme
                             == [Theme::System, Theme::Light, Theme::Dark][usize::from(id - 600)]
@@ -922,12 +952,15 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                     _ => false,
                 };
                 let theme = (600..=602).contains(&id);
+                let primary = id == START_CAPTURE && !disabled;
                 let fill = match (pressed, selected && !theme, hovered && !disabled) {
-                    (true, _, _) => Some(if dark { 0x3c5773 } else { 0xc7e0f7 }),
-                    (_, true, _) => Some(if dark { 0x334d68 } else { 0xdcecfb }),
-                    (_, _, true) => Some(if dark { 0x37393e } else { 0xeff2f6 }),
+                    (true, _, _) if primary => Some(appearance::accent_pressed(dark)),
+                    _ if primary => Some(accent),
+                    (true, _, _) => Some(appearance::pressed(dark)),
+                    (_, true, _) => Some(appearance::selected(dark)),
+                    (_, _, true) => Some(appearance::hover(dark)),
                     _ if matches!(id, 201 | 301 | 500 | 700..=702 | 800) => {
-                        Some(if dark { 0x303236 } else { 0xf0f2f5 })
+                        Some(appearance::sidebar(dark))
                     }
                     _ => None,
                 };
@@ -936,6 +969,8 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                 }
                 let text_color = if disabled {
                     appearance::muted(dark)
+                } else if primary {
+                    appearance::on_accent(dark)
                 } else if selected {
                     accent
                 } else {
@@ -971,8 +1006,8 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                         PAGES[usize::from(id - 100)].to_owned()
                     }
                     420..=423 => {
-                        let n = [1, 3, 5, 8][usize::from(id - 420)];
-                        let h = dip(n).max(1);
+                        let n = STROKE_SIZES[usize::from(id - 420)];
+                        let h = dip(i32::from(n)).max(1);
                         let y = (r.top + r.bottom - h) / 2;
                         let x = r.left + dip(7);
                         if r.right - r.left >= dip(56) {
@@ -990,7 +1025,7 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                         }
                         format!("{n} px")
                     }
-                    430..=433 => [16, 24, 32, 48][usize::from(id - 430)].to_string(),
+                    430..=433 => format!("{} px", TEXT_SIZES[usize::from(id - 430)]),
                     600..=602 => {
                         draw_preview(shapes, r, dip, id);
                         label_bounds.top = r.bottom - dip(36);
@@ -1019,7 +1054,12 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                     right: r.right - inset,
                     bottom: r.bottom - inset,
                 };
-                shapes.focus_ring(frame, dip(5) as f32, dpi_scale, accent);
+                let focus = if id == START_CAPTURE {
+                    appearance::on_accent(dark)
+                } else {
+                    accent
+                };
+                shapes.focus_ring(frame, dip(4) as f32, dpi_scale, focus);
             }
             labels
         });
@@ -1084,7 +1124,7 @@ fn draw_preview(
     let h = thumb.bottom - thumb.top;
     let split = thumb.left + w / 2;
     let miniature = |dark| {
-        shapes.rounded(thumb, dip(12), if dark { 0x36383d } else { 0xe7edf4 });
+        shapes.rounded(thumb, dip(12), appearance::sidebar(dark));
         let x = thumb.left + w / 3;
         let y = thumb.top + h / 6;
         let panel = RECT {
@@ -1093,7 +1133,7 @@ fn draw_preview(
             right: thumb.right - w / 14,
             bottom: thumb.bottom - h / 8,
         };
-        shapes.rounded(panel, dip(6), if dark { 0x26272a } else { 0xffffff });
+        shapes.rounded(panel, dip(6), appearance::background(dark));
         for (index, length) in [(0, 43), (1, 34), (2, 39)] {
             let top = y + (index + 1) * h / 6;
             shapes.rounded(
@@ -1104,7 +1144,7 @@ fn draw_preview(
                     bottom: top + dip(4),
                 },
                 dip(4),
-                if dark { 0x54575e } else { 0xd8e0ea },
+                appearance::divider(dark),
             );
         }
         let left = thumb.left + w / 13;
@@ -1118,11 +1158,10 @@ fn draw_preview(
                     bottom: top + dip(4),
                 },
                 dip(4),
-                match (dark, index) {
-                    (true, 0) => 0x578fc7,
-                    (false, 0) => 0x86b9ee,
-                    (true, _) => 0x686b72,
-                    _ => 0xb7c4d4,
+                if index == 0 {
+                    appearance::accent(dark)
+                } else {
+                    appearance::divider(dark)
                 },
             );
         }
@@ -1159,11 +1198,11 @@ fn draw_toggle(
     let left = r.left + (r.right - r.left - width) / 2;
     let top = r.top + (r.bottom - r.top - height) / 2;
     let track = match (on, dark, pressed) {
-        (true, _, true) => 0x0054b8,
-        (true, _, false) => 0x0875e6,
-        (false, true, _) => 0x667487,
-        (false, false, true) => 0xa9b4c3,
-        (false, false, false) => 0xc7ced8,
+        (true, _, true) => appearance::accent_pressed(dark),
+        (true, _, false) => appearance::accent(dark),
+        (false, true, _) => 0x797166,
+        (false, false, true) => 0x776f63,
+        (false, false, false) => 0x8b8275,
     };
     shapes.rounded(
         RECT {
@@ -1191,7 +1230,11 @@ fn draw_toggle(
             bottom: y + size,
         },
         size,
-        0xffffff,
+        if on {
+            appearance::on_accent(dark)
+        } else {
+            0xffffff
+        },
     );
 }
 
@@ -1381,7 +1424,7 @@ fn open_folder(hwnd: HWND) -> std::result::Result<(), String> {
 }
 fn help(cfg: &Config) -> String {
     format!(
-        "开始截图：{}，或点击系统托盘图标。\r\n\r\n拖动选择区域；拖动边框调整。\r\n选择矩形、箭头、画笔或文字进行标注。\r\nCtrl+Z 撤销；Ctrl+Y 重做；Esc 取消。\r\n复制、保存或贴图成功后结束本次截图。\r\n\r\n贴图：拖动移动，滚轮缩放，Ctrl+0 原始比例。\r\nCtrl+C 复制，Ctrl+S 保存，Esc 关闭。\r\n\r\n右键托盘可打开设置、关闭所有贴图或退出。",
+        "开始截图：{}，或点击系统托盘图标。\r\n\r\n拖动选择区域；拖动边框调整。\r\n选择矩形、箭头、画笔或文字进行标注。\r\nCtrl+Z 撤销；Ctrl+Y 重做；Esc 取消。\r\n复制后可用 Ctrl+V 粘贴。保存生成 PNG 图片。贴图会把截图置顶。\r\n\r\n贴图：拖动移动，滚轮缩放，Ctrl+0 原始比例。\r\nCtrl+C 复制，Ctrl+S 保存，Esc 关闭。\r\n\r\n右键托盘可打开设置、关闭贴图或退出。",
         cfg.hotkey.label()
     )
 }
@@ -1455,12 +1498,18 @@ mod tests {
             let mut initial_registration = super::super::hotkey::Registration::new(startup_blocker);
             initial_registration.replace(cfg.hotkey).unwrap();
             let (guard, warning) = preferences::initialize_at(owner, path.clone()).unwrap();
-            assert!(warning.is_some());
+            assert!(warning.is_none());
+            assert!(!preferences::active());
+            let mut unrelated = cfg.clone();
+            unrelated.show_hints = false;
+            preferences::update(unrelated.clone()).unwrap();
+            assert_eq!(preferences::current(), unrelated);
             assert!(!preferences::active());
             drop(initial_registration);
             DestroyWindow(startup_blocker).unwrap();
-            preferences::update(cfg.clone()).unwrap();
+            preferences::set_shortcut(unrelated.hotkey).unwrap();
             assert!(preferences::active());
+            preferences::update(cfg.clone()).unwrap();
             open_impl(false).unwrap();
             let hwnd = WINDOW.get().unwrap();
             let life = (*pointer(hwnd)).life.clone();

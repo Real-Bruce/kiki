@@ -54,6 +54,7 @@ struct App {
     worker: Option<CaptureWorker>,
     preview: Option<preview::Preview>,
     select_screen: bool,
+    settings_during_capture: Option<HWND>,
 }
 struct AppStateGuard;
 impl Drop for AppStateGuard {
@@ -259,11 +260,7 @@ pub fn run() -> Result<()> {
             hIcon: icon::application(module.into(), true)?,
             ..Default::default()
         };
-        for (dst, src) in data
-            .szTip
-            .iter_mut()
-            .zip(format!("kiki · {}", preferences::current().hotkey.label()).encode_utf16())
-        {
+        for (dst, src) in data.szTip.iter_mut().zip(tray_tip().encode_utf16()) {
             *dst = src;
         }
         if !Shell_NotifyIconW(NIM_ADD, &data).as_bool() {
@@ -285,6 +282,7 @@ pub fn run() -> Result<()> {
                 worker: None,
                 preview: None,
                 select_screen: false,
+                settings_during_capture: None,
             })
         });
         let app_state = AppStateGuard;
@@ -310,36 +308,33 @@ pub fn run() -> Result<()> {
         if std::env::args_os().any(|arg| arg == "--capture") {
             PostMessageW(Some(hwnd), preferences::CAPTURE, WPARAM(0), LPARAM(0))?;
         }
-        if std::env::args_os().any(|arg| arg == "--settings") {
+        let show_settings = std::env::args_os().any(|arg| arg == "--settings")
+            || (!preferences::current().first_tip_seen && std::env::args_os().nth(1).is_none());
+        if show_settings {
             settings::open()?;
+            preferences::record_first_use();
         }
         if let Some(warning) = warning {
             show_error(&warning);
         }
-        if !preferences::current().first_tip_seen && preferences::hints() {
+        if !show_settings && !preferences::active() {
             let mut balloon = _tray.0;
             balloon.uFlags = NIF_INFO;
-            for (d, s) in balloon
+            for (dst, src) in balloon
                 .szInfoTitle
                 .iter_mut()
-                .zip("kiki 已在托盘运行".encode_utf16())
+                .zip("截图快捷键暂不可用".encode_utf16())
             {
-                *d = s;
+                *dst = src;
             }
-            for (d, s) in balloon.szInfo.iter_mut().zip(
-                format!(
-                    "按 {} 开始截图；右键托盘打开设置。",
-                    preferences::current().hotkey.label()
-                )
-                .encode_utf16(),
-            ) {
-                *d = s;
+            for (dst, src) in balloon
+                .szInfo
+                .iter_mut()
+                .zip("可从托盘开始截图，或在设置里更换快捷键。".encode_utf16())
+            {
+                *dst = src;
             }
-            if Shell_NotifyIconW(NIM_MODIFY, &balloon).as_bool() {
-                let mut cfg = preferences::current();
-                cfg.first_tip_seen = true;
-                let _ = preferences::update(cfg);
-            }
+            let _ = Shell_NotifyIconW(NIM_MODIFY, &balloon);
         }
         let mut message = MSG::default();
         loop {
@@ -365,6 +360,33 @@ pub fn run() -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn tray_tip() -> String {
+    preferences::active_shortcut().map_or_else(|| "kiki".into(), |key| format!("kiki（{key}）"))
+}
+
+fn begin_capture_from_settings(hwnd: HWND) {
+    let ready = APP.with_borrow(|app| {
+        app.as_ref().is_some_and(|state| {
+            state.receiver.is_none() && state.preview.as_ref().is_none_or(|p| !p.is_open())
+        })
+    });
+    if !ready {
+        return;
+    }
+    let settings = settings::hide_for_capture();
+    match try_begin_capture_mode(hwnd, false) {
+        Ok(()) => APP.with_borrow_mut(|app| {
+            if let Some(state) = app {
+                state.settings_during_capture = settings;
+            }
+        }),
+        Err(message) => {
+            settings::restore_after_capture_failure(settings);
+            report_capture_error(&message);
+        }
+    }
 }
 
 fn begin_capture(hwnd: HWND) {
@@ -577,6 +599,10 @@ fn poll(hwnd: HWND) {
         }
     });
     if let Some(result) = result {
+        let settings = APP.with_borrow_mut(|app| {
+            app.as_mut()
+                .and_then(|state| state.settings_during_capture.take())
+        });
         // SAFETY: timer belongs to the hidden tray window.
         unsafe {
             let _ = KillTimer(Some(hwnd), 1);
@@ -586,7 +612,10 @@ fn poll(hwnd: HWND) {
                 let mode = APP.with_borrow(|app| app.as_ref().is_some_and(|s| s.select_screen));
                 preview::Preview::open_mode(frame, mode)
             }
-            Ok(None) => return,
+            Ok(None) => {
+                settings::restore_after_capture_failure(settings);
+                return;
+            }
             Err(error) => Err(error),
         };
         match result {
@@ -603,7 +632,10 @@ fn poll(hwnd: HWND) {
                     performance::ready(opened);
                 }
             }
-            Err(e) => report_capture_error(&format!("截图失败，已返回托盘：{e}")),
+            Err(e) => {
+                settings::restore_after_capture_failure(settings);
+                report_capture_error(&format!("无法完成截图，请重试。\n{e}"));
+            }
         }
     }
 }
@@ -693,6 +725,10 @@ fn dispatch(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
                 }
                 LRESULT(0)
             }
+            preferences::CAPTURE_FROM_SETTINGS => {
+                begin_capture_from_settings(hwnd);
+                LRESULT(0)
+            }
             preferences::CAPTURE => {
                 begin_capture(hwnd);
                 LRESULT(0)
@@ -728,11 +764,7 @@ fn dispatch(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
                     uFlags: NIF_TIP,
                     ..Default::default()
                 };
-                for (d, s) in tip
-                    .szTip
-                    .iter_mut()
-                    .zip(format!("kiki · {}", preferences::current().hotkey.label()).encode_utf16())
-                {
+                for (d, s) in tip.szTip.iter_mut().zip(tray_tip().encode_utf16()) {
                     *d = s;
                 }
                 let _ = Shell_NotifyIconW(NIM_MODIFY, &tip);

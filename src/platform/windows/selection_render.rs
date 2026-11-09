@@ -320,7 +320,7 @@ impl Canvas {
                         (3. * scale).round() as i32,
                     ));
                     self.round(label, 5. * scale, color(0, 94, 176, 1.));
-                    self.label(&format!("{rw} × {rh}"), label, color(255, 255, 255, 1.));
+                    self.label(&format!("{rw} × {rh} px"), label, color(255, 255, 255, 1.));
                 }
             } else {
                 self.fill(
@@ -367,11 +367,17 @@ impl Canvas {
                 self.paint_parameters(&layout, editor, focus);
             }
             if busy || super::preferences::hints() {
+                let selected = selection.rect.is_some();
+                let hint_width = if text_active || selected { 480. } else { 350. };
+                let display = self.local(screen);
+                let left = display.left + 16. * scale;
+                // Keep the cue clear of the taskbar, on the display being used.
+                let bottom = display.bottom - 56. * scale;
                 let hint = D2D_RECT_F {
-                    left: 16. * scale,
-                    top: h - 44. * scale,
-                    right: (if text_active { 480. } else { 350. }) * scale,
-                    bottom: h - 12. * scale,
+                    left,
+                    top: bottom - 32. * scale,
+                    right: (left + hint_width * scale).min(display.right - 16. * scale),
+                    bottom,
                 };
                 self.round(hint, 6. * scale, color(30, 36, 46, 0.88));
                 self.label(
@@ -379,8 +385,10 @@ impl Canvas {
                         "正在输出，请稍候…"
                     } else if text_active {
                         "Enter 换行　Ctrl+Enter 完成　Esc 取消文字"
+                    } else if selected {
+                        "复制后可粘贴　　Ctrl+S 保存　　Ctrl+P 贴图"
                     } else {
-                        "拖动框选　F 当前屏幕　Esc 取消"
+                        "拖动选择截图区域　　F 当前屏幕　　Esc 取消"
                     },
                     hint,
                     color(255, 255, 255, 1.),

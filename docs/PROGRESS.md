@@ -346,3 +346,10 @@
 - 125% 单屏实查浅色和深色录入样式。默认和全特性各 44 项测试、严格 Clippy、rustfmt 及两种 Release 构建通过。
 - 便携 ZIP 已生成并核对 16 个解压文件，详见 [P6 验证](validation/P6.md)。
 - 关联提交主题：fix(settings): show a text prompt for hotkey recording。
+
+## P6 首次使用与界面整理
+
+- 通用页突出开始截图。首次普通启动进入通用页，再次启动回到托盘。设置入口收起窗口后开始截图，失败时恢复窗口。
+- 设置和托盘统一暖灰、松绿及文案。菜单显示有效快捷键。快捷键冲突不再阻止无关设置保存。截图提示按框选阶段显示并避开任务栏。
+- 125% 单屏实查首次启动、截图入口、浅深菜单与提示。默认和全特性各 44 项测试、严格 Clippy、rustfmt 和两种 Release 构建通过。ZIP 解压核对 16 个文件，详见 [P6 验证](validation/P6.md)。
+- 关联提交主题：feat(settings): guide first-time users into capture。

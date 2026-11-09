@@ -51,13 +51,15 @@ impl Drop for Menu {
     }
 }
 pub fn tray(owner: HWND, x: i32, y: i32) -> u32 {
+    let start = super::preferences::active_shortcut()
+        .map_or_else(|| "开始截图".into(), |key| format!("开始截图\t{key}"));
     popup(
         owner,
         x,
         y,
         Style::Tray,
         &[
-            (1, "开始截图", true),
+            (1, &start, true),
             (4, "设置", true),
             (0, "", true),
             (3, "关闭贴图", true),
@@ -205,18 +207,25 @@ pub fn handle(msg: u32, lp: LPARAM) -> Option<LRESULT> {
             let scale = item.dpi as f32 / 96.;
             let dc = GetDC(None);
             let old = SelectObject(dc, item.font.into());
-            let mut size = SIZE::default();
-            let _ = GetTextExtentPoint32W(dc, &item.text[..item.text.len() - 1], &mut size);
-            SelectObject(dc, old);
-            ReleaseDC(None, dc);
+            let width = |text: &[u16]| {
+                let mut size = SIZE::default();
+                let _ = GetTextExtentPoint32W(dc, text, &mut size);
+                size.cx
+            };
+            let text = &item.text[..item.text.len() - 1];
             (info.itemWidth, info.itemHeight) = if item.style == Style::Tray {
-                ((size.cx + item.px(24)) as u32, item.px(34) as u32)
+                let mut parts = text.split(|c| *c == u16::from(b'\t'));
+                let label = parts.next().map_or(0, width);
+                let shortcut = parts.next().map_or(0, |key| width(key) + item.px(20));
+                ((label + shortcut + item.px(24)) as u32, item.px(36) as u32)
             } else {
                 (
-                    (size.cx.max(190) as f32 + 56. * scale) as u32,
+                    (width(text).max(190) as f32 + 56. * scale) as u32,
                     (36. * scale) as u32,
                 )
             };
+            SelectObject(dc, old);
+            ReleaseDC(None, dc);
             return Some(LRESULT(1));
         }
         if msg == WM_DRAWITEM {
@@ -226,6 +235,7 @@ pub fn handle(msg: u32, lp: LPARAM) -> Option<LRESULT> {
             }
             let item = &*(info.itemData as *const Item);
             let dark = super::selection_render::system_dark();
+            use super::settings_render as appearance;
             let surface = menu_background(item.style, dark);
             if item.separator {
                 fill(info.hDC, &info.rcItem, surface);
@@ -239,14 +249,20 @@ pub fn handle(msg: u32, lp: LPARAM) -> Option<LRESULT> {
                         top: y,
                         bottom: y + 1,
                     },
-                    if dark { 0x46484c } else { 0xe2e5ea },
+                    appearance::divider(dark),
                 );
                 return Some(LRESULT(1));
             }
             let selected = info.itemState.0 & ODS_SELECTED.0 != 0;
             let disabled = info.itemState.0 & (ODS_DISABLED.0 | ODS_GRAYED.0) != 0;
             let bg = if selected {
-                if dark { 0x174b73 } else { 0xdcecff }
+                if item.style == Style::Tray {
+                    appearance::selected(dark)
+                } else if dark {
+                    0x174b73
+                } else {
+                    0xdcecff
+                }
             } else {
                 surface
             };
@@ -276,7 +292,15 @@ pub fn handle(msg: u32, lp: LPARAM) -> Option<LRESULT> {
             SetBkMode(info.hDC, TRANSPARENT);
             SetTextColor(
                 info.hDC,
-                rgb(if disabled {
+                rgb(if item.style == Style::Tray {
+                    if disabled {
+                        appearance::muted(dark)
+                    } else if selected {
+                        appearance::accent(dark)
+                    } else {
+                        appearance::foreground(dark)
+                    }
+                } else if disabled {
                     0x858585
                 } else if dark {
                     0xf2f2f2
@@ -299,6 +323,9 @@ pub fn handle(msg: u32, lp: LPARAM) -> Option<LRESULT> {
                 DT_LEFT | DT_VCENTER | DT_SINGLELINE,
             );
             if let Some(shortcut) = parts.get(1) {
+                if item.style == Style::Tray {
+                    SetTextColor(info.hDC, rgb(appearance::muted(dark)));
+                }
                 let mut shortcut: Vec<_> = shortcut.encode_utf16().collect();
                 DrawTextW(
                     info.hDC,
