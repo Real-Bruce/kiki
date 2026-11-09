@@ -125,6 +125,18 @@ fn open_impl(visible: bool) -> Result<()> {
             Some(WPARAM(ICON_SMALL as usize)),
             Some(LPARAM(small_icon.0 as isize)),
         );
+        // Preserve the window name and icon for shell identification.
+        let flags = WTNCA_NODRAWCAPTION | WTNCA_NODRAWICON;
+        let caption = WTA_OPTIONS {
+            dwFlags: flags,
+            dwMask: flags,
+        };
+        let _ = SetWindowThemeAttribute(
+            hwnd,
+            WTA_NONCLIENT,
+            (&caption as *const WTA_OPTIONS).cast(),
+            std::mem::size_of_val(&caption) as u32,
+        );
         let font = font(dpi, 14, w!("Microsoft YaHei UI"));
         let state = Box::new(State {
             life: Rc::new(Cell::new(Some(hwnd))),

@@ -332,3 +332,10 @@
 - 125% 单屏对照实际菜单修正前后，并检查深色主题。默认和全特性各 44 项测试、严格 Clippy、rustfmt 及两种 Release 构建通过。
 - 新便携 ZIP 已解压核对 16 个文件，详见 [P6 验证](validation/P6.md)。
 - 关联提交主题：fix(tray): remove the duplicate menu shadow。
+
+## P6 设置窗口标题栏留空
+
+- 隐藏标题栏左侧的图标和文字。保留右侧系统窗口按钮、系统窗口名称和侧栏品牌。
+- 125% 单屏实测浅色与深色窗口。默认和全特性各 44 项测试、严格 Clippy、rustfmt 及两种 Release 构建通过。
+- 已生成便携 ZIP 并核对 16 个解压文件，详见 [P6 验证](validation/P6.md)。
+- 关联提交主题：fix(settings): hide the caption icon and text。
