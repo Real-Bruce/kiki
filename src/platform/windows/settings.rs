@@ -800,7 +800,8 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
         let state = &*p;
         let dark = system_dark();
         let id = item.CtlID as u16;
-        let dip = |v: i32| (v as f32 * state.dpi as f32 / 96.).round() as i32;
+        let dpi_scale = state.dpi as f32 / 96.;
+        let dip = |v: i32| (v as f32 * dpi_scale).round() as i32;
         let r = item.rcItem;
         let dc = item.hDC;
         let nav = (100..=105).contains(&id);
@@ -809,8 +810,8 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
         } else {
             appearance::background(dark)
         };
-        fill_rect(dc, &r, backdrop);
         if id == BRAND {
+            fill_rect(dc, &r, backdrop);
             let _ = DrawIconEx(
                 dc,
                 r.left,
@@ -833,171 +834,192 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
             && item.itemState.0 & (ODS_FOCUS.0 | ODS_NOFOCUSRECT.0) == ODS_FOCUS.0;
         let accent = appearance::accent(dark);
         let fg = appearance::foreground(dark);
-        if matches!(id, 200 | 400) {
-            let on = if id == 400 {
-                cfg.show_hints
-            } else {
-                matches!(
-                    state.startup,
-                    Ok(startup::State::Enabled | startup::State::Moved)
-                )
-            };
-            if hovered && !disabled {
-                rounded_fill(dc, r, dip(12), if dark { 0x37393e } else { 0xeff2f6 });
-            }
-            draw_toggle(item, dip, dark, on);
-        } else if (410..=417).contains(&id) {
-            let color = COLORS[usize::from(id - 410)];
-            let selected = cfg.color == color;
-            let [red, green, blue] = color.map(u32::from);
-            let color = red << 16 | green << 8 | blue;
-            let size = dip(22).min(r.right - r.left - dip(3)).max(1);
-            let left = (r.left + r.right - size) / 2;
-            let top = (r.top + r.bottom - size) / 2;
-            let swatch = RECT {
-                left,
-                top,
-                right: left + size,
-                bottom: top + size,
-            };
-            if hovered || pressed || color == 0xffffff && !dark || color == 0x000000 && dark {
-                rounded_fill(
-                    dc,
-                    swatch,
-                    size,
-                    if hovered || pressed {
-                        accent
-                    } else {
-                        appearance::muted(dark)
-                    },
-                );
-                let inner = RECT {
-                    left: left + 1,
-                    top: top + 1,
-                    right: left + size - 1,
-                    bottom: top + size - 1,
-                };
-                rounded_fill(dc, inner, size - 2, color);
-            } else {
-                rounded_fill(dc, swatch, size, color);
-            }
-            if selected {
-                let mark = if red * 3 + green * 6 + blue > 1400 {
-                    0x202226
+        let labels = appearance::paint_control(dc, r, backdrop, |shapes| {
+            let mut labels = Vec::new();
+            if matches!(id, 200 | 400) {
+                let on = if id == 400 {
+                    cfg.show_hints
                 } else {
-                    0xffffff
+                    matches!(
+                        state.startup,
+                        Ok(startup::State::Enabled | startup::State::Moved)
+                    )
                 };
-                draw_label(dc, state.icon_font, "\u{e73e}", r, mark, DT_CENTER);
+                if hovered && !disabled {
+                    shapes.rounded(r, dip(12), if dark { 0x37393e } else { 0xeff2f6 });
+                }
+                draw_toggle(shapes, r, dip, dark, on, pressed);
+            } else if (410..=417).contains(&id) {
+                let color = COLORS[usize::from(id - 410)];
+                let selected = cfg.color == color;
+                let [red, green, blue] = color.map(u32::from);
+                let color = red << 16 | green << 8 | blue;
+                let size = dip(22).min(r.right - r.left - dip(3)).max(1);
+                let left = (r.left + r.right - size) / 2;
+                let top = (r.top + r.bottom - size) / 2;
+                let swatch = RECT {
+                    left,
+                    top,
+                    right: left + size,
+                    bottom: top + size,
+                };
+                let needs_outline = matches!((id, dark), (416, false) | (417, true));
+                if hovered || pressed || needs_outline {
+                    shapes.rounded(
+                        swatch,
+                        size,
+                        if hovered || pressed {
+                            accent
+                        } else {
+                            appearance::muted(dark)
+                        },
+                    );
+                    let inner = RECT {
+                        left: left + 1,
+                        top: top + 1,
+                        right: left + size - 1,
+                        bottom: top + size - 1,
+                    };
+                    shapes.rounded(inner, size - 2, color);
+                } else {
+                    shapes.rounded(swatch, size, color);
+                }
+                if selected {
+                    let mark = if red * 3 + green * 6 + blue > 1400 {
+                        0x202226
+                    } else {
+                        0xffffff
+                    };
+                    labels.push((state.icon_font, "\u{e73e}".to_owned(), r, mark, DT_CENTER));
+                }
+            } else {
+                let selected = match id {
+                    100..=105 => usize::from(id - 100) == state.page,
+                    420..=423 => cfg.stroke_width == [1, 3, 5, 8][usize::from(id - 420)],
+                    430..=433 => cfg.text_size == [16, 24, 32, 48][usize::from(id - 430)],
+                    600..=602 => {
+                        cfg.theme
+                            == [Theme::System, Theme::Light, Theme::Dark][usize::from(id - 600)]
+                    }
+                    _ => false,
+                };
+                let theme = (600..=602).contains(&id);
+                let fill = match (pressed, selected && !theme, hovered && !disabled) {
+                    (true, _, _) => Some(if dark { 0x3c5773 } else { 0xc7e0f7 }),
+                    (_, true, _) => Some(if dark { 0x334d68 } else { 0xdcecfb }),
+                    (_, _, true) => Some(if dark { 0x37393e } else { 0xeff2f6 }),
+                    _ if matches!(id, 201 | 301 | 500 | 700..=702 | 800) => {
+                        Some(if dark { 0x303236 } else { 0xf0f2f5 })
+                    }
+                    _ => None,
+                };
+                if let Some(fill) = fill {
+                    shapes.rounded(r, dip(12), fill);
+                }
+                let text_color = if disabled {
+                    appearance::muted(dark)
+                } else if selected {
+                    accent
+                } else {
+                    fg
+                };
+                let mut label_bounds = r;
+                let label = match id {
+                    100..=105 => {
+                        const ICONS: [&str; 6] = [
+                            "\u{e713}", "\u{e765}", "\u{e739}", "\u{e718}", "\u{e790}", "\u{e946}",
+                        ];
+                        let icon = RECT {
+                            left: r.left + dip(13),
+                            ..r
+                        };
+                        labels.push((
+                            state.icon_font,
+                            ICONS[usize::from(id - 100)].to_owned(),
+                            icon,
+                            text_color,
+                            DT_LEFT,
+                        ));
+                        label_bounds.left += dip(42);
+                        if selected {
+                            let mark = RECT {
+                                left: r.left + dip(1),
+                                top: r.top + dip(6),
+                                right: r.left + dip(4),
+                                bottom: r.bottom - dip(6),
+                            };
+                            shapes.rounded(mark, dip(3), accent);
+                        }
+                        PAGES[usize::from(id - 100)].to_owned()
+                    }
+                    420..=423 => {
+                        let n = [1, 3, 5, 8][usize::from(id - 420)];
+                        let h = dip(n).max(1);
+                        let y = (r.top + r.bottom - h) / 2;
+                        let x = r.left + dip(7);
+                        if r.right - r.left >= dip(56) {
+                            shapes.rounded(
+                                RECT {
+                                    left: x,
+                                    top: y,
+                                    right: x + dip(16),
+                                    bottom: y + h,
+                                },
+                                h,
+                                text_color,
+                            );
+                            label_bounds.left += dip(22);
+                        }
+                        format!("{n} px")
+                    }
+                    430..=433 => [16, 24, 32, 48][usize::from(id - 430)].to_string(),
+                    600..=602 => {
+                        draw_preview(shapes, r, dip, id);
+                        label_bounds.top = r.bottom - dip(36);
+                        let name = ["跟随系统", "浅色", "深色"][usize::from(id - 600)];
+                        if selected {
+                            format!("✓ {name}")
+                        } else {
+                            name.to_owned()
+                        }
+                    }
+                    _ => caption(id, &cfg, &state.startup),
+                };
+                labels.push((
+                    state.font,
+                    label,
+                    label_bounds,
+                    text_color,
+                    if nav { DT_LEFT } else { DT_CENTER },
+                ));
+            }
+            if focused && !disabled {
+                let inset = dip(2);
+                let frame = RECT {
+                    left: r.left + inset,
+                    top: r.top + inset,
+                    right: r.right - inset,
+                    bottom: r.bottom - inset,
+                };
+                shapes.focus_ring(frame, dip(5) as f32, dpi_scale, accent);
+            }
+            labels
+        });
+        if let Some(labels) = labels {
+            for (font, label, bounds, color, align) in labels {
+                draw_label(dc, font, &label, bounds, color, align);
             }
         } else {
-            let selected = match id {
-                100..=105 => usize::from(id - 100) == state.page,
-                420..=423 => cfg.stroke_width == [1, 3, 5, 8][usize::from(id - 420)],
-                430..=433 => cfg.text_size == [16, 24, 32, 48][usize::from(id - 430)],
-                600..=602 => {
-                    cfg.theme == [Theme::System, Theme::Light, Theme::Dark][usize::from(id - 600)]
-                }
-                _ => false,
-            };
-            let theme = (600..=602).contains(&id);
-            let fill = match (pressed, selected && !theme, hovered && !disabled) {
-                (true, _, _) => Some(if dark { 0x3c5773 } else { 0xc7e0f7 }),
-                (_, true, _) => Some(if dark { 0x334d68 } else { 0xdcecfb }),
-                (_, _, true) => Some(if dark { 0x37393e } else { 0xeff2f6 }),
-                _ if matches!(id, 201 | 301 | 500 | 700..=702 | 800) => {
-                    Some(if dark { 0x303236 } else { 0xf0f2f5 })
-                }
-                _ => None,
-            };
-            if let Some(fill) = fill {
-                rounded_fill(dc, r, dip(12), fill);
-            }
-            let text_color = if disabled {
-                appearance::muted(dark)
-            } else if selected {
-                accent
-            } else {
-                fg
-            };
-            let mut label_bounds = r;
-            let label = match id {
-                100..=105 => {
-                    const ICONS: [&str; 6] = [
-                        "\u{e713}", "\u{e765}", "\u{e739}", "\u{e718}", "\u{e790}", "\u{e946}",
-                    ];
-                    let icon = RECT {
-                        left: r.left + dip(13),
-                        ..r
-                    };
-                    draw_label(
-                        dc,
-                        state.icon_font,
-                        ICONS[usize::from(id - 100)],
-                        icon,
-                        text_color,
-                        DT_LEFT,
-                    );
-                    label_bounds.left += dip(42);
-                    if selected {
-                        let mark = RECT {
-                            left: r.left + dip(1),
-                            top: r.top + dip(6),
-                            right: r.left + dip(4),
-                            bottom: r.bottom - dip(6),
-                        };
-                        rounded_fill(dc, mark, dip(3), accent);
-                    }
-                    PAGES[usize::from(id - 100)].to_owned()
-                }
-                420..=423 => {
-                    let n = [1, 3, 5, 8][usize::from(id - 420)];
-                    let h = dip(n).max(1);
-                    let y = (r.top + r.bottom - h) / 2;
-                    let x = r.left + dip(7);
-                    if r.right - r.left >= dip(56) {
-                        rounded_fill(
-                            dc,
-                            RECT {
-                                left: x,
-                                top: y,
-                                right: x + dip(16),
-                                bottom: y + h,
-                            },
-                            h,
-                            text_color,
-                        );
-                        label_bounds.left += dip(22);
-                    }
-                    format!("{n} px")
-                }
-                430..=433 => [16, 24, 32, 48][usize::from(id - 430)].to_string(),
-                600..=602 => {
-                    draw_preview(dc, r, dip, id);
-                    label_bounds.top = r.bottom - dip(36);
-                    let name = ["跟随系统", "浅色", "深色"][usize::from(id - 600)];
-                    if selected {
-                        format!("✓ {name}")
-                    } else {
-                        name.to_owned()
-                    }
-                }
-                _ => caption(id, &cfg, &state.startup),
-            };
+            // Keep the native action readable during graphics-target recovery.
+            fill_rect(dc, &r, backdrop);
             draw_label(
                 dc,
                 state.font,
-                &label,
-                label_bounds,
-                text_color,
-                if nav { DT_LEFT } else { DT_CENTER },
+                &caption(id, &cfg, &state.startup),
+                r,
+                fg,
+                DT_CENTER,
             );
-        }
-        if focused && !disabled {
-            let mut frame = r;
-            let _ = InflateRect(&mut frame, -dip(2), -dip(2));
-            let brush = CreateSolidBrush(rgb(accent));
-            FrameRect(dc, &frame, brush);
-            let _ = DeleteObject(brush.into());
         }
     }
 }
@@ -1008,24 +1030,6 @@ fn fill_rect(dc: HDC, r: &RECT, color: u32) {
         let brush = CreateSolidBrush(rgb(color));
         FillRect(dc, r, brush);
         let _ = DeleteObject(brush.into());
-    }
-}
-
-fn rounded_fill(dc: HDC, r: RECT, corner: i32, color: u32) {
-    // SAFETY: both temporary GDI objects are local to this paint call and are not selected into the DC.
-    unsafe {
-        let region = CreateRoundRectRgn(
-            r.left,
-            r.top,
-            r.right + 1,
-            r.bottom + 1,
-            corner.max(1),
-            corner.max(1),
-        );
-        let brush = CreateSolidBrush(rgb(color));
-        let _ = FillRgn(dc, region, brush);
-        let _ = DeleteObject(brush.into());
-        let _ = DeleteObject(region.into());
     }
 }
 
@@ -1046,7 +1050,12 @@ fn draw_label(dc: HDC, font: HFONT, label: &str, mut r: RECT, color: u32, align:
     }
 }
 
-fn draw_preview(dc: HDC, r: RECT, dip: impl Fn(i32) -> i32, id: u16) {
+fn draw_preview(
+    shapes: &appearance::ControlShapes<'_>,
+    r: RECT,
+    dip: impl Fn(i32) -> i32,
+    id: u16,
+) {
     let thumb = RECT {
         left: r.left + dip(5),
         top: r.top + dip(5),
@@ -1057,7 +1066,7 @@ fn draw_preview(dc: HDC, r: RECT, dip: impl Fn(i32) -> i32, id: u16) {
     let h = thumb.bottom - thumb.top;
     let split = thumb.left + w / 2;
     let miniature = |dark| {
-        rounded_fill(dc, thumb, dip(12), if dark { 0x36383d } else { 0xe7edf4 });
+        shapes.rounded(thumb, dip(12), if dark { 0x36383d } else { 0xe7edf4 });
         let x = thumb.left + w / 3;
         let y = thumb.top + h / 6;
         let panel = RECT {
@@ -1066,11 +1075,10 @@ fn draw_preview(dc: HDC, r: RECT, dip: impl Fn(i32) -> i32, id: u16) {
             right: thumb.right - w / 14,
             bottom: thumb.bottom - h / 8,
         };
-        rounded_fill(dc, panel, dip(6), if dark { 0x26272a } else { 0xffffff });
+        shapes.rounded(panel, dip(6), if dark { 0x26272a } else { 0xffffff });
         for (index, length) in [(0, 43), (1, 34), (2, 39)] {
             let top = y + (index + 1) * h / 6;
-            rounded_fill(
-                dc,
+            shapes.rounded(
                 RECT {
                     left: x + w / 16,
                     top,
@@ -1084,8 +1092,7 @@ fn draw_preview(dc: HDC, r: RECT, dip: impl Fn(i32) -> i32, id: u16) {
         let left = thumb.left + w / 13;
         for index in 0..3 {
             let top = y + (index + 1) * h / 6;
-            rounded_fill(
-                dc,
+            shapes.rounded(
                 RECT {
                     left,
                     top,
@@ -1102,55 +1109,74 @@ fn draw_preview(dc: HDC, r: RECT, dip: impl Fn(i32) -> i32, id: u16) {
             );
         }
     };
-    miniature(id == 602);
     if id == 600 {
-        // SAFETY: the DC is live for this paint. Restore the clip before returning.
-        unsafe {
-            let saved = SaveDC(dc);
-            if saved != 0 {
-                IntersectClipRect(dc, split, thumb.top, thumb.right + 1, thumb.bottom + 1);
-                miniature(true);
-                let _ = RestoreDC(dc, saved);
-            }
-        }
+        shapes.clipped(
+            RECT {
+                right: split,
+                ..thumb
+            },
+            || miniature(false),
+        );
+        shapes.clipped(
+            RECT {
+                left: split,
+                ..thumb
+            },
+            || miniature(true),
+        );
+    } else {
+        miniature(id == 602);
     }
 }
 
-fn draw_toggle(item: &DRAWITEMSTRUCT, dip: impl Fn(i32) -> i32, dark: bool, on: bool) {
-    // SAFETY: the DC is borrowed from WM_DRAWITEM. Restore the original pen and brush before releasing temporary objects.
-    unsafe {
-        let r = item.rcItem;
-        let dc = item.hDC;
-        let (width, height) = (dip(42), dip(22));
-        let left = r.left + (r.right - r.left - width) / 2;
-        let top = r.top + (r.bottom - r.top - height) / 2;
-        let pressed = item.itemState.0 & ODS_SELECTED.0 != 0;
-        let track = CreateSolidBrush(rgb(match (on, dark, pressed) {
-            (true, _, true) => 0x0054b8,
-            (true, _, false) => 0x0875e6,
-            (false, true, _) => 0x667487,
-            (false, false, true) => 0xa9b4c3,
-            (false, false, false) => 0xc7ced8,
-        }));
-        let old_pen = SelectObject(dc, GetStockObject(NULL_PEN));
-        let old_brush = SelectObject(dc, track.into());
-        let _ = RoundRect(dc, left, top, left + width, top + height, height, height);
-        let knob = CreateSolidBrush(rgb(0xffffff));
-        SelectObject(dc, knob.into());
-        let padding = dip(2);
-        let size = height - 2 * padding;
-        let x = if on {
-            left + width - padding - size
-        } else {
-            left + padding
-        };
-        let _ = Ellipse(dc, x, top + padding, x + size, top + padding + size);
-        SelectObject(dc, old_brush);
-        SelectObject(dc, old_pen);
-        let _ = DeleteObject(knob.into());
-        let _ = DeleteObject(track.into());
-    }
+fn draw_toggle(
+    shapes: &appearance::ControlShapes<'_>,
+    r: RECT,
+    dip: impl Fn(i32) -> i32,
+    dark: bool,
+    on: bool,
+    pressed: bool,
+) {
+    let (width, height) = (dip(42), dip(22));
+    let left = r.left + (r.right - r.left - width) / 2;
+    let top = r.top + (r.bottom - r.top - height) / 2;
+    let track = match (on, dark, pressed) {
+        (true, _, true) => 0x0054b8,
+        (true, _, false) => 0x0875e6,
+        (false, true, _) => 0x667487,
+        (false, false, true) => 0xa9b4c3,
+        (false, false, false) => 0xc7ced8,
+    };
+    shapes.rounded(
+        RECT {
+            left,
+            top,
+            right: left + width,
+            bottom: top + height,
+        },
+        height,
+        track,
+    );
+    let padding = dip(2);
+    let size = height - 2 * padding;
+    let x = if on {
+        left + width - padding - size
+    } else {
+        left + padding
+    };
+    let y = top + padding;
+    shapes.rounded(
+        RECT {
+            left: x,
+            top: y,
+            right: x + size,
+            bottom: y + size,
+        },
+        size,
+        0xffffff,
+    );
 }
+
 fn rgb(value: u32) -> COLORREF {
     COLORREF(((value & 255) << 16) | (value & 0xff00) | ((value >> 16) & 255))
 }
@@ -1293,6 +1319,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 state.life.set(None);
                 WINDOW.set(None);
                 drop(state);
+                appearance::release_control_surface();
                 super::pinned_device::idle();
                 DefWindowProcW(hwnd, msg, wp, lp)
             }
@@ -1414,6 +1441,20 @@ mod tests {
                 SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(100 + page)), None);
                 assert_eq!((*pointer(hwnd)).page, page);
                 assert!(paint(hwnd, pointer(hwnd)).is_ok());
+                if page == 1 {
+                    let input = (*pointer(hwnd))
+                        .controls
+                        .iter()
+                        .find(|c| c.id == 300)
+                        .unwrap()
+                        .hwnd;
+                    let mut window = RECT::default();
+                    let mut client = RECT::default();
+                    GetWindowRect(input, &mut window).unwrap();
+                    GetClientRect(input, &mut client).unwrap();
+                    assert_eq!(client.right, window.right - window.left);
+                    assert_eq!(client.bottom, window.bottom - window.top);
+                }
             }
             SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(602)), None);
             assert!(system_dark());

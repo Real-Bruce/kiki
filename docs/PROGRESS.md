@@ -311,3 +311,10 @@
 - 125% 单屏检查浅色通用、截图及浅深色外观。最终桌面复查由用户停止。默认与全特性各 43 项测试、严格 Clippy、rustfmt 和两种 Release 构建通过。
 - 已打包并核对全部 16 个解压文件。证据、SHA-256 和待验环境见 [P6 验证](validation/P6.md)。
 - 关联提交主题：fix(settings): redesign settings layout and reuse app icon。
+
+## P6 设置控件平滑边缘
+
+- 改用 Direct2D 抗锯齿绘制开关、色点、圆角按钮、缩略图和边框，并处理快捷键控件的系统直角框。
+- 125% 缩放下实机检查浅深色截图页。绿色色点截图像素实测出现边缘过渡色。最终一轮桌面复查由用户按 Esc 停止，待验项见 [P6 验证](validation/P6.md)。
+- 默认与全特性各 44 项测试通过，严格 Clippy、格式及两种 Release 构建通过。便携 ZIP 已解压并核对 16 个文件。
+- 关联提交主题：fix(settings): antialias rounded controls。

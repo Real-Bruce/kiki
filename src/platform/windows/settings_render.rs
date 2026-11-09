@@ -1,10 +1,12 @@
 //! Retained Direct2D surface and palette for the settings window.
 use windows::{
     Win32::{
-        Foundation::HWND,
+        Foundation::{HWND, RECT},
         Graphics::{
             Direct2D::{Common::*, *},
             DirectWrite::*,
+            Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM,
+            Gdi::HDC,
         },
     },
     core::{Interface, Result, w},
@@ -29,6 +31,149 @@ pub const fn accent(dark: bool) -> u32 {
 }
 pub const fn warning(dark: bool) -> u32 {
     if dark { 0xffbd85 } else { 0x974311 }
+}
+
+thread_local! {
+    static CONTROL_SURFACE: std::cell::Cell<Option<ControlSurface>> = const { std::cell::Cell::new(None) };
+}
+
+struct ControlSurface {
+    target: ID2D1DCRenderTarget,
+    brush: ID2D1SolidColorBrush,
+}
+
+impl ControlSurface {
+    fn new() -> Result<Self> {
+        // SAFETY: the factory, target and brush are created and used on the settings UI thread.
+        unsafe {
+            let factory: ID2D1Factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
+            let target = factory.CreateDCRenderTarget(&D2D1_RENDER_TARGET_PROPERTIES {
+                pixelFormat: D2D1_PIXEL_FORMAT {
+                    format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                    alphaMode: D2D1_ALPHA_MODE_IGNORE,
+                },
+                // Win32 supplies physical pixels; the caller already scales DIP dimensions.
+                dpiX: 96.,
+                dpiY: 96.,
+                ..Default::default()
+            })?;
+            target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            let brush = target.CreateSolidColorBrush(&color(0), None)?;
+            Ok(Self { target, brush })
+        }
+    }
+}
+
+/// Paint into the DC borrowed from a native child. The caller can draw GDI text after this
+/// returns. A failed bind or draw discards the target so the next paint can recreate it.
+pub fn paint_control<T>(
+    dc: HDC,
+    bounds: RECT,
+    background: u32,
+    draw: impl FnOnce(&ControlShapes<'_>) -> T,
+) -> Option<T> {
+    if bounds.left >= bounds.right || bounds.top >= bounds.bottom {
+        return None;
+    }
+    let surface = CONTROL_SURFACE
+        .take()
+        .or_else(|| ControlSurface::new().ok())?;
+    // SAFETY: dc remains live through EndDraw. No GDI calls or window dispatch occur during
+    // the closure, which can only issue Direct2D drawing commands on this thread.
+    unsafe {
+        surface.target.BindDC(dc, &bounds).ok()?;
+        surface.target.BeginDraw();
+        surface.target.Clear(Some(&color(background)));
+        let output = draw(&ControlShapes {
+            surface: &surface,
+            origin: [bounds.left, bounds.top],
+        });
+        surface.target.EndDraw(None, None).ok()?;
+        CONTROL_SURFACE.set(Some(surface));
+        Some(output)
+    }
+}
+
+pub fn release_control_surface() {
+    drop(CONTROL_SURFACE.take());
+}
+
+pub struct ControlShapes<'a> {
+    surface: &'a ControlSurface,
+    origin: [i32; 2],
+}
+
+impl ControlShapes<'_> {
+    fn rect(&self, bounds: RECT) -> D2D_RECT_F {
+        let [x, y] = self.origin;
+        D2D_RECT_F {
+            left: (bounds.left - x) as f32,
+            top: (bounds.top - y) as f32,
+            right: (bounds.right - x) as f32,
+            bottom: (bounds.bottom - y) as f32,
+        }
+    }
+
+    pub fn rounded(&self, bounds: RECT, diameter: i32, rgb: u32) {
+        let rect = self.rect(bounds);
+        let radius =
+            (diameter as f32 / 2.).min((rect.right - rect.left).min(rect.bottom - rect.top) / 2.);
+        if radius <= 0. {
+            return;
+        }
+        // SAFETY: the target and brush are borrowed for the active draw, with no GDI calls.
+        unsafe {
+            self.surface.brush.SetColor(&color(rgb));
+            self.surface.target.FillRoundedRectangle(
+                &D2D1_ROUNDED_RECT {
+                    rect,
+                    radiusX: radius,
+                    radiusY: radius,
+                },
+                &self.surface.brush,
+            );
+        }
+    }
+
+    pub fn focus_ring(&self, bounds: RECT, radius: f32, width: f32, rgb: u32) {
+        let mut rect = self.rect(bounds);
+        let half = width / 2.;
+        rect.left += half;
+        rect.top += half;
+        rect.right -= half;
+        rect.bottom -= half;
+        if rect.right <= rect.left || rect.bottom <= rect.top {
+            return;
+        }
+        let radius = (radius - half)
+            .max(0.)
+            .min((rect.right - rect.left).min(rect.bottom - rect.top) / 2.);
+        // SAFETY: the brush belongs to this active target. The stroke stays within the bounds.
+        unsafe {
+            self.surface.brush.SetColor(&color(rgb));
+            self.surface.target.DrawRoundedRectangle(
+                &D2D1_ROUNDED_RECT {
+                    rect,
+                    radiusX: radius,
+                    radiusY: radius,
+                },
+                &self.surface.brush,
+                width,
+                None,
+            );
+        }
+    }
+
+    pub fn clipped(&self, bounds: RECT, draw: impl FnOnce()) {
+        // SAFETY: this clip belongs to the active draw. The closure only draws within this pass.
+        unsafe {
+            self.surface
+                .target
+                .PushAxisAlignedClip(&self.rect(bounds), D2D1_ANTIALIAS_MODE_ALIASED);
+            draw();
+            self.surface.target.PopAxisAlignedClip();
+        }
+    }
 }
 
 pub struct Canvas {
@@ -207,6 +352,95 @@ impl Drop for Canvas {
         unsafe {
             self.context.SetTarget(None::<&ID2D1Image>);
             let _ = self.context.Flush(None, None);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use windows::Win32::Graphics::Gdi::*;
+
+    #[test]
+    fn native_control_edges_have_blended_pixels_at_multiple_scales() {
+        // SAFETY: the test owns the memory DC and bitmap for the entire render and readback.
+        unsafe {
+            let dc = CreateCompatibleDC(None);
+            assert!(!dc.is_invalid());
+            let info = BITMAPINFO {
+                bmiHeader: BITMAPINFOHEADER {
+                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                    biWidth: 144,
+                    biHeight: -100,
+                    biPlanes: 1,
+                    biBitCount: 32,
+                    biCompression: BI_RGB.0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let mut bits = std::ptr::null_mut();
+            let bitmap = CreateDIBSection(None, &info, DIB_RGB_COLORS, &mut bits, None, 0).unwrap();
+            let old = SelectObject(dc, bitmap.into());
+            let bounds = RECT {
+                left: 7,
+                top: 9,
+                right: 135,
+                bottom: 92,
+            };
+            let mut sampled = Vec::new();
+            for percent in [100, 125, 150, 200] {
+                let scale = |dip: i32| (dip * percent + 50) / 100;
+                let circle = RECT {
+                    left: 13,
+                    top: 15,
+                    right: 13 + scale(22),
+                    bottom: 15 + scale(22),
+                };
+                let frame = RECT {
+                    left: 65,
+                    top: 16,
+                    right: 65 + scale(29),
+                    bottom: 16 + scale(24),
+                };
+                let ok = paint_control(dc, bounds, 0xffffff, |shapes| {
+                    shapes.rounded(circle, scale(22), 0x000000);
+                    shapes.focus_ring(frame, scale(6) as f32, percent as f32 / 100., 0x000000);
+                })
+                .is_some();
+                // Sample the corners rather than text or filled centers. Binary GDI masks
+                // would yield only black and white for the same shapes.
+                let corner_has_blend = |r: RECT| {
+                    (r.top..r.top + scale(6)).any(|y| {
+                        (r.left..r.left + scale(6)).any(|x| {
+                            let pixel = GetPixel(dc, x, y).0;
+                            pixel > 0 && pixel < 0x00ffffff
+                        })
+                    })
+                };
+                sampled.push((
+                    percent,
+                    ok,
+                    GetPixel(dc, circle.left, circle.top).0,
+                    GetPixel(dc, circle.left + scale(11), circle.top + scale(11)).0,
+                    corner_has_blend(circle),
+                    corner_has_blend(frame),
+                ));
+            }
+            release_control_surface();
+            SelectObject(dc, old);
+            let _ = DeleteObject(bitmap.into());
+            let _ = DeleteDC(dc);
+            for (percent, drawn, corner, center, circle_blend, frame_blend) in sampled {
+                assert!(
+                    drawn && corner == 0xffffff && center == 0,
+                    "{percent}%: circle placement"
+                );
+                assert!(
+                    circle_blend && frame_blend,
+                    "{percent}%: antialiased circle and outline"
+                );
+            }
         }
     }
 }

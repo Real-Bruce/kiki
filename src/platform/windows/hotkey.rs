@@ -129,13 +129,23 @@ pub fn set_control(hwnd: HWND, hotkey: Hotkey) {
 }
 /// Retain native key handling while painting its surface in the application's theme.
 pub fn theme_control(hwnd: HWND) -> Result<()> {
-    // SAFETY: a live UI-owned HOTKEY_CLASS control; no borrowed state or allocations are retained by the subclass.
+    use windows::Win32::UI::{Shell::SetWindowSubclass, WindowsAndMessaging::*};
+    // SAFETY: the live HOTKEY_CLASS control belongs to this UI thread. Recalculate its
+    // client area after installing the subclass that paints the full control surface.
     unsafe {
-        if !windows::Win32::UI::Shell::SetWindowSubclass(hwnd, Some(themed_proc), 77, 0).as_bool() {
+        if !SetWindowSubclass(hwnd, Some(themed_proc), 77, 0).as_bool() {
             return Err(windows::core::Error::from_win32());
         }
+        SetWindowPos(
+            hwnd,
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        )
     }
-    Ok(())
 }
 unsafe extern "system" fn themed_proc(
     hwnd: HWND,
@@ -158,13 +168,22 @@ unsafe extern "system" fn themed_proc(
             let mut rect = RECT::default();
             let _ = GetClientRect(hwnd, &mut rect);
             let dark = super::selection_render::system_dark();
-            let bg = CreateSolidBrush(ref_color(if dark { 0x343538 } else { 0xeff2f6 }));
-            FillRect(dc, &rect, bg);
-            let _ = DeleteObject(bg.into());
-            if GetFocus() == hwnd {
-                let border = CreateSolidBrush(ref_color(super::settings_render::accent(dark)));
-                FrameRect(dc, &rect, border);
-                let _ = DeleteObject(border.into());
+            let dpi = GetDpiForWindow(hwnd);
+            let scale = dpi.max(96) as f32 / 96.;
+            let fill = if dark { 0x343538 } else { 0xeff2f6 };
+            let focused = GetFocus() == hwnd;
+            use super::settings_render as appearance;
+            if appearance::paint_control(dc, rect, appearance::background(dark), |shapes| {
+                shapes.rounded(rect, (12. * scale).round() as i32, fill);
+                if focused {
+                    shapes.focus_ring(rect, 6. * scale, scale, appearance::accent(dark));
+                }
+            })
+            .is_none()
+            {
+                let bg = CreateSolidBrush(ref_color(fill));
+                FillRect(dc, &rect, bg);
+                let _ = DeleteObject(bg.into());
             }
             SetBkMode(dc, TRANSPARENT);
             SetTextColor(dc, ref_color(if dark { 0xf2f2f2 } else { 0x202020 }));
@@ -174,7 +193,7 @@ unsafe extern "system" fn themed_proc(
                 .map(|key| key.label())
                 .unwrap_or_else(|_| "按 Ctrl 或 Alt 加按键…".into());
             let mut text: Vec<_> = label.encode_utf16().collect();
-            rect.left += (12 * GetDpiForWindow(hwnd) / 96) as i32;
+            rect.left += (12. * scale).round() as i32;
             DrawTextW(
                 dc,
                 &mut text,
@@ -183,6 +202,11 @@ unsafe extern "system" fn themed_proc(
             );
             SelectObject(dc, old);
             let _ = EndPaint(hwnd, &ps);
+            return LRESULT(0);
+        }
+        // The native hotkey class normally reserves a square non-client border.
+        // Use its full bounds for the themed fill and focus ring instead.
+        if matches!(msg, WM_NCCALCSIZE | WM_NCPAINT) {
             return LRESULT(0);
         }
         if msg == WM_ERASEBKGND {
