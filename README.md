@@ -4,7 +4,7 @@
 
 ## Windows 11 x64 免安装包
 
-从本地 dist 目录解压 **kiki-v0.1.0-windows-x64-first-use.zip**，双击 kiki.exe。首次打开可在通用页选择 **开始截图**。以后可从任务栏右下角的 kiki 图标开始截图，默认快捷键是 **Ctrl+Alt+A**。可用 Get-FileHash 核对同目录的 .zip.sha256。
+从本地 dist 目录解压 **kiki-v0.1.0-windows-x64-pine-theme.zip**，双击 kiki.exe。首次打开可在通用页选择 **开始截图**。以后可从任务栏右下角的 kiki 图标开始截图，默认快捷键是 **Ctrl+Alt+A**。可用 Get-FileHash 核对同目录的 .zip.sha256。
 
 [快速使用说明](docs/QUICK_START.txt) · [版本变更](CHANGELOG.md) · [P8 交付与验收](docs/validation/P8.md)
 

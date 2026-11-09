@@ -27,3 +27,11 @@
 - Windows 11 单屏 1920×1080、125% 缩放下，运行 Release 诊断版并通过 WGC 保存浅色和深色的真实截图。两种主条约 776×60 像素。对照查看图标轮廓、相对间距、选择工具高亮、撤销重做禁用态和底部边缘。裁剪证据见忽略目录 `artifacts/visual/toolbar-reference`。其他缩放比例、跨屏及参数交互未在本轮复验。
 - 全特性 43 项测试、严格 Clippy、rustfmt、默认和诊断 Release 构建通过。
 - 修订包 `dist/kiki-v0.1.0-windows-x64-toolbar-reference.zip` 为 551,900 字节，普通 EXE 为 1,038,848 字节。重新解压后 16 个文件的哈希均与暂存文件一致。ZIP SHA-256 为 `97a24cb7329d8cbe8f12469a536b2556cf1e5fc14443f261d6657a568d8ef149`。
+
+## 截图与图标统一松绿主题
+
+- 截图选区、尺寸标签、工具条、参数条、提示和标注编辑状态使用共用暖灰与松绿。保持 01-capture.png 的工具顺序、图标轮廓和控件比例。
+- Windows 11 单屏 SDR、1920×1080、125% 下检查真实浅色箭头工具和深色文字工具，核对选区、工具条、参数条和设置侧栏图标。裁剪证据位于 artifacts/visual/pine-theme。临时预览入口未进入交付程序。
+- 九个 ICO 帧的尺寸和每个像素的透明通道与原版一致。Windows 从解压后的正式 EXE 提取的 32×32 图标显示松绿底和白爪印。换主题前后同一份测试标注 PNG 的 SHA-256 一致。
+- 默认及全特性各 44 项测试通过。严格 Clippy、rustfmt、git diff --check 和两种 Release 构建通过。
+- dist/kiki-v0.1.0-windows-x64-pine-theme.zip 共 526,541 字节，普通 EXE 为 1,022,976 字节。全新路径解压后核对全部 16 个文件。ZIP SHA-256 为 1470330de9251b3927f3f3129d6879a37c1a1a1a214ae3a99234b7158445ac21。

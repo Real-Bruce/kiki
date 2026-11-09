@@ -353,3 +353,10 @@
 - 设置和托盘统一暖灰、松绿及文案。菜单显示有效快捷键。快捷键冲突不再阻止无关设置保存。截图提示按框选阶段显示并避开任务栏。
 - 125% 单屏实查首次启动、截图入口、浅深菜单与提示。默认和全特性各 44 项测试、严格 Clippy、rustfmt 和两种 Release 构建通过。ZIP 解压核对 16 个文件，详见 [P6 验证](validation/P6.md)。
 - 关联提交主题：feat(settings): guide first-time users into capture。
+
+## 截图与图标统一主题
+
+- 截图界面、设置和托盘共用暖灰与松绿配色。应用图标在九个尺寸上保留白色爪印与透明边缘，底板改为松绿。
+- 125% 单屏核对浅深色工具条、参数条和设置图标。同一份测试标注 PNG 前后逐字节一致。默认和全特性各 44 项测试、严格 Clippy、rustfmt 及两种 Release 构建通过。
+- 便携 ZIP 已生成并核对 16 个解压文件，详见 [界面优化验证](validation/UI_POLISH.md)。
+- 关联提交主题：feat(theme): bring pine colors to capture and app icon。

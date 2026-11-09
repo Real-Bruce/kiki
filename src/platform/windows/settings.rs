@@ -955,6 +955,7 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                 let primary = id == START_CAPTURE && !disabled;
                 let fill = match (pressed, selected && !theme, hovered && !disabled) {
                     (true, _, _) if primary => Some(appearance::accent_pressed(dark)),
+                    (_, _, true) if primary => Some(appearance::accent_hover(dark)),
                     _ if primary => Some(accent),
                     (true, _, _) => Some(appearance::pressed(dark)),
                     (_, true, _) => Some(appearance::selected(dark)),

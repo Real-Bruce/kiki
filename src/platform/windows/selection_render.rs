@@ -1,4 +1,4 @@
-use super::{text_input::TextInput, toolbar_icons::ToolbarIcons};
+use super::{text_input::TextInput, toolbar_icons::ToolbarIcons, ui_palette as palette};
 use crate::core::{
     annotation::{Editor, Shape, Tool, rotate_point, text_center},
     display::DisplayInfo,
@@ -290,10 +290,10 @@ impl Canvas {
                         bottom: r.bottom,
                     },
                 ] {
-                    self.fill(mask, color(24, 28, 36, 0.50));
+                    self.fill(mask, tone(palette::foreground(false), 0.50));
                 }
-                self.brush.SetColor(&color(0, 120, 212, 1.));
-                self.target.DrawRectangle(&r, &self.brush, 1.5, None);
+                self.outline(r, 0., 2.5, tone(palette::on_accent(self.dark), 1.));
+                self.outline(r, 0., 1.5, tone(palette::accent(self.dark), 1.));
                 if selection.rect.is_some() {
                     for point in Selection::handles(rect) {
                         let x = (i64::from(point.x) - i64::from(self.source.bounds().left)) as f32;
@@ -305,8 +305,8 @@ impl Canvas {
                             right: x + size,
                             bottom: y + size,
                         };
-                        self.fill(handle, color(255, 255, 255, 1.));
-                        self.brush.SetColor(&color(0, 120, 212, 1.));
+                        self.fill(handle, tone(palette::background(self.dark), 1.));
+                        self.brush.SetColor(&tone(palette::accent(self.dark), 1.));
                         self.target.DrawRectangle(&handle, &self.brush, 1., None);
                     }
                 }
@@ -319,8 +319,12 @@ impl Canvas {
                         (26. * scale).round() as i32,
                         (3. * scale).round() as i32,
                     ));
-                    self.round(label, 5. * scale, color(0, 94, 176, 1.));
-                    self.label(&format!("{rw} × {rh} px"), label, color(255, 255, 255, 1.));
+                    self.round(label, 5. * scale, tone(palette::accent(self.dark), 1.));
+                    self.label(
+                        &format!("{rw} × {rh} px"),
+                        label,
+                        tone(palette::on_accent(self.dark), 1.),
+                    );
                 }
             } else {
                 self.fill(
@@ -330,7 +334,7 @@ impl Canvas {
                         right: w,
                         bottom: h,
                     },
-                    color(24, 28, 36, 0.50),
+                    tone(palette::foreground(false), 0.50),
                 );
             }
             self.paint_annotations(editor, selection.rect, editing, (&text_layouts, &geometry));
@@ -346,7 +350,7 @@ impl Canvas {
                     },
                 );
                 let bounds = input.bounds();
-                self.brush.SetColor(&color(0, 120, 212, 1.));
+                self.brush.SetColor(&tone(palette::accent(self.dark), 1.));
                 self.target.DrawRectangle(
                     &D2D_RECT_F {
                         left: bounds.left as f32,
@@ -379,7 +383,7 @@ impl Canvas {
                     right: (left + hint_width * scale).min(display.right - 16. * scale),
                     bottom,
                 };
-                self.round(hint, 6. * scale, color(30, 36, 46, 0.88));
+                self.round(hint, 6. * scale, tone(palette::sidebar(true), 0.96));
                 self.label(
                     if busy {
                         "正在输出，请稍候…"
@@ -391,7 +395,7 @@ impl Canvas {
                         "拖动选择截图区域　　F 当前屏幕　　Esc 取消"
                     },
                     hint,
-                    color(255, 255, 255, 1.),
+                    tone(palette::foreground(true), 1.),
                 );
             }
             self.target.EndDraw(None, None)?;
@@ -410,177 +414,92 @@ impl Canvas {
         pressed: Option<usize>,
         busy: bool,
     ) {
-        // SAFETY: synchronous UI-thread drawing; all brushes and formats are retained by Canvas.
-        unsafe {
-            let r = self.local(layout.toolbar);
-            let s = layout.scale;
-            let panel = if self.dark {
-                color(44, 47, 53, 0.97)
-            } else {
-                color(235, 240, 249, 0.97)
-            };
-            self.round(r, BAR_RADIUS * s, panel);
-            self.brush.SetColor(&if self.dark {
-                color(98, 103, 114, 1.)
-            } else {
-                color(255, 255, 255, 0.78)
-            });
-            self.target.DrawRoundedRectangle(
-                &D2D1_ROUNDED_RECT {
-                    rect: r,
-                    radiusX: BAR_RADIUS * s,
-                    radiusY: BAR_RADIUS * s,
+        let r = self.local(layout.toolbar);
+        let s = layout.scale;
+        let dark = self.dark;
+        self.panel(r, BAR_RADIUS * s);
+        for center in DIVIDER_CENTERS {
+            let x = r.left + center * REFERENCE_SCALE * s;
+            self.fill(
+                D2D_RECT_F {
+                    left: x - 0.45 * s,
+                    top: r.top + 14. * s,
+                    right: x + 0.45 * s,
+                    bottom: r.bottom - 14. * s,
                 },
-                &self.brush,
-                1.,
-                None,
+                tone(palette::divider(dark), 1.),
             );
-            for center in DIVIDER_CENTERS {
-                let x = r.left + center * REFERENCE_SCALE * s;
-                self.fill(
-                    D2D_RECT_F {
-                        left: x - 0.45 * s,
-                        top: r.top + 14. * s,
-                        right: x + 0.45 * s,
-                        bottom: r.bottom - 14. * s,
-                    },
-                    if self.dark {
-                        color(170, 180, 195, 0.55)
-                    } else {
-                        color(118, 132, 154, 0.55)
-                    },
-                );
+        }
+        let names = [
+            "选择",
+            "矩形",
+            "箭头",
+            "画笔",
+            "文字",
+            "撤销（Ctrl+Z）",
+            "重做（Ctrl+Y）",
+            "贴图",
+            "保存（Ctrl+S）",
+            "复制",
+            "取消（Esc）",
+        ];
+        let mut hovered = None;
+        for (i, button) in layout.buttons.iter().enumerate() {
+            let b = self.local(*button);
+            let inset = (BUTTON_HEIGHT - BUTTON_FACE_HEIGHT) * s / 2.;
+            let face = D2D_RECT_F {
+                top: b.top + inset,
+                bottom: b.bottom - inset,
+                ..b
+            };
+            let active = !busy && editor.enabled(i);
+            let over = contains(*button, pointer);
+            if over {
+                hovered = Some(i);
             }
-            let names = [
-                "选择",
-                "矩形",
-                "箭头",
-                "画笔",
-                "文字",
-                "撤销 · Ctrl+Z",
-                "重做 · Ctrl+Y",
-                "贴图",
-                "保存 · Ctrl+S",
-                "复制",
-                "取消 · Esc",
-            ];
-            let mut hovered = None;
-            for (i, button) in layout.buttons.iter().enumerate() {
-                let b = self.local(*button);
-                let inset = (BUTTON_HEIGHT - BUTTON_FACE_HEIGHT) * s / 2.;
-                let face = D2D_RECT_F {
-                    top: b.top + inset,
-                    bottom: b.bottom - inset,
-                    ..b
-                };
-                let active = !busy && editor.enabled(i);
-                let over = contains(*button, pointer);
-                if over {
-                    hovered = Some(i);
-                }
-                if i == editor.tool.button() {
-                    self.round(
-                        face,
-                        BUTTON_RADIUS * s,
-                        if self.dark {
-                            color(41, 87, 129, 1.)
-                        } else {
-                            color(190, 216, 253, 1.)
-                        },
-                    );
-                }
-                if over && active {
-                    self.round(
-                        face,
-                        BUTTON_RADIUS * s,
-                        if self.dark {
-                            color(72, 82, 95, 1.)
-                        } else {
-                            color(227, 232, 242, 1.)
-                        },
-                    );
-                }
-                if over && active && pressed == Some(i) {
-                    self.round(
-                        face,
-                        BUTTON_RADIUS * s,
-                        if self.dark {
-                            color(35, 66, 96, 1.)
-                        } else {
-                            color(188, 217, 245, 1.)
-                        },
-                    );
-                }
-                if i == 9 {
-                    let blue = if over && pressed == Some(i) {
-                        (0, 85, 154)
-                    } else if over {
-                        (0, 105, 193)
-                    } else {
-                        (0, 110, 235)
-                    };
-                    self.round(
-                        face,
-                        BUTTON_RADIUS * s,
-                        color(blue.0, blue.1, blue.2, if busy { 0.65 } else { 1. }),
-                    );
-                }
-                let foreground = if i == editor.tool.button() {
-                    if self.dark {
-                        color(235, 246, 255, 1.)
-                    } else {
-                        color(18, 22, 28, 1.)
-                    }
-                } else if !active {
-                    if self.dark {
-                        color(153, 159, 170, 0.65)
-                    } else {
-                        color(126, 133, 145, 0.60)
-                    }
-                } else if self.dark {
-                    color(244, 246, 250, 1.)
-                } else {
-                    color(18, 22, 28, 1.)
-                };
-                self.icon(i, b, foreground, s);
-                if focus == i {
-                    self.brush.SetColor(&color(0, 120, 212, 1.));
-                    self.target.DrawRoundedRectangle(
-                        &D2D1_ROUNDED_RECT {
-                            rect: b,
-                            radiusX: 6. * s,
-                            radiusY: 6. * s,
-                        },
-                        &self.brush,
-                        2.,
-                        None,
-                    );
-                }
+            let selected = i == editor.tool.button();
+            let down = over && active && pressed == Some(i);
+            let background = match (i == 9, active) {
+                (true, false) => Some(palette::selected(dark)),
+                (true, true) if down => Some(palette::accent_pressed(dark)),
+                (true, true) if over => Some(palette::accent_hover(dark)),
+                (true, true) => Some(palette::accent(dark)),
+                _ if down => Some(palette::pressed(dark)),
+                _ if over && active => Some(palette::hover(dark)),
+                _ if selected => Some(palette::selected(dark)),
+                _ => None,
+            };
+            if let Some(background) = background {
+                self.round(face, BUTTON_RADIUS * s, tone(background, 1.));
             }
-            if let Some(i) = hovered.filter(|_| super::preferences::hints()) {
-                let b = layout.buttons[i];
-                let width =
-                    ((i64::from(b.right) - i64::from(b.left)) as f32 + 48. * s).round() as i32;
-                let t = self.local(fit_panel(
-                    PixelPoint {
-                        x: b.left.saturating_sub((24. * s).round() as i32),
-                        y: layout.bounds.top.saturating_sub((34. * s).round() as i32),
-                    },
-                    layout.screen,
-                    width,
-                    (28. * s).round() as i32,
-                ));
-                self.round(t, 6. * s, panel);
-                self.label(
-                    names[i],
-                    t,
-                    if self.dark {
-                        color(245, 246, 248, 1.)
-                    } else {
-                        color(36, 42, 50, 1.)
-                    },
-                );
+            let foreground = if !active {
+                tone(palette::muted(dark), 0.58)
+            } else if i == 9 {
+                tone(palette::on_accent(dark), 1.)
+            } else if selected {
+                tone(palette::accent(dark), 1.)
+            } else {
+                tone(palette::foreground(dark), 1.)
+            };
+            self.icon(i, b, foreground, s);
+            if focus == i {
+                self.outline(b, 6. * s, 1.5 * s, tone(palette::accent(dark), 1.));
             }
+        }
+        if let Some(i) = hovered.filter(|_| super::preferences::hints()) {
+            let b = layout.buttons[i];
+            let width = ((i64::from(b.right) - i64::from(b.left)) as f32 + 48. * s).round() as i32;
+            let t = self.local(fit_panel(
+                PixelPoint {
+                    x: b.left.saturating_sub((24. * s).round() as i32),
+                    y: layout.bounds.top.saturating_sub((34. * s).round() as i32),
+                },
+                layout.screen,
+                width,
+                (28. * s).round() as i32,
+            ));
+            self.panel(t, 6. * s);
+            self.label(names[i], t, tone(palette::foreground(dark), 1.));
         }
     }
 
@@ -653,15 +572,8 @@ impl Canvas {
         };
         let r = self.local(bounds);
         let s = layout.scale;
-        self.round(
-            r,
-            10. * s,
-            if self.dark {
-                color(44, 47, 53, 0.98)
-            } else {
-                color(249, 250, 253, 0.98)
-            },
-        );
+        let dark = self.dark;
+        self.panel(r, BAR_RADIUS * s);
         // SAFETY: all drawing objects are owned by Canvas on the UI thread.
         unsafe {
             for (i, rgb) in ANNOTATION_COLORS.iter().enumerate() {
@@ -681,13 +593,12 @@ impl Canvas {
                         right: x + 13. * s,
                         bottom: y + 13. * s,
                     };
-                    self.brush.SetColor(&color(0, 120, 212, 1.));
-                    self.target.DrawRectangle(&rect, &self.brush, 1.5, None);
+                    self.outline(rect, 5. * s, 1.5 * s, tone(palette::accent(dark), 1.));
                 }
                 self.brush.SetColor(&if *rgb == editor.style().color {
-                    color(0, 120, 212, 1.)
+                    tone(palette::accent(self.dark), 1.)
                 } else {
-                    color(136, 143, 155, 1.)
+                    tone(palette::muted(dark), 0.68)
                 });
                 self.target.DrawEllipse(
                     &D2D1_ELLIPSE {
@@ -714,42 +625,29 @@ impl Canvas {
                     right: r.left + (VALUE_START + 46. + i as f32 * VALUE_STEP) * s,
                     bottom: r.bottom - 6. * s,
                 };
-                if focus == 19 + i {
-                    self.brush.SetColor(&color(0, 120, 212, 1.));
-                    self.target.DrawRectangle(&b, &self.brush, 1.5, None);
-                }
-                if *width
+                let selected = *width
                     == if editor.tool == Tool::Text {
                         editor.text_size
                     } else {
                         editor.style().width
-                    }
-                {
-                    self.round(
-                        b,
-                        6. * s,
-                        if self.dark {
-                            color(41, 87, 129, 1.)
-                        } else {
-                            color(211, 233, 255, 1.)
-                        },
-                    );
+                    };
+                if selected {
+                    self.round(b, 6. * s, tone(palette::selected(dark), 1.));
                 }
-                self.brush.SetColor(&if self.dark {
-                    color(245, 246, 250, 1.)
-                } else {
-                    color(34, 40, 49, 1.)
-                });
+                if focus == 19 + i {
+                    self.outline(b, 6. * s, 1.5 * s, tone(palette::accent(dark), 1.));
+                }
+                let foreground = tone(
+                    if selected {
+                        palette::accent(dark)
+                    } else {
+                        palette::foreground(dark)
+                    },
+                    1.,
+                );
+                self.brush.SetColor(&foreground);
                 if editor.tool == Tool::Text {
-                    self.label(
-                        &format!("{}", *width as i32),
-                        b,
-                        if self.dark {
-                            color(245, 246, 250, 1.)
-                        } else {
-                            color(34, 40, 49, 1.)
-                        },
-                    );
+                    self.label(&format!("{}", *width as i32), b, foreground);
                     continue;
                 }
                 self.target.DrawLine(
@@ -795,7 +693,7 @@ impl Canvas {
             if let Some(i) = selected {
                 let object = &editor.objects()[i];
                 if let Shape::Pen(points) = &object.shape {
-                    self.brush.SetColor(&color(0, 120, 212, 0.45));
+                    self.brush.SetColor(&tone(palette::accent(self.dark), 0.45));
                     prepared.1.stroke(
                         &self.target,
                         &self.brush,
@@ -815,7 +713,6 @@ impl Canvas {
                 editing,
             );
             if let Some(object) = selected.and_then(|i| editor.objects().get(i)) {
-                self.brush.SetColor(&color(239, 153, 44, 1.));
                 for p in object.handles() {
                     let p = point(p);
                     let r = D2D_RECT_F {
@@ -824,8 +721,9 @@ impl Canvas {
                         right: p.X + 3. * self.scale,
                         bottom: p.Y + 3. * self.scale,
                     };
-                    self.fill(r, color(255, 255, 255, 1.));
-                    self.brush.SetColor(&color(239, 153, 44, 1.));
+                    self.fill(r, tone(palette::accent(self.dark), 1.));
+                    self.brush
+                        .SetColor(&tone(palette::on_accent(self.dark), 1.));
                     self.target.DrawRectangle(&r, &self.brush, 1., None);
                 }
             }
@@ -836,7 +734,7 @@ impl Canvas {
                 .and_then(|i| editor.objects().get(i))
             {
                 if let Shape::Text { bounds, angle, .. } = object.shape {
-                    let c = color(0, 120, 212, 1.);
+                    let c = tone(palette::accent(self.dark), 1.);
                     self.brush.SetColor(&c);
                     let mut prior = Matrix3x2::default();
                     self.target.GetTransform(&mut prior);
@@ -863,7 +761,8 @@ impl Canvas {
                                 radiusX: 4. * self.scale,
                                 radiusY: 4. * self.scale,
                             };
-                            self.brush.SetColor(&color(255, 255, 255, 1.));
+                            self.brush
+                                .SetColor(&tone(palette::background(self.dark), 1.));
                             self.target.FillEllipse(&circle, &self.brush);
                             self.brush.SetColor(&c);
                             self.target.DrawEllipse(&circle, &self.brush, 1., None);
@@ -880,11 +779,7 @@ impl Canvas {
         };
         // SAFETY: the brush is owned by the active canvas on the render thread.
         unsafe {
-            self.brush.SetColor(&if index == 9 {
-                color(255, 255, 255, 1.)
-            } else {
-                c
-            });
+            self.brush.SetColor(&c);
         }
         let icon_center = if index == 9 {
             Vector2 {
@@ -903,7 +798,7 @@ impl Canvas {
                     left: center.X - 14. * scale,
                     ..r
                 },
-                color(255, 255, 255, 1.),
+                c,
             );
         }
     }
@@ -934,6 +829,30 @@ impl Canvas {
                 },
                 &self.brush,
             );
+        }
+    }
+    fn panel(&self, r: D2D_RECT_F, radius: f32) {
+        self.round(r, radius, tone(palette::background(self.dark), 1.));
+        self.outline(r, radius, 1., tone(palette::divider(self.dark), 1.));
+    }
+    fn outline(&self, r: D2D_RECT_F, radius: f32, width: f32, c: D2D1_COLOR_F) {
+        // SAFETY: the target and brush are retained by the canvas during this draw.
+        unsafe {
+            self.brush.SetColor(&c);
+            if radius == 0. {
+                self.target.DrawRectangle(&r, &self.brush, width, None);
+            } else {
+                self.target.DrawRoundedRectangle(
+                    &D2D1_ROUNDED_RECT {
+                        rect: r,
+                        radiusX: radius,
+                        radiusY: radius,
+                    },
+                    &self.brush,
+                    width,
+                    None,
+                );
+            }
         }
     }
     fn label(&self, text: &str, r: D2D_RECT_F, c: D2D1_COLOR_F) {
@@ -968,6 +887,10 @@ fn format(factory: &IDWriteFactory, scale: f32) -> Result<IDWriteTextFormat> {
         Ok(text)
     }
 }
+fn tone(rgb: u32, alpha: f32) -> D2D1_COLOR_F {
+    color((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8, alpha)
+}
+
 fn color(r: u8, g: u8, b: u8, a: f32) -> D2D1_COLOR_F {
     D2D1_COLOR_F {
         r: r as f32 / 255.,
