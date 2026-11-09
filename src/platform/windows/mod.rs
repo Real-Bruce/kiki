@@ -146,6 +146,13 @@ pub fn run() -> Result<()> {
         return Ok(());
     }
     #[cfg(feature = "diagnostics")]
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|arg| arg == "--tray-menu")
+    {
+        return probe_tray_menu();
+    }
+    #[cfg(feature = "diagnostics")]
     if let Some(directory) = std::env::args_os()
         .nth(1)
         .filter(|a| a == "--probe")
@@ -601,6 +608,53 @@ fn poll(hwnd: HWND) {
     }
 }
 
+#[cfg(feature = "diagnostics")]
+fn probe_tray_menu() -> Result<()> {
+    use windows::Win32::Graphics::Gdi::*;
+    // SAFETY: the diagnostic owner and native popup belong to this process's UI thread.
+    // No tray registration, preferences, or user commands are used by this probe.
+    unsafe {
+        let module = GetModuleHandleW(None)?;
+        let class = WNDCLASSW {
+            lpfnWndProc: Some(window_proc),
+            hInstance: module.into(),
+            lpszClassName: w!("kiki.TrayMenuProbe"),
+            ..Default::default()
+        };
+        if RegisterClassW(&class) == 0 {
+            return Err(Error::from_win32());
+        }
+        let hwnd = CreateWindowExW(
+            WS_EX_TOOLWINDOW,
+            class.lpszClassName,
+            w!("kiki 托盘菜单预览"),
+            WS_POPUP,
+            0,
+            0,
+            1,
+            1,
+            None,
+            None,
+            Some(module.into()),
+            None,
+        )?;
+        let _owner = HiddenWindow::own(hwnd);
+        let mut point = POINT::default();
+        let _ = GetCursorPos(&mut point);
+        let monitor = MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST);
+        let mut info = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        if GetMonitorInfoW(monitor, &mut info).as_bool() {
+            point.x = info.rcWork.left + (info.rcWork.right - info.rcWork.left) / 2;
+            point.y = info.rcWork.top + (info.rcWork.bottom - info.rcWork.top) / 2;
+        }
+        let _ = menu::tray(hwnd, point.x, point.y);
+        Ok(())
+    }
+}
+
 unsafe extern "system" fn window_proc(
     hwnd: HWND,
     msg: u32,
@@ -715,25 +769,16 @@ fn dispatch(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
                 begin_capture(hwnd);
                 LRESULT(0)
             }
+            WM_ENTERIDLE if wparam.0 == MSGF_MENU as usize => {
+                menu::round_tray_popup(hwnd, HWND(lparam.0 as *mut _));
+                LRESULT(0)
+            }
             TRAY if lparam.0 as u32 == WM_RBUTTONUP => {
                 let mut point = POINT::default();
                 let _ = GetCursorPos(&mut point);
-                let command = menu::popup(
-                    hwnd,
-                    point.x,
-                    point.y,
-                    &[
-                        (1, "开始截图", true),
-                        (5, "当前屏幕截图", true),
-                        (4, "设置…", true),
-                        (0, "", true),
-                        (3, "关闭所有贴图", true),
-                        (2, "退出", true),
-                    ],
-                );
+                let command = menu::tray(hwnd, point.x, point.y);
                 match command {
                     1 => begin_capture(hwnd),
-                    5 => begin_capture_mode(hwnd, true),
                     4 => {
                         if let Err(error) = settings::open() {
                             show_error(&error.to_string());

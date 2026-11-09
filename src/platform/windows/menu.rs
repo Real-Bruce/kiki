@@ -2,7 +2,7 @@
 use windows::{
     Win32::{
         Foundation::*,
-        Graphics::Gdi::*,
+        Graphics::{Dwm::*, Gdi::*},
         UI::{
             Accessibility::{MSAA_MENU_SIG, MSAAMENUINFO},
             Controls::*,
@@ -10,14 +10,28 @@ use windows::{
             WindowsAndMessaging::*,
         },
     },
-    core::PWSTR,
+    core::{PWSTR, w},
 };
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Style {
+    Tray,
+    Pinned,
+}
+
 #[repr(C)]
 struct Item {
     accessible: MSAAMENUINFO,
     text: Vec<u16>,
     font: HFONT,
     dpi: u32,
+    style: Style,
+    separator: bool,
+}
+
+impl Item {
+    fn px(&self, dip: i32) -> i32 {
+        (dip as f32 * self.dpi as f32 / 96.).round() as i32
+    }
 }
 struct Menu {
     handle: HMENU,
@@ -36,13 +50,35 @@ impl Drop for Menu {
         }
     }
 }
-pub fn popup(owner: HWND, x: i32, y: i32, entries: &[(u32, &str, bool)]) -> u32 {
+pub fn tray(owner: HWND, x: i32, y: i32) -> u32 {
+    popup(
+        owner,
+        x,
+        y,
+        Style::Tray,
+        &[
+            (1, "开始截图", true),
+            (4, "设置", true),
+            (0, "", true),
+            (3, "关闭贴图", true),
+            (2, "退出", true),
+        ],
+    )
+}
+
+pub fn popup(owner: HWND, x: i32, y: i32, style: Style, entries: &[(u32, &str, bool)]) -> u32 {
     // SAFETY: boxes and UTF-16 buffers stay stable until modal tracking ends and the native menu is destroyed.
     unsafe {
         let Ok(handle) = CreatePopupMenu() else {
             return 0;
         };
-        let dpi = GetDpiForWindow(owner).max(96);
+        let mut dpi = GetDpiForWindow(owner).max(96);
+        if style == Style::Tray {
+            let monitor = MonitorFromPoint(POINT { x, y }, MONITOR_DEFAULTTONEAREST);
+            let mut vertical = dpi;
+            let _ = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi, &mut vertical);
+        }
+        let dpi = dpi.max(96);
         let font = CreateFontW(
             -((14 * dpi / 96) as i32),
             0,
@@ -55,15 +91,18 @@ pub fn popup(owner: HWND, x: i32, y: i32, entries: &[(u32, &str, bool)]) -> u32 
             DEFAULT_CHARSET,
             OUT_DEFAULT_PRECIS,
             CLIP_DEFAULT_PRECIS,
-            DEFAULT_QUALITY,
+            if style == Style::Tray {
+                CLEARTYPE_QUALITY
+            } else {
+                DEFAULT_QUALITY
+            },
             DEFAULT_PITCH.0 as u32,
-            windows::core::w!("Segoe UI"),
+            w!("Segoe UI"),
         );
-        let background = CreateSolidBrush(rgb(if super::selection_render::system_dark() {
-            0x292929
-        } else {
-            0xffffff
-        }));
+        let background = CreateSolidBrush(rgb(menu_background(
+            style,
+            super::selection_render::system_dark(),
+        )));
         let mut menu = Menu {
             handle,
             items: Vec::new(),
@@ -72,13 +111,23 @@ pub fn popup(owner: HWND, x: i32, y: i32, entries: &[(u32, &str, bool)]) -> u32 
         };
         let info = MENUINFO {
             cbSize: std::mem::size_of::<MENUINFO>() as u32,
-            fMask: MIM_BACKGROUND,
+            fMask: if style == Style::Tray {
+                MIM_BACKGROUND | MIM_STYLE
+            } else {
+                MIM_BACKGROUND
+            },
+            dwStyle: if style == Style::Tray {
+                MNS_NOCHECK
+            } else {
+                Default::default()
+            },
             hbrBack: background,
             ..Default::default()
         };
         let _ = SetMenuInfo(handle, &info);
         for (id, label, enabled) in entries {
-            if *id == 0 {
+            let separator = *id == 0;
+            if separator && style == Style::Pinned {
                 let _ = AppendMenuW(handle, MF_SEPARATOR, 0, None);
                 continue;
             }
@@ -92,14 +141,24 @@ pub fn popup(owner: HWND, x: i32, y: i32, entries: &[(u32, &str, bool)]) -> u32 
                 text,
                 font,
                 dpi,
+                style,
+                separator,
             });
             let ptr = &*item as *const Item;
             let info = MENUITEMINFOW {
                 cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
                 fMask: MIIM_ID | MIIM_FTYPE | MIIM_DATA | MIIM_STATE,
                 wID: *id,
-                fType: MFT_OWNERDRAW,
-                fState: if *enabled { MFS_ENABLED } else { MFS_DISABLED },
+                fType: if separator {
+                    MFT_OWNERDRAW | MFT_SEPARATOR
+                } else {
+                    MFT_OWNERDRAW
+                },
+                fState: if *enabled && !separator {
+                    MFS_ENABLED
+                } else {
+                    MFS_DISABLED
+                },
                 dwItemData: ptr as usize,
                 ..Default::default()
             };
@@ -120,6 +179,9 @@ pub fn popup(owner: HWND, x: i32, y: i32, entries: &[(u32, &str, bool)]) -> u32 
         )
         .0 as u32;
         let _ = PostMessageW(Some(owner), WM_NULL, WPARAM(0), LPARAM(0));
+        if style == Style::Tray {
+            super::settings_render::release_control_surface();
+        }
         command
     }
 }
@@ -135,6 +197,11 @@ pub fn handle(msg: u32, lp: LPARAM) -> Option<LRESULT> {
                 return None;
             }
             let item = &*(info.itemData as *const Item);
+            if item.separator {
+                info.itemWidth = 0;
+                info.itemHeight = item.px(9) as u32;
+                return Some(LRESULT(1));
+            }
             let scale = item.dpi as f32 / 96.;
             let dc = GetDC(None);
             let old = SelectObject(dc, item.font.into());
@@ -142,8 +209,14 @@ pub fn handle(msg: u32, lp: LPARAM) -> Option<LRESULT> {
             let _ = GetTextExtentPoint32W(dc, &item.text[..item.text.len() - 1], &mut size);
             SelectObject(dc, old);
             ReleaseDC(None, dc);
-            info.itemWidth = (size.cx.max(190) as f32 + 56. * scale) as u32;
-            info.itemHeight = (36. * scale) as u32;
+            (info.itemWidth, info.itemHeight) = if item.style == Style::Tray {
+                ((size.cx + item.px(24)) as u32, item.px(34) as u32)
+            } else {
+                (
+                    (size.cx.max(190) as f32 + 56. * scale) as u32,
+                    (36. * scale) as u32,
+                )
+            };
             return Some(LRESULT(1));
         }
         if msg == WM_DRAWITEM {
@@ -153,18 +226,53 @@ pub fn handle(msg: u32, lp: LPARAM) -> Option<LRESULT> {
             }
             let item = &*(info.itemData as *const Item);
             let dark = super::selection_render::system_dark();
+            let surface = menu_background(item.style, dark);
+            if item.separator {
+                fill(info.hDC, &info.rcItem, surface);
+                let pad = item.px(9);
+                let y = (info.rcItem.top + info.rcItem.bottom) / 2;
+                fill(
+                    info.hDC,
+                    &RECT {
+                        left: info.rcItem.left + pad,
+                        right: info.rcItem.right - pad,
+                        top: y,
+                        bottom: y + 1,
+                    },
+                    if dark { 0x46484c } else { 0xe2e5ea },
+                );
+                return Some(LRESULT(1));
+            }
             let selected = info.itemState.0 & ODS_SELECTED.0 != 0;
             let disabled = info.itemState.0 & (ODS_DISABLED.0 | ODS_GRAYED.0) != 0;
             let bg = if selected {
                 if dark { 0x174b73 } else { 0xdcecff }
-            } else if dark {
-                0x292929
             } else {
-                0xffffff
+                surface
             };
-            let brush = CreateSolidBrush(rgb(bg));
-            FillRect(info.hDC, &info.rcItem, brush);
-            let _ = DeleteObject(brush.into());
+            if item.style == Style::Tray && selected && !disabled {
+                let horizontal = item.px(4);
+                let vertical = item.px(1);
+                let r = info.rcItem;
+                let rounded =
+                    super::settings_render::paint_control(info.hDC, r, surface, |shape| {
+                        shape.rounded(
+                            RECT {
+                                left: r.left + horizontal,
+                                right: r.right - horizontal,
+                                top: r.top + vertical,
+                                bottom: r.bottom - vertical,
+                            },
+                            item.px(12),
+                            bg,
+                        );
+                    });
+                if rounded.is_none() {
+                    fill(info.hDC, &r, bg);
+                }
+            } else {
+                fill(info.hDC, &info.rcItem, bg);
+            }
             SetBkMode(info.hDC, TRANSPARENT);
             SetTextColor(
                 info.hDC,
@@ -178,7 +286,7 @@ pub fn handle(msg: u32, lp: LPARAM) -> Option<LRESULT> {
             );
             let old = SelectObject(info.hDC, item.font.into());
             let mut rect = info.rcItem;
-            let pad = (16 * item.dpi / 96) as i32;
+            let pad = item.px(if item.style == Style::Tray { 12 } else { 16 });
             rect.left += pad;
             rect.right -= pad;
             let text = String::from_utf16_lossy(&item.text[..item.text.len() - 1]);
@@ -205,6 +313,55 @@ pub fn handle(msg: u32, lp: LPARAM) -> Option<LRESULT> {
         None
     }
 }
+/// The tray owner receives the native popup HWND in WM_ENTERIDLE.
+pub fn round_tray_popup(owner: HWND, popup: HWND) {
+    if popup.is_invalid() || popup == owner {
+        return;
+    }
+    // SAFETY: this is the live HWND from the synchronous menu notification. Only
+    // the system popup class is eligible, and DWM copies the preference values.
+    unsafe {
+        let mut class = [0u16; 16];
+        let len = GetClassNameW(popup, &mut class) as usize;
+        if class[..len]
+            != [
+                b'#' as u16,
+                b'3' as u16,
+                b'2' as u16,
+                b'7' as u16,
+                b'6' as u16,
+                b'8' as u16,
+            ]
+        {
+            return;
+        }
+        let corner = DWMWCP_ROUND;
+        let _ = DwmSetWindowAttribute(
+            popup,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            (&corner as *const DWM_WINDOW_CORNER_PREFERENCE).cast(),
+            std::mem::size_of_val(&corner) as u32,
+        );
+    }
+}
+
+fn menu_background(style: Style, dark: bool) -> u32 {
+    match (style, dark) {
+        (Style::Tray, _) => super::settings_render::background(dark),
+        (Style::Pinned, true) => 0x292929,
+        (Style::Pinned, false) => 0xffffff,
+    }
+}
+
+fn fill(dc: HDC, rect: &RECT, color: u32) {
+    // SAFETY: the DC is borrowed for this paint and FillRect does not retain the brush.
+    unsafe {
+        let brush = CreateSolidBrush(rgb(color));
+        FillRect(dc, rect, brush);
+        let _ = DeleteObject(brush.into());
+    }
+}
+
 fn rgb(value: u32) -> COLORREF {
     COLORREF(((value & 255) << 16) | (value & 0xff00) | ((value >> 16) & 255))
 }

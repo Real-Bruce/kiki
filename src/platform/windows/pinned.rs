@@ -582,6 +582,7 @@ fn context_menu(hwnd: HWND, p: (i32, i32), busy: bool) -> u32 {
         hwnd,
         p.0,
         p.1,
+        super::menu::Style::Pinned,
         &[
             (1, "复制\tCtrl+C", !busy),
             (2, "保存 PNG\tCtrl+S", !busy),

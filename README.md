@@ -4,7 +4,7 @@
 
 ## Windows 11 x64 免安装包
 
-从本地 dist 目录解压 **kiki-v0.1.0-windows-x64-settings-antialias.zip**，双击 kiki.exe。程序驻留托盘，默认按 **Ctrl+Alt+A** 开始截图。可用 Get-FileHash 核对同目录的 .zip.sha256。
+从本地 dist 目录解压 **kiki-v0.1.0-windows-x64-tray-menu.zip**，双击 kiki.exe。程序驻留托盘，默认按 **Ctrl+Alt+A** 开始截图。可用 Get-FileHash 核对同目录的 .zip.sha256。
 
 [快速使用说明](docs/QUICK_START.txt) · [版本变更](CHANGELOG.md) · [P8 交付与验收](docs/validation/P8.md)
 
@@ -32,9 +32,9 @@ cargo build --release
 
 贴图支持拖动、滚轮缩放、Ctrl+0 恢复原比例、Ctrl+C 复制、Ctrl+S 保存、Esc 关闭。悬停显示复制/保存/关闭，右键提供相同操作及恢复原比例；托盘可关闭所有贴图。缩放只改变显示，输出保持原始图像尺寸。当前最多 64 张、累计原始图像 512 MiB，显示边长/面积另有上限；大图恢复 100% 受限时显示提示。已完成共享设备与缓存回收修正、Word 粘贴及原生失败恢复验收，见 [P5 完成记录](docs/validation/P5_COMPLETION.md)。多屏等原遗留与 P7 的资源指标继续单列。
 
-开发构建另提供 `--pin-demo`（两张明确测试图）、`--pin-stress <目录>`（100 轮，每轮四张独立 4K 渐变图，隐藏窗口绘制/关闭及 CPU/GPU 采样）、`--pin-4k-demo`（四张可见 4K 测试图），可加 `--pin-sample <目录>` 记录有界的可见窗口资源采样，普通构建不包含这些入口。
+开发构建另提供 `--pin-demo`（两张明确测试图）、`--pin-stress <目录>`（100 轮，每轮四张独立 4K 渐变图，隐藏窗口绘制/关闭及 CPU/GPU 采样）、`--pin-4k-demo`（四张可见 4K 测试图），可加 `--pin-sample <目录>` 记录有界的可见窗口资源采样，开发构建也可用 `--tray-menu` 预览原生托盘菜单，选择后退出预览。普通构建不包含这些入口。
 
-可从托盘或 `--settings` 打开设置；`--capture-screen` 可选择鼠标所在屏幕。设置包括热键冲突回滚、自动保存、主题 / 提示 / 默认样式与显式开机启动。配置位于当前用户 LocalAppData/kiki；开机启动默认关闭，仅在用户开启时写入。详见 [P6 验证](docs/validation/P6.md)。
+托盘右键菜单提供开始截图、设置、关闭贴图与退出。“关闭贴图”会关闭所有置顶贴图。可从托盘或 `--settings` 打开设置；`--capture-screen` 可选择鼠标所在屏幕。设置包括热键冲突回滚、自动保存、主题 / 提示 / 默认样式与显式开机启动。配置位于当前用户 LocalAppData/kiki；开机启动默认关闭，仅在用户开启时写入。详见 [P6 验证](docs/validation/P6.md)。
 
 P7 的采样口径、性能数字和未通过项见 [验证报告](docs/validation/P7.md)。`scripts/Measure-Performance.ps1` 可分别采集 30 个进程首次截图、200 轮真实截图 / 取消 / 贴图 / 关闭和 60 秒闲置 CPU；`scripts/Measure-Idle.ps1` 可对指定进程读取外部闲置指标。时延探针是 diagnostics 构建的应用端基准，不能混称物理键盘全链路时延。
 

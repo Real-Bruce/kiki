@@ -318,3 +318,10 @@
 - 125% 缩放下实机检查浅深色截图页。绿色色点截图像素实测出现边缘过渡色。最终一轮桌面复查由用户按 Esc 停止，待验项见 [P6 验证](validation/P6.md)。
 - 默认与全特性各 44 项测试通过，严格 Clippy、格式及两种 Release 构建通过。便携 ZIP 已解压并核对 16 个文件。
 - 关联提交主题：fix(settings): antialias rounded controls。
+
+## P6 托盘右键菜单精简
+
+- 菜单仅显示开始截图、设置、关闭贴图、退出。关闭贴图仍一次关闭所有置顶贴图。菜单宽度随文字计算，采用轻分隔线和圆角。
+- 125% 单屏实测浅深色原生菜单。默认和全特性各 44 项测试、严格 Clippy、rustfmt 及两种 Release 构建通过。
+- 新便携 ZIP 已解压核对 16 个文件。截图、校验与验证范围见 [P6 验证](validation/P6.md)。
+- 关联提交主题：fix(tray): simplify and compact the context menu。
