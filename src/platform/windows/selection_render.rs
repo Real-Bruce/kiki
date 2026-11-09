@@ -18,6 +18,23 @@ use windows::{
 };
 use windows_numerics::Vector2;
 
+const BUTTON_WIDTH: f32 = 36.;
+const COPY_WIDTH: f32 = 76.;
+const BUTTON_GAP: f32 = 8.;
+const GROUP_GAP: f32 = 8.;
+const BAR_PADDING: f32 = 10.;
+const GROUP_STARTS: [usize; 3] = [1, 5, 7];
+const BAR_WIDTH: f32 = 10. * BUTTON_WIDTH
+    + COPY_WIDTH
+    + 10. * BUTTON_GAP
+    + GROUP_STARTS.len() as f32 * GROUP_GAP
+    + 2. * BAR_PADDING;
+const PARAM_WIDTH: f32 = 422.;
+const COLOR_START: f32 = 10.;
+const COLOR_STEP: f32 = 30.;
+const VALUE_START: f32 = 258.;
+const VALUE_STEP: f32 = 52.;
+
 pub struct Layout {
     pub bounds: PixelRect,
     pub toolbar: PixelRect,
@@ -121,28 +138,32 @@ impl Canvas {
     pub fn layout(&self, rect: PixelRect, screens: &[DisplayInfo], parameters: bool) -> Layout {
         let (screen, preferred) = self.display(rect, screens);
         let scale = preferred
-            .min((i64::from(screen.right) - i64::from(screen.left)) as f32 / 520.)
+            .min((i64::from(screen.right) - i64::from(screen.left)) as f32 / BAR_WIDTH)
+            .min(
+                (i64::from(screen.bottom) - i64::from(screen.top)) as f32
+                    / if parameters { 104. } else { 48. },
+            )
             .max(0.1);
         let bounds = toolbar(
             rect,
             screen,
-            (520. * scale).round() as i32,
+            (BAR_WIDTH * scale).round() as i32,
             (if parameters { 104. } else { 48. } * scale).round() as i32,
             (10. * scale).round() as i32,
         );
-        let mut x = bounds.left as f32 + 8. * scale;
+        let mut x = bounds.left as f32 + BAR_PADDING * scale;
         let buttons = std::array::from_fn(|i| {
-            if [1, 5, 7].contains(&i) {
-                x += 8. * scale;
+            if GROUP_STARTS.contains(&i) {
+                x += GROUP_GAP * scale;
             }
-            let width = if i == 9 { 80. } else { 40. };
+            let width = if i == 9 { COPY_WIDTH } else { BUTTON_WIDTH };
             let r = PixelRect {
                 left: x.round() as i32,
                 top: (bounds.top as f32 + 6. * scale).round() as i32,
-                right: (x + (width - 4.) * scale).round() as i32,
+                right: (x + width * scale).round() as i32,
                 bottom: (bounds.top as f32 + 42. * scale).round() as i32,
             };
-            x += width * scale;
+            x += (width + BUTTON_GAP) * scale;
             r
         });
         Layout {
@@ -151,9 +172,9 @@ impl Canvas {
                 ..bounds
             },
             parameters: parameters.then(|| PixelRect {
-                left: bounds.left + (64. * scale).round() as i32,
+                left: bounds.left + ((BAR_WIDTH - PARAM_WIDTH) / 2. * scale).round() as i32,
                 top: bounds.top + (56. * scale).round() as i32,
-                right: bounds.right - (64. * scale).round() as i32,
+                right: bounds.right - ((BAR_WIDTH - PARAM_WIDTH) / 2. * scale).round() as i32,
                 bottom: bounds.bottom,
             }),
             bounds,
@@ -344,16 +365,6 @@ impl Canvas {
         unsafe {
             let r = self.local(layout.toolbar);
             let s = layout.scale;
-            self.round(
-                D2D_RECT_F {
-                    left: r.left - 2.,
-                    top: r.top + 3.,
-                    right: r.right + 2.,
-                    bottom: r.bottom + 5.,
-                },
-                12. * s,
-                color(0, 0, 0, 0.18),
-            );
             let panel = if self.dark {
                 color(44, 47, 53, 0.97)
             } else {
@@ -375,13 +386,13 @@ impl Canvas {
                 1.,
                 None,
             );
-            for i in [1, 5, 7] {
+            for i in GROUP_STARTS {
                 let b = self.local(layout.buttons[i]);
                 self.fill(
                     D2D_RECT_F {
-                        left: b.left - 6. * s,
+                        left: b.left - 8.5 * s,
                         top: r.top + 12. * s,
-                        right: b.left - 5. * s,
+                        right: b.left - 7.5 * s,
                         bottom: r.bottom - 12. * s,
                     },
                     color(135, 143, 157, 0.35),
@@ -442,7 +453,18 @@ impl Canvas {
                     );
                 }
                 if i == 9 {
-                    self.round(b, 6. * s, color(0, 120, 212, if busy { 0.65 } else { 1. }));
+                    let blue = if over && pressed == Some(i) {
+                        (0, 85, 154)
+                    } else if over {
+                        (0, 105, 193)
+                    } else {
+                        (0, 120, 212)
+                    };
+                    self.round(
+                        b,
+                        6. * s,
+                        color(blue.0, blue.1, blue.2, if busy { 0.65 } else { 1. }),
+                    );
                 }
                 let foreground = if i == editor.tool.button() {
                     if self.dark {
@@ -554,10 +576,11 @@ impl Canvas {
             return None;
         }
         let x = (p.x - r.left) as f32 / layout.scale;
-        if (8. ..232.).contains(&x) {
-            Some(((x - 8.) / 28.) as usize)
-        } else if (240. ..384.).contains(&x) {
-            Some(8 + ((x - 240.) / 48.) as usize)
+        if (COLOR_START..COLOR_START + 8. * COLOR_STEP).contains(&x) {
+            Some(((x - COLOR_START) / COLOR_STEP) as usize)
+        } else if (VALUE_START..VALUE_START + 3. * VALUE_STEP).contains(&x) {
+            let offset = x - VALUE_START;
+            (offset % VALUE_STEP < 46.).then_some(8 + (offset / VALUE_STEP) as usize)
         } else {
             None
         }
@@ -580,7 +603,7 @@ impl Canvas {
         // SAFETY: all drawing objects are owned by Canvas on the UI thread.
         unsafe {
             for (i, rgb) in ANNOTATION_COLORS.iter().enumerate() {
-                let x = r.left + (22. + i as f32 * 28.) * s;
+                let x = r.left + (COLOR_START + (i as f32 + 0.5) * COLOR_STEP) * s;
                 let y = (r.top + r.bottom) / 2.;
                 self.brush.SetColor(&color(rgb[0], rgb[1], rgb[2], 1.));
                 let circle = D2D1_ELLIPSE {
@@ -624,9 +647,9 @@ impl Canvas {
             .enumerate()
             {
                 let b = D2D_RECT_F {
-                    left: r.left + (240. + i as f32 * 48.) * s,
+                    left: r.left + (VALUE_START + i as f32 * VALUE_STEP) * s,
                     top: r.top + 6. * s,
-                    right: r.left + (284. + i as f32 * 48.) * s,
+                    right: r.left + (VALUE_START + 46. + i as f32 * VALUE_STEP) * s,
                     bottom: r.bottom - 6. * s,
                 };
                 if focus == 19 + i {
@@ -734,16 +757,17 @@ impl Canvas {
         let y = (r.top + r.bottom) / 2.;
         // SAFETY: retained UI-thread rendering resources and bounded icon coordinates.
         unsafe {
+            let icon_scale = s * (18. / 21.);
             let line = |a: (f32, f32), b: (f32, f32)| {
                 self.brush.SetColor(&c);
                 self.target.DrawLine(
                     Vector2 {
-                        X: x + a.0 * s,
-                        Y: y + a.1 * s,
+                        X: x + a.0 * icon_scale,
+                        Y: y + a.1 * icon_scale,
                     },
                     Vector2 {
-                        X: x + b.0 * s,
-                        Y: y + b.1 * s,
+                        X: x + b.0 * icon_scale,
+                        Y: y + b.1 * icon_scale,
                     },
                     &self.brush,
                     1.5 * s,
@@ -904,7 +928,7 @@ fn format(factory: &IDWriteFactory, icon: bool, scale: f32) -> Result<IDWriteTex
             DWRITE_FONT_WEIGHT_NORMAL,
             DWRITE_FONT_STYLE_NORMAL,
             DWRITE_FONT_STRETCH_NORMAL,
-            if icon { 20. * scale } else { 14. * scale },
+            if icon { 18. * scale } else { 14. * scale },
             w!("zh-CN"),
         )?;
         text.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER)?;

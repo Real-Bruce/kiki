@@ -277,3 +277,9 @@
 - 用户使用解压版保存截图并确认 Word 粘贴、Ctrl+P 置顶贴图和 Esc 关闭通过。已解码窗口和区域 PNG，补测 874×347 PNG 中的矩形和箭头可见。
 - 快速使用、版本变更、性能继承和限制见 README、CHANGELOG.md 和 validation/P8.md。
 - 关联提交主题为 chore(release): prepare Windows v0.1.0 portable package。
+
+## P3/P4 截图界面优化
+
+- 工具条按 48 DIP 高度、18 DIP 图标和 36 DIP 普通按钮布局，拉开按钮和分组间距，移除向下偏移的深色色块。参数条同步对齐。
+- rustfmt 及沙箱内 33 项测试通过。另有 8 项系统集成测试因沙箱中的文件、注册表、热键或输入法权限失败，待桌面会话复测。下一步调整箭头、画笔和文字。
+- 关联提交主题：fix(selection): align capture toolbar with design。
