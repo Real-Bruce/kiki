@@ -191,6 +191,11 @@ pub(super) fn bind(
     // SAFETY: buffer zero belongs to this live swap chain; context retains its bitmap until resize or drop.
     unsafe {
         let surface: windows::Win32::Graphics::Dxgi::IDXGISurface = swap.GetBuffer(0)?;
+        let desc = swap.GetDesc1()?;
+        let mut options = D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW;
+        if desc.Flags & DXGI_SWAP_CHAIN_FLAG_GDI_COMPATIBLE.0 as u32 != 0 {
+            options |= D2D1_BITMAP_OPTIONS_GDI_COMPATIBLE;
+        }
         let bitmap = context.CreateBitmapFromDxgiSurface(
             &surface,
             Some(&D2D1_BITMAP_PROPERTIES1 {
@@ -200,7 +205,7 @@ pub(super) fn bind(
                 },
                 dpiX: 96.,
                 dpiY: 96.,
-                bitmapOptions: D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+                bitmapOptions: options,
                 ..Default::default()
             }),
         )?;
@@ -216,6 +221,7 @@ impl Device {
         hwnd: HWND,
         width: u32,
         height: u32,
+        gdi: bool,
     ) -> Result<(ID2D1DeviceContext, IDXGISwapChain1)> {
         // SAFETY: this device and live HWND belong to the calling UI thread; the context retains the back buffer until detach/drop.
         unsafe {
@@ -240,6 +246,11 @@ impl Device {
                     Scaling: DXGI_SCALING_STRETCH,
                     SwapEffect: DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
                     AlphaMode: DXGI_ALPHA_MODE_IGNORE,
+                    Flags: if gdi {
+                        DXGI_SWAP_CHAIN_FLAG_GDI_COMPATIBLE.0 as u32
+                    } else {
+                        0
+                    },
                     ..Default::default()
                 },
                 None,

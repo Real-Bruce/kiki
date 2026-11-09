@@ -47,7 +47,7 @@ impl Canvas {
             use windows::core::Interface;
             let device = super::pinned_device::get()?;
             let (context, swap) =
-                device.surface(hwnd, width.max(1) as u32, height.max(1) as u32)?;
+                device.surface(hwnd, width.max(1) as u32, height.max(1) as u32, false)?;
             let target: ID2D1RenderTarget = context.cast()?;
             let mut pixels = Vec::new();
             pixels

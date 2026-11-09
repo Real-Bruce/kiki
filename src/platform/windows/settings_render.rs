@@ -22,7 +22,7 @@ impl Canvas {
         // SAFETY: all COM resources belong to the window's UI thread; the target retains no borrowed pointers.
         unsafe {
             let device = super::pinned_device::get()?;
-            let (context, swap) = device.surface(hwnd, width, height)?;
+            let (context, swap) = device.surface(hwnd, width, height, false)?;
             context.SetDpi(dpi as f32, dpi as f32);
             let target: ID2D1RenderTarget = context.cast()?;
             let brush = target.CreateSolidColorBrush(&color(0), None)?;

@@ -286,3 +286,7 @@
 - 箭头改为实心尖端，画笔改为圆头圆接的连续路径。两者移除矩形线框，箭头选中仅显示端点，画笔沿笔迹高亮。预览与成图共用几何。
 - 新增四方向箭头和鼠标释放点、单点笔画回归。下一步接透明文字与旋转。
 - 关联提交主题：fix(annotation): render solid arrows and continuous pen strokes。
+- 接通透明无窗口 Rich Edit、随内容伸缩的细边框和输入时边框拖动。选择工具支持拖动文字、自由旋转与重编，旋转进撤销历史和共用成图。
+- 用户确认透明输入并提供包含箭头、笔画和多行中文的人工成图。Release 探针 PNG 核对旋转中文字；默认和全特性各 43 项通过，双配置严格 Clippy、rustfmt、Release 构建通过。
+- 修正版 ZIP 和 SHA-256 已生成并验算 16 个文件。单次 WGC 首帧及读回为 67.4654 ms。详见 [界面优化验证](validation/UI_POLISH.md)。
+- 关联提交主题：feat(annotation): add transparent text editing and rotation。下一步实机复测深浅工具条、旋转手柄、拼音候选和高 DPI，延续多屏及 HDR 遗留。

@@ -2,10 +2,10 @@
 use super::{
     capture::CaptureResult,
     selection_render::{Canvas, PaintInput, system_dark},
-    text_input::TextInput,
+    text_input::{TextInput, TextStart},
 };
 use crate::core::{
-    annotation::{Editor, Shape, Tool},
+    annotation::{Editor, Shape, Tool, text_center},
     display::DisplayInfo,
     geometry::PixelRect,
     selection::{PixelPoint, Selection, contains},
@@ -351,6 +351,9 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         {
             return LRESULT(0);
         }
+        if let Some(result) = dispatch_text(hwnd, pointer, msg, wp, lp) {
+            return result;
+        }
         match msg {
             WM_TIMER if wp.0 == 5 => {
                 let result =
@@ -400,21 +403,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 }
                 LRESULT(0)
             }
-            super::text_input::SAVE | super::text_input::PIN => {
-                if (*pointer)
-                    .text_input
-                    .as_ref()
-                    .and_then(TextInput::hwnd)
-                    .is_some_and(|child| child.0 as usize == wp.0)
-                {
-                    (*pointer).pending_output =
-                        Some(if msg == super::text_input::PIN { 7 } else { 8 });
-                    if let Err(e) = begin_output(hwnd, pointer) {
-                        super::show_error(&e.to_string());
-                    }
-                }
-                LRESULT(0)
-            }
+
             WM_ERASEBKGND => LRESULT(1),
             WM_PAINT => {
                 let mut ps = PAINTSTRUCT::default();
@@ -424,8 +413,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     state.canvas.paint(PaintInput {
                         selection: &state.selection,
                         editor: &state.editor,
-                        editing: state.text_input.as_ref().and_then(|input| input.index),
-                        text_active: state.text_input.is_some(),
+                        text_input: state.text_input.as_ref(),
                         busy: state.busy,
                         hover: state.hover,
                         screens: &state.screens,
@@ -444,22 +432,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 }
                 LRESULT(0)
             }
-            super::text_input::COMMIT | super::text_input::CANCEL => {
-                let current = (*pointer).text_input.as_ref().and_then(TextInput::hwnd);
-                if current.is_some_and(|child| child.0 as usize == wp.0) {
-                    if msg == super::text_input::COMMIT {
-                        if let Err(error) = finish_text(hwnd, pointer) {
-                            super::show_error(&error.to_string());
-                        }
-                    } else {
-                        let input = (*pointer).text_input.take();
-                        drop(input);
-                        let _ = SetFocus(Some(hwnd));
-                    }
-                    let _ = InvalidateRect(Some(hwnd), None, false);
-                }
-                LRESULT(0)
-            }
+
             WM_LBUTTONDBLCLK => {
                 (*pointer).pointer = position().unwrap_or((*pointer).pointer);
                 if (*pointer).editor.text_at((*pointer).pointer).is_some() {
@@ -470,23 +443,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 }
                 LRESULT(0)
             }
-            WM_CTLCOLOREDIT => {
-                if let Some(input) = (*pointer).text_input.as_ref() {
-                    let color = input.style.color;
-                    let dc = HDC(wp.0 as *mut _);
-                    SetTextColor(
-                        dc,
-                        COLORREF(
-                            u32::from(color[0])
-                                | (u32::from(color[1]) << 8)
-                                | (u32::from(color[2]) << 16),
-                        ),
-                    );
-                    SetBkColor(dc, input.background);
-                    return LRESULT(input.brush.0 as isize);
-                }
-                DefWindowProcW(hwnd, msg, wp, lp)
-            }
+
             WM_MOUSEMOVE => {
                 {
                     let state = &mut *pointer;
@@ -528,7 +485,11 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                             .selection
                             .rect
                             .is_some_and(|r| contains(r, state.pointer))
-                        {
+                            || state.editor.rotation_at(
+                                state.pointer,
+                                state.radius(),
+                                state.scale(),
+                            ) {
                             if state.editor.tool == Tool::Text {
                                 request_text = true;
                                 true
@@ -618,18 +579,6 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 LRESULT(0)
             }
             WM_KEYDOWN => {
-                if (*pointer).text_input.is_some() {
-                    if wp.0 == 27 {
-                        let input = (*pointer).text_input.take();
-                        drop(input);
-                        let _ = SetFocus(Some(hwnd));
-                        let _ = InvalidateRect(Some(hwnd), None, false);
-                        return LRESULT(0);
-                    } else if let Err(error) = finish_text(hwnd, pointer) {
-                        super::show_error(&error.to_string());
-                        return LRESULT(0);
-                    }
-                }
                 let mut release = false;
                 let close = {
                     let state = &mut *pointer;
@@ -736,6 +685,11 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     || state.parameter_at(state.pointer).is_some()
                 {
                     IDC_ARROW
+                } else if state
+                    .editor
+                    .rotation_at(state.pointer, state.radius(), state.scale())
+                {
+                    IDC_SIZEALL
                 } else if state.editor.tool != Tool::Select {
                     IDC_CROSS
                 } else if let Some(handle) =
@@ -764,9 +718,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             WM_SETTINGCHANGE | WM_THEMECHANGED => {
                 let dark = system_dark();
                 (*pointer).canvas.dark = dark;
-                if let Some(input) = (*pointer).text_input.as_mut() {
-                    let _ = input.set_theme(dark);
-                }
+
                 let _ = InvalidateRect(Some(hwnd), None, false);
                 LRESULT(0)
             }
@@ -775,85 +727,199 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     }
 }
 
+fn dispatch_text(
+    hwnd: HWND,
+    pointer: *mut State,
+    msg: u32,
+    wp: WPARAM,
+    lp: LPARAM,
+) -> Option<LRESULT> {
+    // SAFETY: the live preview dispatch owns State. Take the service out across native calls
+    // that can synchronously dispatch capture, focus and IME messages.
+    unsafe {
+        let input = (*pointer).text_input.as_ref()?;
+        if msg == WM_KEYDOWN && !input.composing() {
+            let ctrl = GetKeyState(VK_CONTROL.0 as i32) < 0;
+            if wp.0 == 27 {
+                let input = (*pointer).text_input.take();
+                drop(input);
+                let _ = InvalidateRect(Some(hwnd), None, false);
+                return Some(LRESULT(0));
+            }
+            let output = if ctrl {
+                match wp.0 {
+                    83 => Some(8),
+                    80 => Some(7),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            if (ctrl && wp.0 == 13) || output.is_some() {
+                let result = finish_text(hwnd, pointer).and_then(|()| {
+                    if let Some(button) = output {
+                        (*pointer).pending_output = Some(button);
+                        begin_output(hwnd, pointer)?;
+                    }
+                    Ok(())
+                });
+                if let Err(error) = result {
+                    super::show_error(&error.to_string());
+                }
+                let _ = InvalidateRect(Some(hwnd), None, false);
+                return Some(LRESULT(0));
+            }
+        }
+        if msg == WM_SETCURSOR {
+            let p = position()?;
+            let r = input.bounds();
+            let desktop = (*pointer).canvas.bounds();
+            let x = p.x.saturating_sub(desktop.left);
+            let y = p.y.saturating_sub(desktop.top);
+            if x >= r.left && x < r.right && y >= r.top && y < r.bottom {
+                if let Ok(cursor) = LoadCursorW(None, IDC_IBEAM) {
+                    SetCursor(Some(cursor));
+                }
+                return Some(LRESULT(1));
+            }
+            return None;
+        }
+        let mut input = (*pointer).text_input.take()?;
+        let result = match msg {
+            WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP | WM_LBUTTONDBLCLK => {
+                let p = position().unwrap_or((*pointer).pointer);
+                let state = &mut *pointer;
+                state.pointer = p;
+                if !input.mouse_captured()
+                    && (state.button_at(p).is_some() || state.parameter_at(p).is_some())
+                {
+                    Ok(None)
+                } else {
+                    input
+                        .mouse(msg, wp, p)
+                        .map(|handled| handled.then_some(LRESULT(0)))
+                }
+            }
+            WM_CAPTURECHANGED if input.mouse_captured() => {
+                input.capture_lost();
+                Ok(Some(LRESULT(0)))
+            }
+            WM_KEYDOWN
+            | WM_KEYUP
+            | WM_CHAR
+            | WM_CUT
+            | WM_COPY
+            | WM_PASTE
+            | WM_CLEAR
+            | WM_UNDO
+            | WM_IME_STARTCOMPOSITION
+            | WM_IME_COMPOSITION
+            | WM_IME_ENDCOMPOSITION
+            | WM_IME_CHAR
+            | WM_IME_NOTIFY
+            | WM_IME_REQUEST
+            | WM_IME_SETCONTEXT
+            | WM_SETFOCUS
+            | WM_KILLFOCUS => input.message(msg, wp, lp).map(Some),
+            WM_TIMER if TextInput::owns_timer(wp.0) => input.message(msg, wp, lp).map(Some),
+            _ => Ok(None),
+        };
+        (*pointer).text_input = Some(input);
+        match result {
+            Ok(Some(result)) => {
+                let _ = InvalidateRect(Some(hwnd), None, false);
+                Some(result)
+            }
+            Ok(None) => None,
+            Err(error) => {
+                super::show_error(&format!("文字输入失败，草稿已保留：{error}"));
+                Some(LRESULT(0))
+            }
+        }
+    }
+}
+
 fn start_text(hwnd: HWND, pointer: *mut State) -> Result<()> {
-    // SAFETY: caller is this live preview's UI-thread dispatch. Native creation occurs after the state borrow ends.
-    let (index, content, anchor, edit_bounds, size, style, desktop, wrap) = unsafe {
+    // SAFETY: caller owns the live State. Open the service after releasing the borrow.
+    let (index, origin, content, size, style, wrap_width, angle, desktop, area) = unsafe {
         let state = &mut *pointer;
         if state.text_input.is_some() {
             return Ok(());
         }
         state.editor.cancel();
-        let selection = state
+        let area = state
             .selection
             .rect
             .ok_or_else(|| Error::new(E_FAIL, "请先选择截图范围"))?;
         let desktop = state.canvas.bounds();
-        if let Some(index) = state.editor.text_at(state.pointer) {
+        let scale = state.scale();
+        let index = state.editor.text_at(state.pointer);
+        let (origin, content, size, style, wrap_width, angle) = if let Some(index) = index {
             let object = &state.editor.objects()[index];
-            if let Shape::Text {
+            let Shape::Text {
                 bounds,
                 content,
                 size,
                 wrap_width,
+                angle,
             } = &object.shape
-            {
-                let width = (*wrap_width as i32)
-                    .saturating_add(64)
-                    .max(32)
-                    .min(desktop.right.saturating_sub(bounds.left).max(32));
-                let height = (180. * state.scale()).round() as i32;
-                let edit_bounds = crate::core::selection::fit_panel(
-                    PixelPoint {
-                        x: bounds.left,
-                        y: bounds.top,
-                    },
-                    desktop,
-                    width,
-                    height,
-                );
-                (
-                    Some(index),
-                    content.clone(),
-                    *bounds,
-                    edit_bounds,
-                    *size,
-                    object.style,
-                    desktop,
-                    *wrap_width,
-                )
-            } else {
+            else {
                 return Ok(());
-            }
-        } else {
-            let edit_bounds = crate::core::selection::fit_panel(
-                state.pointer,
-                selection,
-                (480. * state.scale()).round() as i32,
-                (180. * state.scale()).round() as i32,
-            );
-            let mut style = state.editor.styles[3];
-            style.width *= state.scale();
+            };
             (
-                None,
-                String::new(),
-                edit_bounds,
-                edit_bounds,
-                state.editor.text_size * state.scale(),
-                style,
-                desktop,
-                (edit_bounds.right - edit_bounds.left) as f32,
+                PixelPoint {
+                    x: bounds.left,
+                    y: bounds.top,
+                },
+                content.clone(),
+                *size,
+                object.style,
+                *wrap_width,
+                *angle,
             )
-        }
+        } else {
+            let origin = PixelPoint {
+                x: state
+                    .pointer
+                    .x
+                    .clamp(area.left, area.right.saturating_sub(8).max(area.left)),
+                y: state.pointer.y.clamp(
+                    area.top,
+                    area.bottom
+                        .saturating_sub((state.editor.text_size * scale * 1.3).ceil() as i32)
+                        .max(area.top),
+                ),
+            };
+            let mut style = state.editor.styles[3];
+            style.width *= scale;
+            (
+                origin,
+                String::new(),
+                state.editor.text_size * scale,
+                style,
+                area.right.saturating_sub(origin.x) as f32,
+                0.,
+            )
+        };
+        (
+            index, origin, content, size, style, wrap_width, angle, desktop, area,
+        )
     };
-    let mut input = TextInput::open(hwnd, index, edit_bounds, desktop, &content, size, style)?;
-    input.origin = anchor;
-    // SAFETY: synchronous read of the live parent state; theme setup owns only child resources.
-    let dark = unsafe { (*pointer).canvas.dark };
-    input.set_theme(dark)?;
-    if index.is_some() {
-        input.set_wrap_width(Some(wrap));
-    }
-    // SAFETY: parent is retained through synchronous creation; the independent native child owns no State pointer.
+    let input = TextInput::open(
+        hwnd,
+        TextStart {
+            index,
+            origin,
+            desktop,
+            area,
+            content: &content,
+            size,
+            wrap_width,
+            style,
+            angle,
+        },
+    )?;
+    // SAFETY: the service and preview are retained by this UI-thread window.
     unsafe {
         (*pointer).editor.selected = index;
         (*pointer).text_input = Some(input);
@@ -872,15 +938,28 @@ fn finish_text(hwnd: HWND, pointer: *mut State) -> Result<()> {
         // SAFETY: synchronous DirectWrite calls do not dispatch window messages; parent State is live.
         unsafe {
             let state = &mut *pointer;
+            let center = if input.angle != 0. {
+                input
+                    .index
+                    .and_then(|i| state.editor.objects().get(i))
+                    .map(|object| {
+                        let old = object.bounds();
+                        let (cx, cy) = text_center(old);
+                        (
+                            cx + f64::from(input.origin.x) - f64::from(old.left),
+                            cy + f64::from(input.origin.y) - f64::from(old.top),
+                        )
+                    })
+            } else {
+                None
+            };
             let object = state.canvas.text_object(
-                PixelPoint {
-                    x: input.origin.left,
-                    y: input.origin.top,
-                },
+                input.origin,
                 content,
                 input.size,
                 input.wrap_width,
                 input.style,
+                (input.angle, center),
             )?;
             state
                 .editor
@@ -918,6 +997,7 @@ fn restyle_text(
                 content,
                 size,
                 wrap_width,
+                angle,
             } = &object.shape
             {
                 let size = if resize {
@@ -936,6 +1016,7 @@ fn restyle_text(
                         size,
                         *wrap_width,
                         style,
+                        (*angle, (*angle != 0.).then(|| text_center(*bounds))),
                     )
                     .map_err(|_| "无法更新文字布局，原文字已保留")?;
                 state.editor.commit_text(Some(index), object)?;
@@ -1225,14 +1306,27 @@ mod tests {
             (*p).text_input = Some(
                 TextInput::open(
                     hwnd,
-                    None,
-                    bounds,
-                    bounds,
-                    "未提交中文\n第二行",
-                    24.,
-                    crate::core::annotation::Style::default(),
+                    TextStart {
+                        index: None,
+                        origin: PixelPoint {
+                            x: bounds.left + 40,
+                            y: bounds.top + 40,
+                        },
+                        desktop: bounds,
+                        area: bounds,
+                        content: "未提交中文\n第二行",
+                        size: 24.,
+                        wrap_width: 320.,
+                        style: crate::core::annotation::Style::default(),
+                        angle: 0.,
+                    },
                 )
                 .unwrap(),
+            );
+            SendMessageW(hwnd, WM_PAINT, None, None);
+            assert!(
+                take_ui_errors().is_empty(),
+                "windowless editor must render on the real preview surface"
             );
             let source = Arc::downgrade(&(*p).canvas.source());
             (*p).pending_output = Some(7);

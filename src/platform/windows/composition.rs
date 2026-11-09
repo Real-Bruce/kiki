@@ -224,6 +224,7 @@ fn fixture_at(left: i32, top: i32) -> Result<(Image, Editor)> {
                     content: "中文标注\n第二行 ABC 123".into(),
                     size: 30.,
                     wrap_width: 320.,
+                    angle: 0.41,
                 },
                 style: Style {
                     color: [0, 90, 180],

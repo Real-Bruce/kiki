@@ -4,7 +4,7 @@
 
 ## Windows 11 x64 免安装包
 
-从本地 dist 目录解压 **kiki-v0.1.0-windows-x64.zip**，双击 kiki.exe。程序驻留托盘，默认按 **Ctrl+Alt+A** 开始截图。可用 Get-FileHash 核对同目录的 .zip.sha256。
+从本地 dist 目录解压 **kiki-v0.1.0-windows-x64-ui-polish.zip**，双击 kiki.exe。程序驻留托盘，默认按 **Ctrl+Alt+A** 开始截图。可用 Get-FileHash 核对同目录的 .zip.sha256。
 
 [快速使用说明](docs/QUICK_START.txt) · [版本变更](CHANGELOG.md) · [P8 交付与验收](docs/validation/P8.md)
 
@@ -19,11 +19,11 @@ cargo test --workspace
 cargo build --release
 ```
 
-构建结果为 `target/x86_64-pc-windows-msvc/release/kiki.exe`。运行后驻留托盘，Ctrl+Alt+A 或托盘开始截图打开冻结桌面选区；拖动框选，内部拖动移动，调整点改变尺寸，F 选择鼠标所在屏幕，Esc 取消操作或会话。当前工具条已接通选择、矩形、箭头、画笔、文字、撤销、重做、贴图、保存、复制与取消。选择工具命中对象后可整体移动，矩形八点调整、箭头端点调整；Delete 删除，Ctrl+Z / Ctrl+Y 撤销/重做。重新选择已有对象后切到对应绘图工具可修改颜色、粗细或字号。文字工具单击创建/重编，选择工具双击文字也可重编；文字输入时 Enter 换行、Ctrl+Enter 提交，Esc 取消本次文字输入；非文本输入时 Enter 复制，Ctrl+S 打开原生 PNG 保存对话框，Ctrl+P 生成置顶贴图。成功才结束截图，取消保存或输出失败保留编辑。输入框中的 Ctrl+Z、Delete、F 作用于文本。参数条可用 Tab/Shift+Tab 访问，Enter/空格激活。`--capture` 可在首次启动时直接捕获，`--theme=light` / `--theme=dark` 可选择本阶段主题。
+构建结果为 `target/x86_64-pc-windows-msvc/release/kiki.exe`。运行后驻留托盘，Ctrl+Alt+A 或托盘开始截图打开冻结桌面选区；拖动框选，内部拖动移动，调整点改变尺寸，F 选择鼠标所在屏幕，Esc 取消操作或会话。当前工具条已接通选择、矩形、箭头、画笔、文字、撤销、重做、贴图、保存、复制与取消。选择工具命中对象后可整体移动，矩形八点调整、箭头端点调整；Delete 删除，Ctrl+Z / Ctrl+Y 撤销/重做。重新选择已有对象后切到对应绘图工具可修改颜色、粗细或字号。文字工具单击创建/重编。文字框透明并随内容伸缩。用选择工具单击已有文字，拖动文字移动或拖动顶部圆点旋转，双击可重编；文字输入时 Enter 换行、Ctrl+Enter 提交，Esc 取消本次文字输入；非文本输入时 Enter 复制，Ctrl+S 打开原生 PNG 保存对话框，Ctrl+P 生成置顶贴图。成功才结束截图，取消保存或输出失败保留编辑。输入框中的 Ctrl+Z、Delete、F 作用于文本。参数条可用 Tab/Shift+Tab 访问，Enter/空格激活。`--capture` 可在首次启动时直接捕获，`--theme=light` / `--theme=dark` 可选择本阶段主题。
 
 开发探针须用 `cargo build --release --features diagnostics` 单独编译，默认构建不包含它们：`kiki.exe --probe artifacts/p1` 写入真实桌面 PNG 与捕获耗时；`kiki.exe --stress artifacts/p1/stress` 执行 100 次捕获、释放及资源采样；`scripts/Measure-Startup.ps1` 采集 30 次独立进程启动到热键和托盘就绪时间。仅显式调用时运行，结果目录不入库。探针会包含真实屏幕内容，请勿将其作为公开测试数据提交。完成后用默认 `cargo build --release` 恢复不含探针的程序。
 
-当前验证结果和缺项见 [P1](docs/validation/P1.md)、[P2](docs/validation/P2.md)、[P3](docs/validation/P3.md)、[P4](docs/validation/P4.md) 、[文字标注](docs/validation/P4_TEXT.md) 和 [P5 输出](docs/validation/P5.md) 验证报告。`--probe` 还输出中心裁剪 PNG；开发构建的 `--cancel-stress` 验证 100 次实际取消及同进程恢复。电脑操作工具需要时，可在 diagnostics 构建显式使用 `--accessible-capture` 枚举同一画布；默认构建保留 ToolWindow 样式。完整输入法、高 DPI、多屏、HDR 及更多应用兼容性验收仍待补齐。
+当前验证结果和缺项见 [P1](docs/validation/P1.md)、[P2](docs/validation/P2.md)、[P3](docs/validation/P3.md)、[P4](docs/validation/P4.md) 、[文字标注](docs/validation/P4_TEXT.md) 、[P5 输出](docs/validation/P5.md) 和 [截图界面优化](docs/validation/UI_POLISH.md) 验证报告。`--probe` 还输出中心裁剪 PNG；开发构建的 `--cancel-stress` 验证 100 次实际取消及同进程恢复。电脑操作工具需要时，可在 diagnostics 构建显式使用 `--accessible-capture` 枚举同一画布；默认构建保留 ToolWindow 样式。完整输入法、高 DPI、多屏、HDR 及更多应用兼容性验收仍待补齐。
 
 开发构建可显式使用 `--trace-window-targets <文件路径>` 记录窗口类别、样式和边界，用于检查透明辅助层筛选；每次捕获覆盖该文件，不记录窗口标题或输入内容。
 

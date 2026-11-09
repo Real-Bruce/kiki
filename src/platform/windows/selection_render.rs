@@ -1,5 +1,6 @@
+use super::text_input::TextInput;
 use crate::core::{
-    annotation::{Editor, Shape, Tool},
+    annotation::{Editor, Shape, Tool, rotate_point, text_center},
     display::DisplayInfo,
     geometry::PixelRect,
     image::Image,
@@ -7,7 +8,7 @@ use crate::core::{
 };
 use windows::{
     Win32::{
-        Foundation::HWND,
+        Foundation::{HWND, RECT},
         Graphics::{
             Direct2D::{Common::*, *},
             DirectWrite::*,
@@ -16,7 +17,7 @@ use windows::{
     },
     core::{Interface, Result, w},
 };
-use windows_numerics::Vector2;
+use windows_numerics::{Matrix3x2, Vector2};
 
 const BUTTON_WIDTH: f32 = 36.;
 const COPY_WIDTH: f32 = 76.;
@@ -46,8 +47,7 @@ pub struct Layout {
 pub struct PaintInput<'a> {
     pub selection: &'a Selection,
     pub editor: &'a Editor,
-    pub editing: Option<usize>,
-    pub text_active: bool,
+    pub text_input: Option<&'a TextInput>,
     pub busy: bool,
     pub hover: Option<PixelRect>,
     pub screens: &'a [DisplayInfo],
@@ -58,6 +58,7 @@ pub struct PaintInput<'a> {
 pub struct Canvas {
     target: ID2D1RenderTarget,
     factory: ID2D1Factory,
+    gdi: ID2D1GdiInteropRenderTarget,
     context: ID2D1DeviceContext,
     swap: windows::Win32::Graphics::Dxgi::IDXGISwapChain1,
     bitmap: ID2D1Bitmap,
@@ -101,9 +102,10 @@ impl Canvas {
                 .size()
                 .ok_or_else(windows::core::Error::from_win32)?;
             let device = super::pinned_device::get()?;
-            let (context, swap) = device.surface(hwnd, width, height)?;
+            let (context, swap) = device.surface(hwnd, width, height, true)?;
             let target: ID2D1RenderTarget = context.cast()?;
             let factory = target.GetFactory()?;
+            let gdi = target.cast()?;
             let bitmap = target.CreateBitmap(
                 D2D_SIZE_U { width, height },
                 Some(image.pixels().as_ptr().cast()),
@@ -124,6 +126,7 @@ impl Canvas {
             Ok(Self {
                 target,
                 factory,
+                gdi,
                 context,
                 swap,
                 _device: device,
@@ -211,8 +214,7 @@ impl Canvas {
         let PaintInput {
             selection,
             editor,
-            editing,
-            text_active,
+            text_input,
             busy,
             hover,
             screens,
@@ -220,6 +222,8 @@ impl Canvas {
             focus,
             pressed,
         } = input;
+        let editing = text_input.and_then(|input| input.index);
+        let text_active = text_input.is_some();
         let layout = selection
             .rect
             .filter(|_| !selection.active())
@@ -326,6 +330,34 @@ impl Canvas {
                 );
             }
             self.paint_annotations(editor, selection.rect, editing, (&text_layouts, &geometry));
+            let text_draw = if let (Some(input), Some(area)) = (text_input, selection.rect) {
+                let area = self.local(area);
+                let result = input.draw(
+                    &self.gdi,
+                    RECT {
+                        left: area.left as i32,
+                        top: area.top as i32,
+                        right: area.right as i32,
+                        bottom: area.bottom as i32,
+                    },
+                );
+                let bounds = input.bounds();
+                self.brush.SetColor(&color(0, 120, 212, 1.));
+                self.target.DrawRectangle(
+                    &D2D_RECT_F {
+                        left: bounds.left as f32,
+                        top: bounds.top as f32,
+                        right: bounds.right as f32,
+                        bottom: bounds.bottom as f32,
+                    },
+                    &self.brush,
+                    1.,
+                    None,
+                );
+                result
+            } else {
+                Ok(())
+            };
             if let Some(layout) = layout {
                 self.paint_toolbar(&layout, editor, pointer, focus, pressed, busy);
                 self.paint_parameters(&layout, editor, focus);
@@ -351,6 +383,7 @@ impl Canvas {
                 );
             }
             self.target.EndDraw(None, None)?;
+            text_draw?;
             self.swap
                 .Present(0, windows::Win32::Graphics::Dxgi::DXGI_PRESENT(0))
                 .ok()
@@ -528,9 +561,7 @@ impl Canvas {
             }
         }
     }
-    fn text_layout(&self, content: &str, size: f32, width: f32) -> Result<IDWriteTextLayout> {
-        super::annotation_render::text_layout(&self.dw, content, size, width)
-    }
+
     pub fn text_object(
         &self,
         origin: PixelPoint,
@@ -538,13 +569,9 @@ impl Canvas {
         size: f32,
         width: f32,
         style: crate::core::annotation::Style,
+        (angle, center): (f64, Option<(f64, f64)>),
     ) -> Result<crate::core::annotation::Object> {
-        let layout = self.text_layout(&content, size, width)?;
-        let mut metrics = DWRITE_TEXT_METRICS::default();
-        // SAFETY: initialized output descriptor and live UI-thread layout.
-        unsafe {
-            layout.GetMetrics(&mut metrics)?;
-        }
+        let metrics = super::annotation_render::text_metrics(&self.dw, &content, size, width)?;
         let w = metrics.widthIncludingTrailingWhitespace.ceil().max(1.);
         let h = metrics.height.ceil().max(1.);
         if !w.is_finite() || !h.is_finite() || w > i32::MAX as f32 || h > i32::MAX as f32 {
@@ -553,6 +580,14 @@ impl Canvas {
                 "文字尺寸过大",
             ));
         }
+        let origin = if let Some((x, y)) = center {
+            PixelPoint {
+                x: (x - f64::from(w) / 2.).round() as i32,
+                y: (y - f64::from(h) / 2.).round() as i32,
+            }
+        } else {
+            origin
+        };
         let right = origin.x.checked_add(w as i32).ok_or_else(|| {
             windows::core::Error::new(windows::Win32::Foundation::E_FAIL, "文字范围溢出")
         })?;
@@ -570,6 +605,7 @@ impl Canvas {
                 content,
                 size,
                 wrap_width: width,
+                angle,
             },
             style,
         })
@@ -758,10 +794,6 @@ impl Canvas {
             );
             if let Some(object) = selected.and_then(|i| editor.objects().get(i)) {
                 self.brush.SetColor(&color(239, 153, 44, 1.));
-                if matches!(object.shape, Shape::Text { .. }) {
-                    self.target
-                        .DrawRectangle(&self.local(object.bounds()), &self.brush, 1., None);
-                }
                 for p in object.handles() {
                     let p = point(p);
                     let r = D2D_RECT_F {
@@ -776,6 +808,47 @@ impl Canvas {
                 }
             }
             self.target.PopAxisAlignedClip();
+            if let Some(object) = editor
+                .selected
+                .filter(|i| editing != Some(*i))
+                .and_then(|i| editor.objects().get(i))
+            {
+                if let Shape::Text { bounds, angle, .. } = object.shape {
+                    let c = color(0, 120, 212, 1.);
+                    self.brush.SetColor(&c);
+                    let mut prior = Matrix3x2::default();
+                    self.target.GetTransform(&mut prior);
+                    self.target.SetTransform(
+                        &(super::annotation_render::text_transform(bounds, self.bounds(), angle)
+                            * prior),
+                    );
+                    self.target
+                        .DrawRectangle(&self.local(bounds), &self.brush, 1., None);
+                    self.target.SetTransform(&prior);
+                    if editor.tool == Tool::Select {
+                        if let Some(handle) = object.rotation_handle(self.scale) {
+                            let (cx, _) = text_center(bounds);
+                            let (x, y) = rotate_point(bounds, angle, cx, f64::from(bounds.top));
+                            let origin = self.bounds();
+                            let tip = Vector2 {
+                                X: (x - f64::from(origin.left)) as f32,
+                                Y: (y - f64::from(origin.top)) as f32,
+                            };
+                            let handle = point(handle);
+                            self.target.DrawLine(tip, handle, &self.brush, 1., None);
+                            let circle = D2D1_ELLIPSE {
+                                point: handle,
+                                radiusX: 4. * self.scale,
+                                radiusY: 4. * self.scale,
+                            };
+                            self.brush.SetColor(&color(255, 255, 255, 1.));
+                            self.target.FillEllipse(&circle, &self.brush);
+                            self.brush.SetColor(&c);
+                            self.target.DrawEllipse(&circle, &self.brush, 1., None);
+                        }
+                    }
+                }
+            }
         }
     }
     fn icon(&self, index: usize, r: D2D_RECT_F, c: D2D1_COLOR_F, s: f32) {

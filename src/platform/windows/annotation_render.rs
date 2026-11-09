@@ -1,6 +1,6 @@
 //! Shared annotation geometry for preview and clean output. No selection or toolbar decoration.
 use crate::core::{
-    annotation::{Editor, Shape, arrow_head},
+    annotation::{Editor, Shape, arrow_head, text_center},
     geometry::PixelRect,
     selection::PixelPoint,
 };
@@ -11,7 +11,21 @@ use windows::{
     },
     core::{Result, w},
 };
-use windows_numerics::Vector2;
+use windows_numerics::{Matrix3x2, Vector2};
+pub fn text_transform(bounds: PixelRect, origin: PixelRect, angle: f64) -> Matrix3x2 {
+    let (cx, cy) = text_center(bounds);
+    let (cx, cy) = (cx - f64::from(origin.left), cy - f64::from(origin.top));
+    let (sin, cos) = angle.sin_cos();
+    Matrix3x2 {
+        M11: cos as f32,
+        M12: sin as f32,
+        M21: -sin as f32,
+        M22: cos as f32,
+        M31: (cx * (1. - cos) + cy * sin) as f32,
+        M32: (cy * (1. - cos) - cx * sin) as f32,
+    }
+}
+
 pub fn text_layout(
     factory: &IDWriteFactory,
     content: &str,
@@ -33,6 +47,21 @@ pub fn text_layout(
         factory.CreateTextLayout(&wide, &format, width, 10_000_000.)
     }
 }
+pub fn text_metrics(
+    factory: &IDWriteFactory,
+    text: &str,
+    size: f32,
+    width: f32,
+) -> Result<DWRITE_TEXT_METRICS> {
+    let layout = text_layout(factory, text, size, width)?;
+    let mut metrics = DWRITE_TEXT_METRICS::default();
+    // SAFETY: layout is live and the initialized output descriptor is writable.
+    unsafe {
+        layout.GetMetrics(&mut metrics)?;
+    }
+    Ok(metrics)
+}
+
 pub fn layouts(
     factory: &IDWriteFactory,
     editor: &Editor,
@@ -175,8 +204,13 @@ pub fn draw(
             });
             let width = object.style.width;
             match &object.shape {
-                Shape::Text { bounds, .. } => {
+                Shape::Text { bounds, angle, .. } => {
                     if let Some(layout) = &layouts[index] {
+                        let mut prior = Matrix3x2::default();
+                        if *angle != 0. {
+                            target.GetTransform(&mut prior);
+                            target.SetTransform(&(text_transform(*bounds, origin, *angle) * prior));
+                        }
                         target.DrawTextLayout(
                             point(PixelPoint {
                                 x: bounds.left,
@@ -186,6 +220,9 @@ pub fn draw(
                             brush,
                             D2D1_DRAW_TEXT_OPTIONS_NONE,
                         );
+                        if *angle != 0. {
+                            target.SetTransform(&prior);
+                        }
                     }
                 }
                 Shape::Rectangle(r) => target.DrawRectangle(&local(*r), brush, width, None),

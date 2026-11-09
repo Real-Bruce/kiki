@@ -1,328 +1,606 @@
-//! Native multiline EDIT owns IME and text-local shortcuts on the UI thread.
-use crate::core::{annotation::Style, geometry::PixelRect};
-use std::{cell::Cell, rc::Rc};
+//! Windowless Windows Rich Edit. The capture canvas owns all visible pixels.
+use crate::core::{annotation::Style, geometry::PixelRect, selection::PixelPoint};
+use std::{cell::Cell, ffi::c_void, ptr::null_mut, rc::Rc};
 use windows::{
     Win32::{
         Foundation::*,
-        Graphics::Gdi::*,
-        System::LibraryLoader::GetModuleHandleW,
+        Graphics::{Direct2D::*, DirectWrite::*, Gdi::*},
+        System::{Com::DVASPECT_CONTENT, LibraryLoader::*},
         UI::{
-            Controls::{EM_GETRECT, EM_SETLIMITTEXT, EM_SETRECTNP, EM_SETSEL},
+            Controls::{EM_SETSEL, RichEdit::*},
             Input::{Ime::*, KeyboardAndMouse::*},
-            Shell::*,
             WindowsAndMessaging::*,
         },
     },
-    core::{Error, Result, w},
+    core::{BOOL, BSTR, Error, GUID, IUnknown, Interface, PCWSTR, Result, s, w},
 };
-pub const COMMIT: u32 = WM_APP + 40;
-pub const CANCEL: u32 = WM_APP + 41;
-pub const SAVE: u32 = WM_APP + 42;
-pub const PIN: u32 = WM_APP + 43;
-struct TextFlags {
-    composing: Cell<bool>,
-    suppress_return: Cell<bool>,
+
+const LIMIT: u32 = 16384;
+const TIMER_PREFIX: usize = 0x20000;
+const CARET_TIMER: usize = 0x10001;
+
+struct Library(HMODULE);
+impl Drop for Library {
+    fn drop(&mut self) {
+        // SAFETY: references to DLL code are dropped before this owned module reference.
+        unsafe {
+            let _ = FreeLibrary(self.0);
+        }
+    }
 }
-struct Subclass {
-    parent: HWND,
-    flags: Rc<TextFlags>,
-    alive: Rc<Cell<Option<HWND>>>,
+
+#[derive(Default)]
+struct View {
+    rect: Cell<RECT>,
+    caret: Cell<RECT>,
+    caret_visible: Cell<bool>,
+    caret_on: Cell<bool>,
+    mouse_captured: Cell<bool>,
 }
+
+#[windows::core::implement(ITextHost)]
+struct Host {
+    hwnd: HWND,
+    view: Rc<View>,
+    format: CHARFORMATW,
+    paragraph: PARAFORMAT,
+}
+
+fn write_out<T>(dest: *mut T, value: T) -> Result<()> {
+    if dest.is_null() {
+        return Err(Error::from_hresult(E_POINTER));
+    }
+    // SAFETY: Rich Edit's documented host callbacks supply aligned, writable out parameters.
+    unsafe {
+        dest.write(value);
+    }
+    Ok(())
+}
+
+impl Host {
+    fn repaint(&self) {
+        // SAFETY: on the window thread; invalidation queues a later paint.
+        unsafe {
+            let _ = InvalidateRect(Some(self.hwnd), None, false);
+        }
+    }
+}
+
+impl ITextHost_Impl for Host_Impl {
+    fn TxGetDC(&self) -> HDC {
+        // SAFETY: Rich Edit calls TxReleaseDC for this borrowed window DC.
+        unsafe { GetDC(Some(self.hwnd)) }
+    }
+    fn TxReleaseDC(&self, dc: HDC) -> i32 {
+        // SAFETY: DC comes from TxGetDC on the same thread.
+        unsafe { ReleaseDC(Some(self.hwnd), dc) }
+    }
+    fn TxShowScrollBar(&self, _: i32, _: BOOL) -> BOOL {
+        BOOL(0)
+    }
+    fn TxEnableScrollBar(&self, _: SCROLLBAR_CONSTANTS, _: i32) -> BOOL {
+        BOOL(0)
+    }
+    fn TxSetScrollRange(&self, _: i32, _: i32, _: i32, _: BOOL) -> BOOL {
+        BOOL(0)
+    }
+    fn TxSetScrollPos(&self, _: i32, _: i32, _: BOOL) -> BOOL {
+        BOOL(0)
+    }
+    fn TxInvalidateRect(&self, _: *mut RECT, _: BOOL) {
+        self.repaint();
+    }
+    fn TxViewChange(&self, _: BOOL) {
+        self.repaint();
+    }
+    fn TxCreateCaret(&self, _: HBITMAP, width: i32, height: i32) -> BOOL {
+        let mut r = self.view.caret.get();
+        r.right = r.left.saturating_add(width.max(1));
+        r.bottom = r.top.saturating_add(height.max(1));
+        self.view.caret.set(r);
+        BOOL(1)
+    }
+    fn TxShowCaret(&self, show: BOOL) -> BOOL {
+        self.view.caret_visible.set(show.as_bool());
+        self.view.caret_on.set(show.as_bool());
+        // SAFETY: timer belongs to this window, with no callback function.
+        unsafe {
+            if show.as_bool() {
+                let blink = GetCaretBlinkTime();
+                if blink != 0 && blink != u32::MAX {
+                    SetTimer(Some(self.hwnd), CARET_TIMER, blink, None);
+                }
+            } else {
+                let _ = KillTimer(Some(self.hwnd), CARET_TIMER);
+            }
+        }
+        self.repaint();
+        BOOL(1)
+    }
+    fn TxSetCaretPos(&self, x: i32, y: i32) -> BOOL {
+        let r = self.view.caret.get();
+        self.view.caret.set(RECT {
+            left: x,
+            top: y,
+            right: x.saturating_add(r.right.saturating_sub(r.left)),
+            bottom: y.saturating_add(r.bottom.saturating_sub(r.top)),
+        });
+        self.view.caret_on.set(true);
+        self.repaint();
+        BOOL(1)
+    }
+    fn TxSetTimer(&self, id: u32, ms: u32) -> BOOL {
+        // SAFETY: timer messages go to our window thread; reserved range isolates Rich Edit IDs.
+        BOOL::from(unsafe { SetTimer(Some(self.hwnd), TIMER_PREFIX + id as usize, ms, None) } != 0)
+    }
+    fn TxKillTimer(&self, id: u32) {
+        // SAFETY: this is the same HWND and timer ID used in TxSetTimer.
+        unsafe {
+            let _ = KillTimer(Some(self.hwnd), TIMER_PREFIX + id as usize);
+        }
+    }
+    fn TxScrollWindowEx(
+        &self,
+        _: i32,
+        _: i32,
+        _: *mut RECT,
+        _: *mut RECT,
+        _: HRGN,
+        _: *mut RECT,
+        _: SCROLL_WINDOW_FLAGS,
+    ) {
+        self.repaint();
+    }
+    fn TxSetCapture(&self, capture: BOOL) {
+        // Update our flag before Windows sends a synchronous capture-change message.
+        self.view.mouse_captured.set(capture.as_bool());
+        // SAFETY: this UI thread owns the capture window.
+        unsafe {
+            if capture.as_bool() {
+                SetCapture(self.hwnd);
+            } else if GetCapture() == self.hwnd {
+                let _ = ReleaseCapture();
+            }
+        }
+    }
+    fn TxSetFocus(&self) {}
+    fn TxSetCursor(&self, cursor: HCURSOR, _: BOOL) {
+        // SAFETY: Rich Edit owns the cursor for this call.
+        unsafe {
+            SetCursor(Some(cursor));
+        }
+    }
+    fn TxScreenToClient(&self, p: *mut POINT) -> BOOL {
+        // SAFETY: Rich Edit supplies a mutable POINT for the duration of the callback.
+        unsafe { ScreenToClient(self.hwnd, p) }
+    }
+    fn TxClientToScreen(&self, p: *mut POINT) -> BOOL {
+        // SAFETY: Rich Edit supplies a mutable POINT for the duration of the callback.
+        unsafe { ClientToScreen(self.hwnd, p) }
+    }
+    fn TxActivate(&self, old: *mut i32) -> Result<()> {
+        write_out(old, 0)
+    }
+    fn TxDeactivate(&self, _: i32) -> Result<()> {
+        Ok(())
+    }
+    fn TxGetClientRect(&self, p: *mut RECT) -> Result<()> {
+        write_out(p, self.view.rect.get())
+    }
+    fn TxGetViewInset(&self, p: *mut RECT) -> Result<()> {
+        write_out(p, RECT::default())
+    }
+    fn TxGetCharFormat(&self, p: *const *const CHARFORMATW) -> Result<()> {
+        write_out(p.cast_mut(), &raw const self.format)
+    }
+    fn TxGetParaFormat(&self, p: *const *const PARAFORMAT) -> Result<()> {
+        write_out(p.cast_mut(), &raw const self.paragraph)
+    }
+    fn TxGetSysColor(&self, index: SYS_COLOR_INDEX) -> COLORREF {
+        // SAFETY: GetSysColor accepts the system index supplied by Rich Edit.
+        COLORREF(unsafe { GetSysColor(index) })
+    }
+    fn TxGetBackStyle(&self, p: *mut TXTBACKSTYLE) -> Result<()> {
+        write_out(p, TXTBACK_TRANSPARENT)
+    }
+    fn TxGetMaxLength(&self, p: *mut u32) -> Result<()> {
+        write_out(p, LIMIT)
+    }
+    fn TxGetScrollBars(&self, p: *mut u32) -> Result<()> {
+        write_out(p, ES_AUTOVSCROLL as u32)
+    }
+    fn TxGetPasswordChar(&self) -> Result<i8> {
+        Ok(0)
+    }
+    fn TxGetAcceleratorPos(&self, p: *mut i32) -> Result<()> {
+        write_out(p, -1)
+    }
+    fn TxGetExtent(&self, _: *mut SIZE) -> Result<()> {
+        Err(Error::from_hresult(E_NOTIMPL))
+    }
+    fn OnTxCharFormatChange(&self, _: *const CHARFORMATW) -> Result<()> {
+        Ok(())
+    }
+    fn OnTxParaFormatChange(&self, _: *const PARAFORMAT) -> Result<()> {
+        Ok(())
+    }
+    fn TxGetPropertyBits(&self, mask: u32, p: *mut u32) -> Result<()> {
+        write_out(
+            p,
+            mask & (TXTBIT_MULTILINE | TXTBIT_WORDWRAP | TXTBIT_DISABLEDRAG | TXTBIT_SAVESELECTION),
+        )
+    }
+    fn TxNotify(&self, _: u32, _: *mut c_void) -> Result<()> {
+        self.repaint();
+        Ok(())
+    }
+    fn TxImmGetContext(&self) -> HIMC {
+        // SAFETY: paired with TxImmReleaseContext on the window thread.
+        unsafe { ImmGetContext(self.hwnd) }
+    }
+    fn TxImmReleaseContext(&self, context: HIMC) {
+        // SAFETY: the context is obtained from this HWND in TxImmGetContext.
+        unsafe {
+            let _ = ImmReleaseContext(self.hwnd, context);
+        }
+    }
+    fn TxGetSelectionBarWidth(&self, p: *mut i32) -> Result<()> {
+        write_out(p, 0)
+    }
+}
+
 pub struct TextInput {
-    flags: Rc<TextFlags>,
-    alive: Rc<Cell<Option<HWND>>>,
-    font: HFONT,
-    pub background: COLORREF,
-    pub brush: HBRUSH,
+    service: ITextServices,
+    dwrite: IDWriteFactory,
+    _host: ITextHost,
+    _library: Library,
+    hwnd: HWND,
+    view: Rc<View>,
+    composing: bool,
+    desktop: PixelRect,
+    area: PixelRect,
+    drag: Option<(PixelPoint, PixelPoint)>,
     pub index: Option<usize>,
-    pub origin: PixelRect,
+    pub origin: PixelPoint,
     pub size: f32,
     pub wrap_width: f32,
     pub style: Style,
+    pub angle: f64,
 }
+
+pub struct TextStart<'a> {
+    pub index: Option<usize>,
+    pub origin: PixelPoint,
+    pub desktop: PixelRect,
+    pub area: PixelRect,
+    pub content: &'a str,
+    pub size: f32,
+    pub wrap_width: f32,
+    pub style: Style,
+    pub angle: f64,
+}
+
 impl TextInput {
-    pub fn hwnd(&self) -> Option<HWND> {
-        self.alive.get()
-    }
-    pub fn open(
-        parent: HWND,
-        index: Option<usize>,
-        bounds: PixelRect,
-        desktop: PixelRect,
-        content: &str,
-        size: f32,
-        style: Style,
-    ) -> Result<Self> {
-        // SAFETY: UI thread owns parent, child and font; all strings and descriptors are call scoped.
+    pub fn open(hwnd: HWND, start: TextStart<'_>) -> Result<Self> {
+        let [r, g, b] = start.style.color;
+        let mut format = CHARFORMATW {
+            cbSize: size_of::<CHARFORMATW>() as u32,
+            dwMask: CFM_SIZE | CFM_COLOR | CFM_FACE | CFM_CHARSET,
+            yHeight: (start.size * 15.).round() as i32,
+            crTextColor: COLORREF(u32::from(r) | (u32::from(g) << 8) | (u32::from(b) << 16)),
+            bCharSet: DEFAULT_CHARSET,
+            ..Default::default()
+        };
+        for (dst, unit) in format.szFaceName.iter_mut().zip("Segoe UI".encode_utf16()) {
+            *dst = unit;
+        }
+        let view = Rc::new(View::default());
+        // SAFETY: load the OS copy. Exported function and IID have the documented TextServ.h ABI.
+        // The host and service are confined to this window thread and drop before the module.
         unsafe {
-            let (width, height) = bounds
-                .size()
-                .ok_or_else(|| Error::new(E_FAIL, "文字输入范围无效"))?;
-            let wide: Vec<u16> = content
-                .replace('\n', "\r\n")
+            let dc = GetDC(Some(hwnd));
+            if !dc.is_invalid() {
+                let dpi = GetDeviceCaps(Some(dc), LOGPIXELSY);
+                let _ = ReleaseDC(Some(hwnd), dc);
+                if dpi > 0 {
+                    format.yHeight = (start.size * 1440. / dpi as f32).round() as i32;
+                }
+            }
+            let dwrite = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
+            let library = Library(LoadLibraryExW(
+                w!("Msftedit.dll"),
+                None,
+                LOAD_LIBRARY_SEARCH_SYSTEM32,
+            )?);
+            let create = GetProcAddress(library.0, s!("CreateTextServices"))
+                .ok_or_else(Error::from_win32)?;
+            let iid =
+                GetProcAddress(library.0, s!("IID_ITextServices")).ok_or_else(Error::from_win32)?;
+            let create: PCreateTextServices = std::mem::transmute(Some(create));
+            let host: ITextHost = Host {
+                hwnd,
+                view: view.clone(),
+                format,
+                paragraph: PARAFORMAT {
+                    cbSize: size_of::<PARAFORMAT>() as u32,
+                    ..Default::default()
+                },
+            }
+            .into();
+            let mut unknown: Option<IUnknown> = None;
+            create.ok_or_else(Error::from_win32)?(
+                (&None).into(),
+                (&Some(host.clone())).into(),
+                (&mut unknown).into(),
+            )
+            .ok()?;
+            let unknown = unknown.ok_or_else(|| Error::from_hresult(E_NOINTERFACE))?;
+            // windows-rs has a placeholder GUID for this interface. The DLL exports the real IID.
+            let mut raw = null_mut();
+            unknown.query(iid as *const GUID, &mut raw).ok()?;
+            let service = ITextServices::from_raw(raw);
+            drop(unknown);
+            let _ = ImmAssociateContextEx(hwnd, HIMC::default(), IACE_DEFAULT);
+            let mut input = Self {
+                service,
+                dwrite,
+                _host: host,
+                _library: library,
+                hwnd,
+                view,
+                composing: false,
+                desktop: start.desktop,
+                area: start.area,
+                drag: None,
+                index: start.index,
+                origin: start.origin,
+                size: start.size,
+                wrap_width: start.wrap_width,
+                style: start.style,
+                angle: start.angle,
+            };
+            input.send(EM_SETTEXTMODE, WPARAM(TM_PLAINTEXT.0 as usize), LPARAM(0))?;
+            input.send(EM_EXLIMITTEXT, WPARAM(0), LPARAM(LIMIT as isize))?;
+            let wide: Vec<_> = start
+                .content
+                .replace('\n', "\r")
                 .encode_utf16()
                 .chain(Some(0))
                 .collect();
-            let hwnd = CreateWindowExW(
-                WS_EX_CLIENTEDGE,
-                w!("EDIT"),
-                windows::core::PCWSTR(wide.as_ptr()),
-                WS_CHILD
-                    | WS_VISIBLE
-                    | WINDOW_STYLE(
-                        ES_MULTILINE as u32 | ES_WANTRETURN as u32 | ES_AUTOVSCROLL as u32,
-                    ),
-                bounds.left - desktop.left,
-                bounds.top - desktop.top,
-                width as i32,
-                height as i32,
-                Some(parent),
-                None,
-                Some(GetModuleHandleW(None)?.into()),
-                None,
-            )?;
-            // The parent canvas has no IME association; this control explicitly opts into the thread default.
-            let _ = ImmAssociateContextEx(hwnd, HIMC::default(), IACE_DEFAULT);
-            let alive = Rc::new(Cell::new(Some(hwnd)));
-            let font = CreateFontW(
-                -(size.round() as i32),
-                0,
-                0,
-                0,
-                FW_NORMAL.0 as i32,
-                0,
-                0,
-                0,
-                DEFAULT_CHARSET,
-                OUT_DEFAULT_PRECIS,
-                CLIP_DEFAULT_PRECIS,
-                CLEARTYPE_QUALITY,
-                0,
-                w!("Segoe UI"),
-            );
-            let flags = Rc::new(TextFlags {
-                composing: Cell::new(false),
-                suppress_return: Cell::new(false),
-            });
-            let mut input = Self {
-                flags: flags.clone(),
-                alive: alive.clone(),
-                font,
-                background: COLORREF(0xFFFFFF),
-                brush: CreateSolidBrush(COLORREF(0xFFFFFF)),
-                index,
-                origin: bounds,
-                size,
-                wrap_width: width as f32,
-                style,
-            };
-            if font.is_invalid() || input.brush.is_invalid() {
-                return Err(Error::new(E_FAIL, "无法创建文字字体"));
+            input.service.TxSetText(PCWSTR(wide.as_ptr()))?;
+            input.resize()?;
+            let rect = input.view.rect.get();
+            input.service.OnTxInPlaceActivate(&mut { rect })?;
+            input.service.OnTxUIActivate()?;
+            input.send(WM_SETFOCUS, WPARAM(0), LPARAM(0))?;
+            if start.index.is_some() {
+                input.send(EM_SETSEL, WPARAM(0), LPARAM(-1))?;
             }
-            let data = Box::into_raw(Box::new(Subclass {
-                parent,
-                flags,
-                alive,
-            }));
-            if !SetWindowSubclass(hwnd, Some(subclass), 1, data as usize).as_bool() {
-                drop(Box::from_raw(data));
-                return Err(Error::new(E_FAIL, "无法创建文字输入处理器"));
-            }
-            SendMessageW(
-                hwnd,
-                WM_SETFONT,
-                Some(WPARAM(font.0 as usize)),
-                Some(LPARAM(1)),
-            );
-            SendMessageW(hwnd, EM_SETLIMITTEXT, Some(WPARAM(16384)), Some(LPARAM(0)));
-            SendMessageW(hwnd, EM_SETSEL, Some(WPARAM(0)), Some(LPARAM(-1)));
-            input.set_wrap_width(None);
-            let _ = SetFocus(Some(hwnd));
             Ok(input)
         }
     }
-    pub fn set_theme(&mut self, dark: bool) -> Result<()> {
-        let background = if dark {
-            COLORREF(0x352F2C)
-        } else {
-            COLORREF(0xFFFFFF)
+    fn send(&self, msg: u32, wp: WPARAM, lp: LPARAM) -> Result<LRESULT> {
+        let mut result = LRESULT(0);
+        // SAFETY: active thread-local service. Any message data is live until the synchronous call returns.
+        unsafe {
+            self.service.TxSendMessage(msg, wp, lp, &mut result)?;
+        }
+        Ok(result)
+    }
+    pub fn resize(&mut self) -> Result<()> {
+        let content = self.content()?;
+        let metrics = super::annotation_render::text_metrics(
+            &self.dwrite,
+            &content,
+            self.size,
+            self.wrap_width,
+        )?;
+        let w = metrics.widthIncludingTrailingWhitespace.ceil() as i32;
+        let h = metrics.height.ceil() as i32;
+        let left = self.origin.x.saturating_sub(self.desktop.left);
+        let top = self.origin.y.saturating_sub(self.desktop.top);
+        let rect = RECT {
+            left,
+            top,
+            right: left.saturating_add(
+                w.saturating_add(4)
+                    .clamp(6, (self.wrap_width.ceil() as i32).max(6)),
+            ),
+            bottom: top.saturating_add(
+                h.max((self.size * 1.25).ceil() as i32)
+                    .min(self.area.bottom.saturating_sub(self.origin.y).max(1)),
+            ),
         };
-        // SAFETY: this input exclusively owns its brush, replaced only on the UI thread; invalidation is asynchronous.
-        unsafe {
-            let brush = CreateSolidBrush(background);
-            if brush.is_invalid() {
-                return Err(Error::new(E_FAIL, "无法创建文字输入背景"));
-            }
-            let old = std::mem::replace(&mut self.brush, brush);
-            self.background = background;
-            if !old.is_invalid() {
-                let _ = DeleteObject(old.into());
-            }
-            if let Some(hwnd) = self.hwnd() {
-                let _ = InvalidateRect(Some(hwnd), None, true);
-            }
-        }
-        Ok(())
-    }
-    pub fn set_wrap_width(&mut self, desired: Option<f32>) {
-        if let Some(hwnd) = self.hwnd() {
-            // SAFETY: owned UI-thread EDIT with call-scoped formatting rectangle; setting it preserves native wrapping width across reediting.
+        if self.view.rect.replace(rect) != rect {
+            // SAFETY: the host rectangle has been updated and will be read synchronously.
             unsafe {
-                let mut rect = RECT::default();
-                SendMessageW(
-                    hwnd,
-                    EM_GETRECT,
-                    None,
-                    Some(LPARAM((&mut rect as *mut RECT) as isize)),
-                );
-                if let Some(width) = desired {
-                    rect.right = (rect.left + width.ceil() as i32).min(rect.right);
-                    SendMessageW(
-                        hwnd,
-                        EM_SETRECTNP,
-                        None,
-                        Some(LPARAM((&rect as *const RECT) as isize)),
-                    );
-                }
-                self.wrap_width = (rect.right - rect.left).max(1) as f32;
-            }
-        }
-    }
-    pub fn complete_composition(&self) -> Result<()> {
-        let hwnd = self
-            .hwnd()
-            .ok_or_else(|| Error::new(E_FAIL, "文字输入框已关闭"))?;
-        // SAFETY: only this UI thread accesses subclass state. No state borrow is held while IME may synchronously send messages.
-        unsafe {
-            let composing = self.flags.composing.get();
-            if composing {
-                let context = ImmGetContext(hwnd);
-                if context.is_invalid() {
-                    return Err(Error::new(E_FAIL, "请先确认输入法候选，再完成文字输入"));
-                }
-                let completed = ImmNotifyIME(context, NI_COMPOSITIONSTR, CPS_COMPLETE, 0).as_bool();
-                let _ = ImmReleaseContext(hwnd, context);
-                if !completed || self.flags.composing.get() {
-                    return Err(Error::new(E_FAIL, "请先确认输入法候选，再完成文字输入"));
-                }
+                self.service
+                    .OnTxPropertyBitsChange(TXTBIT_CLIENTRECTCHANGE, TXTBIT_CLIENTRECTCHANGE)?;
             }
         }
         Ok(())
     }
     pub fn content(&self) -> Result<String> {
-        let hwnd = self
-            .hwnd()
-            .ok_or_else(|| Error::new(E_FAIL, "文字输入框已关闭"))?;
-        // SAFETY: owned live EDIT and bounded writable UTF-16 buffer.
+        let mut value = BSTR::new();
+        // SAFETY: the service writes an owned BSTR to this out parameter.
         unsafe {
-            let len = GetWindowTextLengthW(hwnd);
-            if !(0..=16384).contains(&len) {
-                return Err(Error::new(E_FAIL, "文字超过 16384 个字符上限"));
-            }
-            let mut buffer = vec![0u16; len as usize + 1];
-            let read = GetWindowTextW(hwnd, &mut buffer);
-            Ok(String::from_utf16_lossy(&buffer[..read as usize]).replace("\r\n", "\n"))
+            self.service.TxGetText(&mut value)?;
+        }
+        Ok(value.to_string().replace("\r\n", "\n").replace('\r', "\n"))
+    }
+    pub fn composing(&self) -> bool {
+        self.composing
+    }
+    pub fn complete_composition(&self) -> Result<()> {
+        if self.composing {
+            return Err(Error::new(E_FAIL, "请先确认输入法候选，再完成文字输入"));
+        }
+        Ok(())
+    }
+    pub fn message(&mut self, msg: u32, wp: WPARAM, lp: LPARAM) -> Result<LRESULT> {
+        if msg == WM_TIMER && wp.0 == CARET_TIMER {
+            self.view.caret_on.set(!self.view.caret_on.get());
+            return Ok(LRESULT(0));
+        }
+        let wp = if msg == WM_TIMER {
+            WPARAM(wp.0.saturating_sub(TIMER_PREFIX))
+        } else {
+            wp
+        };
+        if msg == WM_IME_STARTCOMPOSITION {
+            self.composing = true;
+        }
+        if msg == WM_IME_ENDCOMPOSITION {
+            self.composing = false;
+        }
+        let result = self.send(msg, wp, lp)?;
+        if matches!(
+            msg,
+            WM_CHAR
+                | WM_KEYDOWN
+                | WM_IME_COMPOSITION
+                | WM_IME_ENDCOMPOSITION
+                | WM_PASTE
+                | WM_CUT
+                | WM_CLEAR
+                | WM_UNDO
+        ) {
+            self.resize()?;
+        }
+        Ok(result)
+    }
+    pub fn owns_timer(id: usize) -> bool {
+        id == CARET_TIMER || id >= TIMER_PREFIX
+    }
+    pub fn bounds(&self) -> RECT {
+        let r = self.view.rect.get();
+        RECT {
+            left: r.left.saturating_sub(3),
+            top: r.top.saturating_sub(3),
+            right: r.right.saturating_add(3),
+            bottom: r.bottom.saturating_add(3),
         }
     }
-}
-impl Drop for TextInput {
-    fn drop(&mut self) {
-        // SAFETY: child NCDESTROY clears alive even when parent destroys the child first. Font is deleted after child stops using it.
-        unsafe {
-            if let Some(hwnd) = self.alive.get() {
-                let _ = DestroyWindow(hwnd);
-            }
-            if !self.brush.is_invalid() {
-                let _ = DeleteObject(self.brush.into());
-            }
-            if !self.font.is_invalid() {
-                let _ = DeleteObject(self.font.into());
-            }
-        }
+    pub fn mouse_captured(&self) -> bool {
+        self.view.mouse_captured.get() || self.drag.is_some()
     }
-}
-unsafe extern "system" fn subclass(
-    hwnd: HWND,
-    msg: u32,
-    wp: WPARAM,
-    lp: LPARAM,
-    _id: usize,
-    data: usize,
-) -> LRESULT {
-    let result = std::panic::catch_unwind(|| {
-        // SAFETY: SetWindowSubclass owns this one Box until NCDESTROY; no borrowed state survives DefSubclassProc.
-        unsafe {
-            if msg == WM_NCDESTROY {
-                let state = Box::from_raw(data as *mut Subclass);
-                state.alive.set(None);
-                let _ = RemoveWindowSubclass(hwnd, Some(subclass), 1);
-                return DefSubclassProc(hwnd, msg, wp, lp);
-            }
-            let state = &mut *(data as *mut Subclass);
-            if msg == WM_IME_STARTCOMPOSITION {
-                state.flags.composing.set(true);
-            }
-            if msg == WM_IME_ENDCOMPOSITION {
-                state.flags.composing.set(false);
-            }
-            if msg == WM_KEYDOWN
-                && !state.flags.composing.get()
-                && wp.0 == 65
-                && GetKeyState(VK_CONTROL.0 as i32) < 0
-            {
-                SendMessageW(hwnd, EM_SETSEL, Some(WPARAM(0)), Some(LPARAM(-1)));
-                return LRESULT(0);
-            }
-            if msg == WM_KEYDOWN && !state.flags.composing.get() {
-                let command = if wp.0 == 27 {
-                    Some(CANCEL)
-                } else if wp.0 == 13 && GetKeyState(VK_CONTROL.0 as i32) < 0 {
-                    Some(COMMIT)
-                } else if wp.0 == 83 && GetKeyState(VK_CONTROL.0 as i32) < 0 {
-                    Some(SAVE)
-                } else if wp.0 == 80 && GetKeyState(VK_CONTROL.0 as i32) < 0 {
-                    Some(PIN)
-                } else {
-                    None
-                };
-                if let Some(command) = command {
-                    state.flags.suppress_return.set(command == COMMIT);
-                    let parent = state.parent;
-                    let _ = PostMessageW(Some(parent), command, WPARAM(hwnd.0 as usize), LPARAM(0));
-                    return LRESULT(0);
+    pub fn mouse(&mut self, msg: u32, wp: WPARAM, p: PixelPoint) -> Result<bool> {
+        let x = p.x.saturating_sub(self.desktop.left);
+        let y = p.y.saturating_sub(self.desktop.top);
+        let outer = self.bounds();
+        let inside = |r: RECT| x >= r.left && x < r.right && y >= r.top && y < r.bottom;
+        if let Some((start, origin)) = self.drag {
+            if msg == WM_MOUSEMOVE || msg == WM_LBUTTONUP {
+                self.origin.x = (i64::from(origin.x) + i64::from(p.x) - i64::from(start.x))
+                    .clamp(i64::from(self.area.left), i64::from(self.area.right - 1))
+                    as i32;
+                self.origin.y = (i64::from(origin.y) + i64::from(p.y) - i64::from(start.y))
+                    .clamp(i64::from(self.area.top), i64::from(self.area.bottom - 1))
+                    as i32;
+                self.resize()?;
+                if msg == WM_LBUTTONUP {
+                    self.drag = None;
+                    // SAFETY: paired with SetCapture for this UI-thread drag.
+                    unsafe {
+                        let _ = ReleaseCapture();
+                    }
                 }
             }
-            if msg == WM_CHAR && state.flags.suppress_return.get() && matches!(wp.0, 10 | 13) {
-                state.flags.suppress_return.set(false);
-                return LRESULT(0);
-            }
-            if msg == WM_CHAR
-                && (wp.0 == 16
-                    || wp.0 == 19
-                    || wp.0 == 27
-                    || ((wp.0 == 13 || wp.0 == 10)
-                        && (state.flags.suppress_return.get()
-                            || GetKeyState(VK_CONTROL.0 as i32) < 0)))
-            {
-                return LRESULT(0);
-            }
-            DefSubclassProc(hwnd, msg, wp, lp)
+            return Ok(true);
         }
-    });
-    result.unwrap_or(LRESULT(0))
+        if !inside(outer) && !self.view.mouse_captured.get() {
+            return Ok(false);
+        }
+        if msg == WM_LBUTTONDOWN && !inside(self.view.rect.get()) {
+            self.drag = Some((p, self.origin));
+            // SAFETY: capture routes this drag to the live HWND on the same thread.
+            unsafe {
+                SetCapture(self.hwnd);
+            }
+        } else {
+            let packed = u32::from(x as u16) | (u32::from(y as u16) << 16);
+            self.send(msg, wp, LPARAM(packed as isize))?;
+        }
+        Ok(true)
+    }
+    pub fn capture_lost(&mut self) {
+        if let Some((_, origin)) = self.drag.take() {
+            self.origin = origin;
+            let _ = self.resize();
+        }
+        self.view.mouse_captured.set(false);
+    }
+    pub fn draw(&self, interop: &ID2D1GdiInteropRenderTarget, clip: RECT) -> Result<()> {
+        let mut r = self.view.rect.get();
+        let mut bounds = RECTL {
+            left: r.left,
+            top: r.top,
+            right: r.right,
+            bottom: r.bottom,
+        };
+        // SAFETY: draw into the borrowed GDI DC during BeginDraw. Always release before the next D2D call.
+        unsafe {
+            let dc = interop.GetDC(D2D1_DC_INITIALIZE_MODE_COPY)?;
+            let saved = SaveDC(dc);
+            let result = if saved != 0 {
+                IntersectClipRect(dc, clip.left, clip.top, clip.right, clip.bottom);
+                let result = self.service.TxDraw(
+                    DVASPECT_CONTENT,
+                    0,
+                    null_mut(),
+                    null_mut(),
+                    dc,
+                    HDC::default(),
+                    &mut bounds,
+                    null_mut(),
+                    &mut r,
+                    0,
+                    0,
+                    0,
+                );
+                if self.view.caret_visible.get()
+                    && self.view.caret_on.get()
+                    && GetFocus() == self.hwnd
+                {
+                    let mut caret = self.view.caret.get();
+                    caret.right = caret.left.saturating_add(2);
+                    let _ = InvertRect(dc, &caret);
+                }
+                let _ = RestoreDC(dc, saved);
+                result
+            } else {
+                Err(Error::from_win32())
+            };
+            let release = interop.ReleaseDC(None);
+            result.and(release)
+        }
+    }
+}
+
+impl Drop for TextInput {
+    fn drop(&mut self) {
+        // SAFETY: UI thread owns focus, IME and the service. Deactivate before destroying host and module.
+        unsafe {
+            let _ = self.service.OnTxUIDeactivate();
+            let _ = self.service.OnTxInPlaceDeactivate();
+            let _ = KillTimer(Some(self.hwnd), CARET_TIMER);
+            let _ = ImmAssociateContextEx(self.hwnd, HIMC::default(), 0);
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
-    fn native_edit_roundtrip_ime_cancel_routing_and_parent_teardown() {
-        // SAFETY: this test owns hidden parent and child on one thread; messages target only these test windows.
+    fn native_windowless_text_grows_shrinks_and_keeps_multiline_content() {
+        // SAFETY: test uses only its own hidden window and creates/destroys it on the same thread.
         unsafe {
-            let parent = CreateWindowExW(
+            let hwnd = CreateWindowExW(
                 WINDOW_EX_STYLE::default(),
                 w!("STATIC"),
-                w!("Text input test"),
+                w!("Text test"),
                 WS_OVERLAPPED,
                 0,
                 0,
@@ -334,47 +612,53 @@ mod tests {
                 None,
             )
             .unwrap();
-            let _ = ImmAssociateContextEx(parent, HIMC::default(), 0);
-            assert!(ImmGetContext(parent).is_invalid());
-            let bounds = PixelRect {
+            let area = PixelRect {
                 left: 0,
                 top: 0,
-                right: 400,
-                bottom: 180,
+                right: 640,
+                bottom: 480,
             };
-            let input = TextInput::open(
-                parent,
-                None,
-                bounds,
-                bounds,
-                "中文\n😀第二行",
-                30.,
-                Style::default(),
+            let mut input = TextInput::open(
+                hwnd,
+                TextStart {
+                    index: None,
+                    origin: PixelPoint { x: 40, y: 40 },
+                    desktop: area,
+                    area,
+                    content: "",
+                    size: 24.,
+                    wrap_width: 400.,
+                    style: Style::default(),
+                    angle: 0.,
+                },
             )
             .unwrap();
-            let child = input.hwnd().unwrap();
-            let context = ImmGetContext(child);
+            let empty = input.bounds();
+            for c in "透明文字".encode_utf16() {
+                input
+                    .message(WM_CHAR, WPARAM(c as usize), LPARAM(1))
+                    .unwrap();
+            }
+            let line = input.bounds();
+            assert_eq!(input.content().unwrap(), "透明文字");
             assert!(
-                !context.is_invalid(),
-                "text must retain IME when its canvas disables composition"
+                line.right > empty.right && (line.bottom - empty.bottom).abs() <= 2,
+                "{empty:?} {line:?}"
             );
-            let _ = ImmReleaseContext(child, context);
-            assert_eq!(input.content().unwrap(), "中文\n😀第二行");
-            input.flags.suppress_return.set(true);
-            SendMessageW(child, WM_KEYUP, Some(WPARAM(13)), None);
-            SendMessageW(child, WM_CHAR, Some(WPARAM(10)), None);
-            assert_eq!(input.content().unwrap(), "中文\n😀第二行");
-            SendMessageW(child, WM_IME_STARTCOMPOSITION, None, None);
-            SendMessageW(child, WM_KEYDOWN, Some(WPARAM(27)), None);
-            let mut message = MSG::default();
-            assert!(!PeekMessageW(&mut message, Some(parent), CANCEL, CANCEL, PM_REMOVE).as_bool());
-            SendMessageW(child, WM_IME_ENDCOMPOSITION, None, None);
-            SendMessageW(child, WM_KEYDOWN, Some(WPARAM(27)), None);
-            assert!(PeekMessageW(&mut message, Some(parent), CANCEL, CANCEL, PM_REMOVE).as_bool());
-            assert_eq!(message.wParam.0, child.0 as usize);
-            DestroyWindow(parent).unwrap();
-            assert!(input.hwnd().is_none());
+            input.message(WM_KEYDOWN, WPARAM(13), LPARAM(1)).unwrap();
+            input.message(WM_CHAR, WPARAM(13), LPARAM(1)).unwrap();
+            input
+                .message(WM_CHAR, WPARAM('F' as usize), LPARAM(1))
+                .unwrap();
+            assert_eq!(input.content().unwrap(), "透明文字\nF");
+            assert!(input.bounds().bottom > line.bottom);
+            input.send(EM_SETSEL, WPARAM(0), LPARAM(-1)).unwrap();
+            input.message(WM_CLEAR, WPARAM(0), LPARAM(0)).unwrap();
+            assert_eq!(input.bounds(), empty);
+            input.message(WM_UNDO, WPARAM(0), LPARAM(0)).unwrap();
+            assert_eq!(input.content().unwrap(), "透明文字\nF");
             drop(input);
+            DestroyWindow(hwnd).unwrap();
         }
     }
 }

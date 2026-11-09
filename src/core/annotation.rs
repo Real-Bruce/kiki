@@ -47,6 +47,7 @@ pub enum Shape {
         content: String,
         size: f32,
         wrap_width: f32,
+        angle: f64,
     },
 }
 #[derive(Clone, Debug, PartialEq)]
@@ -90,10 +91,32 @@ impl Object {
             Shape::Pen(_) | Shape::Text { .. } => Vec::new(),
         }
     }
+    pub fn rotation_handle(&self, scale: f32) -> Option<PixelPoint> {
+        let Shape::Text { bounds, angle, .. } = self.shape else {
+            return None;
+        };
+        let (cx, _) = text_center(bounds);
+        let (x, y) = rotate_point(
+            bounds,
+            angle,
+            cx,
+            f64::from(bounds.top) - 16. * f64::from(scale),
+        );
+        Some(PixelPoint {
+            x: x.round() as i32,
+            y: y.round() as i32,
+        })
+    }
     fn hit(&self, p: PixelPoint, tolerance: f64) -> bool {
         let t = tolerance + f64::from(self.style.width) / 2.;
         match &self.shape {
-            Shape::Text { bounds, .. } => super::selection::contains(*bounds, p),
+            Shape::Text { bounds, angle, .. } => {
+                let (x, y) = rotate_point(*bounds, -*angle, f64::from(p.x), f64::from(p.y));
+                x >= f64::from(bounds.left)
+                    && x < f64::from(bounds.right)
+                    && y >= f64::from(bounds.top)
+                    && y < f64::from(bounds.bottom)
+            }
             Shape::Rectangle(r) => {
                 let h = Selection::handles(*r);
                 [(0, 2), (2, 4), (4, 6), (6, 0)]
@@ -138,6 +161,20 @@ pub fn arrow_head(a: PixelPoint, b: PixelPoint, width: f32) -> [PixelPoint; 2] {
         y: (f64::from(b.y) - head * uy - side * head * 0.5 * ux).round() as i32,
     })
 }
+pub fn text_center(bounds: PixelRect) -> (f64, f64) {
+    (
+        (f64::from(bounds.left) + f64::from(bounds.right)) / 2.,
+        (f64::from(bounds.top) + f64::from(bounds.bottom)) / 2.,
+    )
+}
+
+pub fn rotate_point(bounds: PixelRect, angle: f64, x: f64, y: f64) -> (f64, f64) {
+    let (cx, cy) = text_center(bounds);
+    let (sin, cos) = angle.sin_cos();
+    let (x, y) = (x - cx, y - cy);
+    (cx + x * cos - y * sin, cy + x * sin + y * cos)
+}
+
 fn rect(a: PixelPoint, b: PixelPoint) -> PixelRect {
     PixelRect {
         left: a.x.min(b.x),
@@ -173,6 +210,7 @@ enum DragKind {
     Create,
     Move,
     Handle(usize),
+    Rotate,
 }
 struct Drag {
     index: usize,
@@ -223,11 +261,13 @@ impl Editor {
             ref content,
             size,
             wrap_width,
+            angle,
         } = object.shape
         else {
             return Err("无效文字对象");
         };
         if bounds.size().is_none()
+            || !angle.is_finite()
             || !size.is_finite()
             || size <= 0.
             || !wrap_width.is_finite()
@@ -335,6 +375,14 @@ impl Editor {
             });
         }
     }
+    pub fn rotation_at(&self, p: PixelPoint, tolerance: i32, scale: f32) -> bool {
+        self.tool == Tool::Select
+            && self
+                .selected
+                .and_then(|i| self.objects.get(i))
+                .and_then(|o| o.rotation_handle(scale))
+                .is_some_and(|handle| distance(p, handle, handle) <= f64::from(tolerance))
+    }
     pub fn begin(
         &mut self,
         p: PixelPoint,
@@ -346,6 +394,15 @@ impl Editor {
         if self.tool == Tool::Select {
             if let Some(index) = self.selected {
                 let object = &self.objects[index];
+                if self.rotation_at(p, tolerance, scale) {
+                    self.drag = Some(Drag {
+                        index,
+                        start: p,
+                        before: Some(object.clone()),
+                        kind: DragKind::Rotate,
+                    });
+                    return Ok(true);
+                }
                 if let Some(handle) = object
                     .handles()
                     .iter()
@@ -452,6 +509,7 @@ impl Editor {
                             content,
                             size,
                             wrap_width,
+                            angle,
                         } => Shape::Text {
                             bounds: rect(
                                 shift(PixelPoint {
@@ -466,12 +524,40 @@ impl Editor {
                             content: content.clone(),
                             size: *size,
                             wrap_width: *wrap_width,
+                            angle: *angle,
                         },
                         Shape::Arrow(a, b) => Shape::Arrow(shift(*a), shift(*b)),
                         Shape::Pen(points) => {
                             Shape::Pen(points.iter().map(|v| shift(*v)).collect())
                         }
                     };
+                }
+            }
+            DragKind::Rotate => {
+                if let (
+                    Some(Object {
+                        shape:
+                            Shape::Text {
+                                bounds,
+                                angle: original,
+                                ..
+                            },
+                        ..
+                    }),
+                    Shape::Text { angle, .. },
+                ) = (&drag.before, &mut object.shape)
+                {
+                    let (x, y) = text_center(*bounds);
+                    let vector = |p: PixelPoint| (f64::from(p.x) - x, f64::from(p.y) - y);
+                    let (a, b) = vector(drag.start);
+                    let (c, d) = vector(p);
+                    if p == drag.start {
+                        *angle = *original;
+                    } else if c.hypot(d) >= 1. {
+                        *angle = (original + d.atan2(c) - b.atan2(a) + std::f64::consts::PI)
+                            .rem_euclid(std::f64::consts::TAU)
+                            - std::f64::consts::PI;
+                    }
                 }
             }
             DragKind::Handle(index) => {
@@ -624,6 +710,7 @@ mod tests {
                 content: content.into(),
                 size: 30.,
                 wrap_width: 200.,
+                angle: 0.,
             },
             style: Style::default(),
         }
@@ -643,6 +730,33 @@ mod tests {
         e.undo();
         assert_eq!(e.objects()[0], text("修改后的中文"));
     }
+    #[test]
+    fn rotate_text_hit_and_history_use_the_rotated_bounds() {
+        let mut e = Editor::default();
+        e.commit_text(None, text("旋转")).unwrap();
+        let before = e.objects()[0].clone();
+        let bounds = before.bounds();
+        let (x, y) = text_center(bounds);
+        let handle = before.rotation_handle(1.).unwrap();
+        let rotated_handle = p(
+            (x + y - f64::from(handle.y)).round() as i32,
+            y.round() as i32,
+        );
+        e.begin(handle, 5, 1.).unwrap();
+        e.finish(rotated_handle);
+        let after = e.objects()[0].clone();
+        assert!(
+            matches!(after.shape, Shape::Text { angle, .. } if (angle - std::f64::consts::FRAC_PI_2).abs() < 0.06)
+        );
+        assert_eq!(after.bounds(), bounds);
+        assert_eq!(e.text_at(p(x as i32, y as i32)), Some(0));
+        assert_eq!(e.text_at(p(bounds.left + 1, y as i32)), None);
+        e.undo();
+        assert_eq!(e.objects(), &[before]);
+        e.redo();
+        assert_eq!(e.objects(), &[after]);
+    }
+
     #[test]
     fn text_validation_failure_preserves_object_and_redo() {
         let mut e = Editor::default();
