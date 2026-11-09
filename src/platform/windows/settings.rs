@@ -21,6 +21,7 @@ use windows::{
     core::{BOOL, PCWSTR, Result, w},
 };
 pub(super) const RESTORE_HOTKEY: u32 = WM_APP + 62;
+const HOTKEY_RECORDED: u32 = WM_APP + 63;
 const PAGES: [&str; 6] = ["通用", "快捷键", "截图", "贴图", "外观", "关于"];
 const BRAND: u16 = 90;
 const COLORS: [[u8; 3]; 8] = super::selection_render::ANNOTATION_COLORS;
@@ -180,6 +181,7 @@ fn open_impl(visible: bool) -> Result<()> {
         Ok(())
     }
 }
+
 pub fn close() {
     if let Some(hwnd) = WINDOW.get() {
         unsafe {
@@ -753,6 +755,10 @@ fn action(hwnd: HWND, id: u16) {
             _ => Ok(()),
         };
         if life.get() == Some(hwnd) {
+            if id == 300 && result.is_ok() && hotkey_focused() {
+                // Finish recording after the native control returns from its key handler.
+                let _ = PostMessageW(Some(hwnd), HOTKEY_RECORDED, WPARAM(0), LPARAM(0));
+            }
             (*p).error = result.err();
             refresh();
         }
@@ -1206,6 +1212,15 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 restore_hotkey_input();
                 LRESULT(0)
             }
+            HOTKEY_RECORDED => {
+                if hotkey_focused() {
+                    let navigation = (*p).controls.iter().find(|c| c.id == 101).map(|c| c.hwnd);
+                    if let Some(navigation) = navigation {
+                        let _ = SetFocus(Some(navigation));
+                    }
+                }
+                LRESULT(0)
+            }
             WM_COMMAND => {
                 let id = (wp.0 & 65535) as u16;
                 let code = (wp.0 >> 16) as u32;
@@ -1511,12 +1526,21 @@ mod tests {
             assert!(preferences::active());
             drop(registration);
             DestroyWindow(blocked).unwrap();
+            SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(101)), None);
             let child = (*pointer(hwnd))
                 .controls
                 .iter()
                 .find(|c| c.id == 300)
                 .unwrap()
                 .hwnd;
+            let _ = SetFocus(Some(child));
+            assert!(hotkey_focused());
+            let mut gui = GUITHREADINFO {
+                cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
+                ..Default::default()
+            };
+            GetGUIThreadInfo(GetWindowThreadProcessId(child, None), &mut gui).unwrap();
+            assert_ne!(gui.hwndCaret, child);
             hotkey::set_control(child, candidate);
             SendMessageW(
                 hwnd,
@@ -1525,6 +1549,19 @@ mod tests {
                 Some(LPARAM(child.0 as isize)),
             );
             assert_eq!(preferences::current().hotkey, candidate);
+            let mut recorded = MSG::default();
+            assert!(
+                PeekMessageW(
+                    &mut recorded,
+                    Some(hwnd),
+                    HOTKEY_RECORDED,
+                    HOTKEY_RECORDED,
+                    PM_REMOVE
+                )
+                .as_bool()
+            );
+            DispatchMessageW(&recorded);
+            assert!(!hotkey_focused());
             // Short logical work areas must scroll; controls outside the viewport must be hidden.
             SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(102)), None);
             SetWindowPos(hwnd, None, 0, 0, 860, 480, SWP_NOZORDER | SWP_NOACTIVATE).unwrap();

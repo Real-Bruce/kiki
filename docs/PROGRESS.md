@@ -339,3 +339,10 @@
 - 125% 单屏实测浅色与深色窗口。默认和全特性各 44 项测试、严格 Clippy、rustfmt 及两种 Release 构建通过。
 - 已生成便携 ZIP 并核对 16 个解压文件，详见 [P6 验证](validation/P6.md)。
 - 关联提交主题：fix(settings): hide the caption icon and text。
+
+## P6 快捷键录入文字提示
+
+- 快捷键输入条改为文字提示。录入时无系统插入光标，新组合注册成功后显示当前组合。
+- 125% 单屏实查浅色和深色录入样式。默认和全特性各 44 项测试、严格 Clippy、rustfmt 及两种 Release 构建通过。
+- 便携 ZIP 已生成并核对 16 个解压文件，详见 [P6 验证](validation/P6.md)。
+- 关联提交主题：fix(settings): show a text prompt for hotkey recording。

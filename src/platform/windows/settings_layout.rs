@@ -92,10 +92,10 @@ impl Page {
             }
             1 => {
                 p.heading("开始截图");
-                let input = (p.width - 126).clamp(120, 290);
-                p.control(300, 0, 0, input, 38);
-                p.control(301, input + 12, 0, 108, 38);
-                p.y += 58;
+                let recorder = (p.width - 126).clamp(120, 244);
+                p.control(300, 0, 0, recorder, 38);
+                p.control(301, recorder + 12, 0, 108, 38);
+                p.y += 54;
                 p.note(
                     "按 Ctrl 或 Alt 加字母、数字或 F1–F24。冲突时保留原组合。",
                     Tone::Muted,

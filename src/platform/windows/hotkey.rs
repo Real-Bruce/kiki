@@ -158,9 +158,10 @@ unsafe extern "system" fn themed_proc(
     use windows::Win32::{
         Foundation::*,
         Graphics::Gdi::*,
-        UI::{HiDpi::GetDpiForWindow, Shell::*, WindowsAndMessaging::*},
+        UI::{Shell::*, WindowsAndMessaging::*},
     };
-    // SAFETY: the native hotkey control still owns focus, caret and keyboard processing. Paint uses only call-scoped GDI resources.
+    // SAFETY: the native hotkey control owns focus and keyboard handling on this thread.
+    // The paint DC and brush are local to WM_PAINT.
     unsafe {
         if msg == WM_PAINT {
             let mut ps = PAINTSTRUCT::default();
@@ -168,37 +169,28 @@ unsafe extern "system" fn themed_proc(
             let mut rect = RECT::default();
             let _ = GetClientRect(hwnd, &mut rect);
             let dark = super::selection_render::system_dark();
-            let dpi = GetDpiForWindow(hwnd);
-            let scale = dpi.max(96) as f32 / 96.;
-            let fill = if dark { 0x343538 } else { 0xeff2f6 };
-            let focused = GetFocus() == hwnd;
             use super::settings_render as appearance;
-            if appearance::paint_control(dc, rect, appearance::background(dark), |shapes| {
-                shapes.rounded(rect, (12. * scale).round() as i32, fill);
-                if focused {
-                    shapes.focus_ring(rect, 6. * scale, scale, appearance::accent(dark));
-                }
-            })
-            .is_none()
-            {
-                let bg = CreateSolidBrush(ref_color(fill));
-                FillRect(dc, &rect, bg);
-                let _ = DeleteObject(bg.into());
-            }
+            let bg = CreateSolidBrush(ref_color(appearance::background(dark)));
+            FillRect(dc, &rect, bg);
+            let _ = DeleteObject(bg.into());
             SetBkMode(dc, TRANSPARENT);
-            SetTextColor(dc, ref_color(if dark { 0xf2f2f2 } else { 0x202020 }));
+            SetTextColor(dc, ref_color(appearance::accent(dark)));
             let font = HFONT(SendMessageW(hwnd, WM_GETFONT, None, None).0 as *mut _);
             let old = SelectObject(dc, font.into());
-            let label = control_value(hwnd)
-                .map(|key| key.label())
-                .unwrap_or_else(|_| "按 Ctrl 或 Alt 加按键…".into());
+            let label = if GetFocus() == hwnd {
+                "请按下新快捷键…".to_owned()
+            } else {
+                format!(
+                    "当前 {}　·　点击更改",
+                    super::preferences::current().hotkey.label()
+                )
+            };
             let mut text: Vec<_> = label.encode_utf16().collect();
-            rect.left += (12. * scale).round() as i32;
             DrawTextW(
                 dc,
                 &mut text,
                 &mut rect,
-                DT_LEFT | DT_VCENTER | DT_SINGLELINE,
+                DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS,
             );
             SelectObject(dc, old);
             let _ = EndPaint(hwnd, &ps);
@@ -212,10 +204,29 @@ unsafe extern "system" fn themed_proc(
         if msg == WM_ERASEBKGND {
             return LRESULT(1);
         }
+        if msg == WM_SETCURSOR
+            && let Ok(cursor) = LoadCursorW(None, IDC_HAND)
+        {
+            SetCursor(Some(cursor));
+            return LRESULT(1);
+        }
         if msg == WM_NCDESTROY {
             let _ = RemoveWindowSubclass(hwnd, Some(themed_proc), 77);
         }
         let value = DefSubclassProc(hwnd, msg, wp, lp);
+        if matches!(msg, WM_SETFOCUS | WM_KEYDOWN | WM_SYSKEYDOWN) {
+            // The native control may create a caret, but this UI records a chord
+            // rather than editing text. Only remove a caret owned by this control.
+            let mut info = GUITHREADINFO {
+                cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
+                ..Default::default()
+            };
+            let thread = GetWindowThreadProcessId(hwnd, None);
+            if thread != 0 && GetGUIThreadInfo(thread, &mut info).is_ok() && info.hwndCaret == hwnd
+            {
+                let _ = DestroyCaret();
+            }
+        }
         if matches!(msg, WM_KEYUP | WM_SYSKEYUP)
             && [VK_CONTROL, VK_MENU, VK_SHIFT]
                 .iter()
