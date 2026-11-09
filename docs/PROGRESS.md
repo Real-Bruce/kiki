@@ -368,3 +368,11 @@
 - `dist/kiki-v0.2.1-windows-x64.zip` 为 526,918 字节。解压到含中文和空格的路径，逐一核对全部 16 个文件的 SHA-256，并读取解压后 EXE 的文件版本、产品版本和嵌入清单。
 - ZIP 的 SHA-256 为 `377aa910de2652d1e0e886d94f6ce7afd228e081edd26a68aafe76ea38e35c12`。版本提交主题为 `chore(release): prepare v0.2.1`，主分支版本标签为 `v0.2.1`。
 - 实机界面及成图记录见 [界面优化验证](validation/UI_POLISH.md) 和 [设置与托盘验证](validation/P6.md)。多显示器、混合 DPI、HDR 及完整 IME 验收仍按 [P8 报告](validation/P8.md) 跟踪。
+
+## 统一版本与标签发布自动化
+
+- 根目录 `VERSION` 是发布版本来源。同步脚本更新 Cargo 包版本及锁文件，构建脚本校验版本并生成嵌入 EXE 的 Windows 清单。
+- 本地与 GitHub Actions 共用 Windows x64 打包脚本，生成包含 EXE、说明和许可的 ZIP 及 SHA-256。新建 `vX.Y.Z` 标签推送后触发工作流，标签匹配时将两个文件附到 GitHub Release。
+- 本机验证 v0.2.1 便携包和独立副本中的 v0.2.2 升版包，核对 ZIP 内容、校验值、EXE 版本、嵌入清单以及版本错配的拒绝路径。格式检查、全特性严格 Clippy 和正常 Windows 会话中的 44 项全特性测试通过。
+- 正式版本记录为 0.2.1。云端触发、构建和 Release 上传待首次推送新标签时验证。步骤和本机证据见 [README](../README.md#打包与发布) 与 [P8 报告](validation/P8.md#自动打包与标签发布)。
+- 关联提交主题为 `ci(release): automate versioned Windows packages`。

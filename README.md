@@ -4,9 +4,27 @@
 
 ## Windows 11 x64 免安装包
 
-从本地 dist 目录解压 **kiki-v0.2.1-windows-x64.zip**，双击 kiki.exe。首次打开可在通用页选择 **开始截图**。以后可从任务栏右下角的 kiki 图标开始截图，默认快捷键是 **Ctrl+Alt+A**。可用 Get-FileHash 核对同目录的 .zip.sha256。
+从 GitHub 仓库的 **Releases** 页面或本地 `dist` 目录获取 `kiki-v<版本>-windows-x64.zip`。解压后双击 `kiki.exe`。首次打开可在通用页选择 **开始截图**。以后可从任务栏右下角的 kiki 图标开始截图，默认快捷键是 **Ctrl+Alt+A**。可用 `Get-FileHash` 核对随包提供的 `.zip.sha256`。
 
 [快速使用说明](docs/QUICK_START.txt) · [版本变更](CHANGELOG.md) · [P8 交付与验收](docs/validation/P8.md)
+
+## 打包与发布
+
+在 Windows x64 上使用 PowerShell 7，在仓库根目录运行 `./scripts/Package-Windows.ps1`。脚本按锁文件构建 Release，将 EXE、快速使用说明和许可证打成 ZIP，并在 `dist` 下生成 ZIP 及 SHA-256 校验文件。
+
+根目录的 [VERSION](VERSION) 是发布版本来源，格式为 `X.Y.Z`。发布新版本时，先确认要打标签的分支包含发布工作流。以 `v0.2.2` 为例，将 `VERSION` 改为 `0.2.2`，再运行以下命令同步 Cargo 版本、验证本地打包、提交并推送。
+
+```powershell
+./scripts/Sync-Version.ps1
+./scripts/Package-Windows.ps1 -Tag v0.2.2
+git add VERSION Cargo.toml Cargo.lock
+git commit -m "chore(release): prepare v0.2.2"
+git push origin HEAD
+git tag -a v0.2.2 -m "v0.2.2"
+git push origin v0.2.2
+```
+
+推送新建的 `vX.Y.Z` 标签后，[发布工作流](.github/workflows/release.yml) 会核对标签与 `VERSION`，在 Windows 上运行同一打包脚本，并将 ZIP 和 `.zip.sha256` 附到同名 GitHub Release。仓库需要启用 GitHub Actions，并允许工作流使用自带的 `GITHUB_TOKEN` 写入 Release。
 
 ## 开发与验证
 
