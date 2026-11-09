@@ -57,6 +57,7 @@ pub struct PaintInput<'a> {
 }
 pub struct Canvas {
     target: ID2D1RenderTarget,
+    factory: ID2D1Factory,
     context: ID2D1DeviceContext,
     swap: windows::Win32::Graphics::Dxgi::IDXGISwapChain1,
     bitmap: ID2D1Bitmap,
@@ -102,6 +103,7 @@ impl Canvas {
             let device = super::pinned_device::get()?;
             let (context, swap) = device.surface(hwnd, width, height)?;
             let target: ID2D1RenderTarget = context.cast()?;
+            let factory = target.GetFactory()?;
             let bitmap = target.CreateBitmap(
                 D2D_SIZE_U { width, height },
                 Some(image.pixels().as_ptr().cast()),
@@ -121,6 +123,7 @@ impl Canvas {
             let icons = format(&dw, true, 1.)?;
             Ok(Self {
                 target,
+                factory,
                 context,
                 swap,
                 _device: device,
@@ -230,6 +233,7 @@ impl Canvas {
         let (screen, preferred) = self.display(anchor, screens);
         let scale = layout.as_ref().map_or(preferred, |l| l.scale);
         let text_layouts = super::annotation_render::layouts(&self.dw, editor)?;
+        let geometry = super::annotation_render::geometry(&self.factory, self.bounds(), editor)?;
         // SAFETY: all drawing resources belong to this UI thread; BeginDraw is always paired with EndDraw.
         unsafe {
             if (scale - self.scale).abs() > 0.001 {
@@ -321,7 +325,7 @@ impl Canvas {
                     color(24, 28, 36, 0.50),
                 );
             }
-            self.paint_annotations(editor, selection.rect, editing, &text_layouts);
+            self.paint_annotations(editor, selection.rect, editing, (&text_layouts, &geometry));
             if let Some(layout) = layout {
                 self.paint_toolbar(&layout, editor, pointer, focus, pressed, busy);
                 self.paint_parameters(&layout, editor, focus);
@@ -711,7 +715,10 @@ impl Canvas {
         editor: &Editor,
         clip: Option<PixelRect>,
         editing: Option<usize>,
-        layouts: &[Option<IDWriteTextLayout>],
+        prepared: (
+            &[Option<IDWriteTextLayout>],
+            &super::annotation_render::Geometry,
+        ),
     ) {
         let Some(clip) = clip else {
             return;
@@ -724,25 +731,44 @@ impl Canvas {
         unsafe {
             self.target
                 .PushAxisAlignedClip(&self.local(clip), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            let selected = editor
+                .selected
+                .filter(|i| !editor.active() && editing != Some(*i));
+            if let Some(i) = selected {
+                let object = &editor.objects()[i];
+                if let Shape::Pen(points) = &object.shape {
+                    self.brush.SetColor(&color(0, 120, 212, 0.45));
+                    prepared.1.stroke(
+                        &self.target,
+                        &self.brush,
+                        self.bounds(),
+                        i,
+                        points,
+                        object.style.width + 3. * self.scale,
+                    );
+                }
+            }
             super::annotation_render::draw(
                 &self.target,
                 &self.brush,
                 self.source.bounds(),
                 editor,
-                layouts,
+                prepared,
                 editing,
             );
-            if let Some(object) = editor.selected.and_then(|i| editor.objects().get(i)) {
+            if let Some(object) = selected.and_then(|i| editor.objects().get(i)) {
                 self.brush.SetColor(&color(239, 153, 44, 1.));
-                self.target
-                    .DrawRectangle(&self.local(object.bounds()), &self.brush, 1., None);
+                if matches!(object.shape, Shape::Text { .. }) {
+                    self.target
+                        .DrawRectangle(&self.local(object.bounds()), &self.brush, 1., None);
+                }
                 for p in object.handles() {
                     let p = point(p);
                     let r = D2D_RECT_F {
-                        left: p.X - 4.,
-                        top: p.Y - 4.,
-                        right: p.X + 4.,
-                        bottom: p.Y + 4.,
+                        left: p.X - 3. * self.scale,
+                        top: p.Y - 3. * self.scale,
+                        right: p.X + 3. * self.scale,
+                        bottom: p.Y + 3. * self.scale,
                     };
                     self.fill(r, color(255, 255, 255, 1.));
                     self.brush.SetColor(&color(239, 153, 44, 1.));

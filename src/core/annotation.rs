@@ -101,10 +101,17 @@ impl Object {
                     .any(|(a, b)| distance(p, h[*a], h[*b]) <= t)
             }
             Shape::Arrow(a, b) => {
+                let [left, right] = arrow_head(*a, *b, self.style.width);
+                let edges = [(*b, left), (left, right), (right, *b)];
+                let cross = |(a, b): (PixelPoint, PixelPoint)| {
+                    (f64::from(b.x) - f64::from(a.x)) * (f64::from(p.y) - f64::from(a.y))
+                        - (f64::from(b.y) - f64::from(a.y)) * (f64::from(p.x) - f64::from(a.x))
+                };
+                let signs = edges.map(cross);
                 distance(p, *a, *b) <= t
-                    || arrow_head(*a, *b, self.style.width)
-                        .iter()
-                        .any(|head| distance(p, *b, *head) <= t)
+                    || edges.iter().any(|(a, b)| distance(p, *a, *b) <= t)
+                    || (left != right
+                        && (signs.iter().all(|s| *s >= 0.) || signs.iter().all(|s| *s <= 0.)))
             }
             Shape::Pen(points) => {
                 points
@@ -518,7 +525,7 @@ impl Editor {
             Shape::Text { bounds, .. } => bounds.size().is_some(),
             Shape::Rectangle(r) => r.size().is_some(),
             Shape::Arrow(a, b) => a != b,
-            Shape::Pen(points) => points.len() > 1,
+            Shape::Pen(points) => !points.is_empty(),
         };
         if !valid {
             if let Some(before) = drag.before {
@@ -527,6 +534,9 @@ impl Editor {
                 self.objects.remove(drag.index);
                 self.selected = None;
             }
+            return;
+        }
+        if drag.before.as_ref() == Some(object) {
             return;
         }
         self.record(Change {
@@ -706,6 +716,30 @@ mod tests {
         e.finish(p(150, 90));
         assert_eq!(e.objects[0].shape, Shape::Arrow(p(0, 0), p(150, 90)));
     }
+    #[test]
+    fn arrow_keeps_start_in_four_directions_and_pen_keeps_release() {
+        let mut e = Editor::default();
+        let start = p(-40, 20);
+        for end in [p(50, -50), p(50, 50), p(-100, -50), p(-100, 50)] {
+            e.tool = Tool::Arrow;
+            assert!(e.begin(start, 5, 1.).unwrap());
+            e.update(p(0, 0));
+            e.finish(end);
+            assert_eq!(e.objects().last().unwrap().shape, Shape::Arrow(start, end));
+        }
+        e.tool = Tool::Pen;
+        e.begin(start, 5, 1.).unwrap();
+        e.update(start);
+        e.finish(p(1, 4));
+        assert_eq!(
+            e.objects().last().unwrap().shape,
+            Shape::Pen(vec![start, p(1, 4)])
+        );
+        e.begin(start, 5, 1.).unwrap();
+        e.finish(start);
+        assert_eq!(e.objects().last().unwrap().shape, Shape::Pen(vec![start]));
+    }
+
     #[test]
     fn arrow_wings_are_hittable_and_inside_bounds() {
         let object = Object {

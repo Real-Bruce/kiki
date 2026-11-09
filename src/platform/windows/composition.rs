@@ -99,6 +99,7 @@ pub fn render(source: &Image, selection: PixelRect, editor: &Editor) -> Result<I
         )?;
         let dw: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
         let layouts = annotation_render::layouts(&dw, editor)?;
+        let geometry = annotation_render::geometry(&factory, selection, editor)?;
         target.BeginDraw();
         target.Clear(Some(&D2D1_COLOR_F::default()));
         target.DrawBitmap(
@@ -108,7 +109,14 @@ pub fn render(source: &Image, selection: PixelRect, editor: &Editor) -> Result<I
             D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
             None,
         );
-        annotation_render::draw(&target, &brush, selection, editor, &layouts, None);
+        annotation_render::draw(
+            &target,
+            &brush,
+            selection,
+            editor,
+            (&layouts, &geometry),
+            None,
+        );
         target.EndDraw(None, None)?;
         drop(target);
         let lock = backing.Lock(
