@@ -3,6 +3,7 @@ use super::{
     hotkey,
     preferences::{self, SaveStatus},
     selection_render::system_dark,
+    settings_render::{self as appearance, Canvas},
     startup,
 };
 use crate::core::config::{Config, Hotkey, Theme};
@@ -18,6 +19,12 @@ use windows::{
 };
 pub(super) const RESTORE_HOTKEY: u32 = WM_APP + 62;
 const PAGES: [&str; 6] = ["通用", "快捷键", "截图", "贴图", "外观", "关于"];
+const SIDEBAR: i32 = 216;
+const BODY_X: i32 = 242;
+const BODY_END: i32 = 24;
+const HEADER: i32 = 82;
+const FOOTER: i32 = 46;
+const REPAIR_ROW: i32 = 38;
 const COLORS: [[u8; 3]; 8] = super::selection_render::ANNOTATION_COLORS;
 thread_local! {static WINDOW:Cell<Option<HWND>>=const{Cell::new(None)};}
 struct Control {
@@ -35,8 +42,9 @@ struct State {
     scroll: i32,
     dpi: u32,
     controls: Vec<Control>,
-    canvas: Option<super::settings_render::Canvas>,
+    canvas: Option<Canvas>,
     font: HFONT,
+    icon_font: HFONT,
     brush: HBRUSH,
     suppress: bool,
     error: Option<String>,
@@ -44,8 +52,10 @@ struct State {
 }
 impl Drop for State {
     fn drop(&mut self) {
+        // SAFETY: the state owns both fonts and the brush on this window thread.
         unsafe {
             let _ = DeleteObject(self.font.into());
+            let _ = DeleteObject(self.icon_font.into());
             let _ = DeleteObject(self.brush.into());
         }
     }
@@ -85,10 +95,13 @@ fn open_impl(visible: bool) -> Result<()> {
             ..Default::default()
         };
         let _ = GetMonitorInfoW(monitor, &mut info);
-        let dpi = GetDpiForSystem().max(96);
+        let mut dpi = GetDpiForSystem().max(96);
+        let mut dpi_y = dpi;
+        let _ = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi, &mut dpi_y);
+        let dpi = dpi.max(96);
         let s = dpi as f32 / 96.;
         let width = (1040. * s) as i32;
-        let height = (780. * s) as i32;
+        let height = (680. * s) as i32;
         let work = info.rcWork;
         let width = width.min(work.right - work.left);
         let height = height.min(work.bottom - work.top);
@@ -107,7 +120,7 @@ fn open_impl(visible: bool) -> Result<()> {
             None,
         )?;
         let dpi = GetDpiForWindow(hwnd).max(96);
-        let font = font(dpi);
+        let font = font(dpi, 15, w!("Segoe UI"));
         let state = Box::new(State {
             life: Rc::new(Cell::new(Some(hwnd))),
             page: 0,
@@ -116,7 +129,8 @@ fn open_impl(visible: bool) -> Result<()> {
             controls: Vec::new(),
             canvas: None,
             font,
-            brush: CreateSolidBrush(rgb(if system_dark() { 0x2b2b2b } else { 0xffffff })),
+            icon_font: font_for_icons(dpi),
+            brush: CreateSolidBrush(rgb(appearance::card_body(system_dark()))),
             suppress: true,
             error: None,
             startup: startup::state().map_err(|e| e.to_string()),
@@ -212,8 +226,8 @@ pub fn refresh() {
                 &dark as *const _ as *const _,
                 std::mem::size_of::<BOOL>() as u32,
             );
-            let caption = rgb(if dark.as_bool() { 0x202020 } else { 0xf3f3f3 });
-            let text = rgb(if dark.as_bool() { 0xf2f2f2 } else { 0x202020 });
+            let caption = rgb(if dark.as_bool() { 0x242e3d } else { 0xdfeafa });
+            let text = rgb(appearance::foreground(dark.as_bool()));
             let _ = DwmSetWindowAttribute(
                 hwnd,
                 DWMWA_CAPTION_COLOR,
@@ -221,7 +235,7 @@ pub fn refresh() {
                 4,
             );
             let _ = DwmSetWindowAttribute(hwnd, DWMWA_TEXT_COLOR, &text as *const _ as *const _, 4);
-            let brush = CreateSolidBrush(rgb(if dark.as_bool() { 0x2b2b2b } else { 0xffffff }));
+            let brush = CreateSolidBrush(rgb(appearance::card_body(dark.as_bool())));
             let old = std::mem::replace(&mut (*p).brush, brush);
             let _ = DeleteObject(old.into());
             (*p).suppress = false;
@@ -233,10 +247,14 @@ pub fn refresh() {
 unsafe fn pointer(hwnd: HWND) -> *mut State {
     unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut State }
 }
-fn font(dpi: u32) -> HFONT {
+fn font_for_icons(dpi: u32) -> HFONT {
+    font(dpi, 17, w!("Segoe Fluent Icons"))
+}
+fn font(dpi: u32, size: u32, face: PCWSTR) -> HFONT {
+    // SAFETY: the font name is NUL-terminated and the font is owned by the caller.
     unsafe {
         CreateFontW(
-            -((14 * dpi / 96) as i32),
+            -((size * dpi / 96) as i32),
             0,
             0,
             0,
@@ -249,7 +267,7 @@ fn font(dpi: u32) -> HFONT {
             CLIP_DEFAULT_PRECIS,
             DEFAULT_QUALITY,
             DEFAULT_PITCH.0 as u32,
-            w!("Segoe UI"),
+            face,
         )
     }
 }
@@ -302,15 +320,16 @@ fn caption(id: u16, cfg: &Config, start: &std::result::Result<startup::State, St
     }
 }
 fn create_controls(hwnd: HWND) -> Result<()> {
+    // SAFETY: native controls and synchronous messages are owned by this settings window thread.
     unsafe {
         let p = pointer(hwnd);
         let mut items = Vec::new();
         for i in 0..6 {
-            items.push((100 + i, 6, 20, 104 + i32::from(i) * 48, 164, 40));
+            items.push((100 + i, 6, 10, 76 + i32::from(i) * 42, SIDEBAR - 20, 35));
         }
         items.extend([
-            (200, 0, 464, 150, 224, 36),
-            (201, 0, 464, 194, 224, 36),
+            (200, 0, 0, 135, 52, 32),
+            (201, 0, 0, 177, 154, 30),
             (300, 1, 244, 160, 280, 36),
             (301, 1, 544, 160, 120, 36),
             (400, 2, 244, 138, 220, 36),
@@ -369,6 +388,7 @@ fn create_controls(hwnd: HWND) -> Result<()> {
     }
 }
 fn layout(hwnd: HWND) {
+    // SAFETY: layout uses the live UI-thread state and snapshots child handles before moving them.
     unsafe {
         let p = pointer(hwnd);
         if p.is_null() {
@@ -381,22 +401,28 @@ fn layout(hwnd: HWND) {
         let width = (rect.right as f32 / s) as i32;
         let page = (*p).page;
         let extent = match page {
-            0 => 676,
+            0 => {
+                575 + if matches!((*p).startup, Ok(startup::State::Moved)) {
+                    REPAIR_ROW
+                } else {
+                    0
+                }
+            }
             1 => 350,
             2 => 570,
             3 => 420,
             4 => 330,
             _ => 400,
         };
-        let viewport = (height - 132).max(1);
-        let maximum = (extent - 90 - viewport).max(0);
+        let viewport = (height - HEADER - FOOTER).max(1);
+        let maximum = (extent - HEADER - viewport).max(0);
         (*p).scroll = (*p).scroll.clamp(0, maximum);
         let scroll = (*p).scroll;
         let info = SCROLLINFO {
             cbSize: std::mem::size_of::<SCROLLINFO>() as u32,
             fMask: SIF_RANGE | SIF_PAGE | SIF_POS,
             nMin: 0,
-            nMax: extent - 91,
+            nMax: extent - HEADER - 1,
             nPage: viewport as u32,
             nPos: scroll,
             ..Default::default()
@@ -413,15 +439,17 @@ fn layout(hwnd: HWND) {
                 (width - 136, height - 38)
             } else if pag == 6 {
                 (x, y)
+            } else if matches!(id, 200 | 201) {
+                (width - BODY_END - 20 - w, y - scroll)
             } else {
-                (x, y - scroll)
+                (x + 18, y - scroll)
             };
             let visible = if id == 201 && !matches!((*p).startup, Ok(startup::State::Moved)) {
                 false
             } else if id == 800 {
                 failed
             } else {
-                pag == 6 || pag == page && y >= 94 && y + h <= height - 52
+                pag == 6 || pag == page && y >= HEADER && y + h <= height - FOOTER
             };
             let _ = InvalidateRect(Some(child), None, true);
             let _ = SetWindowPos(
@@ -444,76 +472,120 @@ fn layout(hwnd: HWND) {
     }
 }
 fn paint(hwnd: HWND, p: *mut State) -> Result<()> {
+    // SAFETY: the live HWND and settings state belong to this UI-thread paint dispatch.
     unsafe {
         let mut rect = RECT::default();
         GetClientRect(hwnd, &mut rect)?;
         let state = &mut *p;
         if state.canvas.is_none() {
-            state.canvas = Some(super::settings_render::Canvas::new(
+            state.canvas = Some(Canvas::new(
                 hwnd,
                 rect.right as u32,
                 rect.bottom as u32,
                 state.dpi,
             )?);
         }
-        // Canvas was created successfully in the immediately preceding branch.
-        let c = state.canvas.as_ref().unwrap();
+        let Some(c) = state.canvas.as_ref() else {
+            return Ok(());
+        };
         let dark = system_dark();
-        let fg = if dark { 0xf2f2f2 } else { 0x202020 };
-        let sub = if dark { 0xb6b6b6 } else { 0x606060 };
-        let bg = if dark { 0x202020 } else { 0xf3f3f3 };
+        let fg = appearance::foreground(dark);
+        let sub = appearance::muted(dark);
+        let bg = appearance::background(dark);
         let s = state.dpi as f32 / 96.;
         let width = rect.right as f32 / s;
         let height = rect.bottom as f32 / s;
         let offset = state.scroll as f32;
         let cfg = preferences::current();
         c.begin(dark);
-        c.fill(0., 0., 204., height, if dark { 0x252525 } else { 0xececec });
-        c.text("kiki", 24., 24., 160., 26., fg);
-        c.text("设置", 24., 62., 160., 13., sub);
-        let x = 224.;
-        let w = width - x - 24.;
+        c.fill(0., 0., SIDEBAR as f32, height, appearance::sidebar(dark));
+        c.mark(22., 23., 22., if dark { 0x78b8ff } else { 0x006cec });
+        c.heading("kiki", 54., 20., 130., 23., fg);
+        let x = BODY_X as f32;
+        let w = (width - x - BODY_END as f32).max(1.);
         let card = |y, h| c.card(x, y - offset, w, h, dark);
+        let heading = |label: &str, y| c.heading(label, x + 16., y - offset, w - 32., 17., fg);
         let text =
-            |label: &str, y, size, rgb| c.text(label, x + 20., y - offset, w - 40., size, rgb);
+            |label: &str, y, size, rgb| c.text(label, x + 22., y - offset, w - 44., size, rgb);
+        let line = |y: f32| {
+            c.fill(
+                x + 22.,
+                y - offset,
+                (w - 44.).max(0.),
+                1.,
+                appearance::divider(dark),
+            )
+        };
+        let row = |label: &str, value: &str, y: f32, icon: Option<&str>| {
+            let inset = if let Some(icon) = icon {
+                c.glyph(icon, x + 22., y - offset, fg);
+                56.
+            } else {
+                22.
+            };
+            c.text(label, x + inset, y - offset, w * 0.36, 15., fg);
+            c.value(value, x + w * 0.42, y - offset, w * 0.58 - 22., sub);
+        };
         match state.page {
             0 => {
-                card(104., 174.);
-                text("启动与后台", 116., 16., fg);
-                text("开机启动", 154., 14., fg);
-                text("启动后驻留系统托盘", 238., 14., sub);
-                card(294., 172.);
-                text("截图完成后", 306., 16., fg);
-                text("复制 / 保存 / 贴图成功后退出本次截图", 346., 14., fg);
-                text("取消保存或操作失败时保留当前截图", 380., 14., sub);
-                text("关闭设置窗口后继续在托盘运行", 414., 14., sub);
-                card(482., 174.);
-                text("文件保存", 494., 16., fg);
-                text(
-                    "图片格式                   PNG（保留透明度）",
-                    536.,
-                    14.,
-                    fg,
-                );
-                text(
-                    "保存位置                   每次询问，记住上次目录",
-                    574.,
-                    14.,
-                    fg,
-                );
-                text(
-                    "文件名称                   kiki_年月日_时分秒.png",
-                    612.,
-                    14.,
-                    fg,
-                );
-                if matches!(state.startup, Ok(startup::State::Moved)) {
-                    text("启动项指向旧路径，请更新或关闭", 194., 12., 0xd08030);
+                let repair = if matches!(state.startup, Ok(startup::State::Moved)) {
+                    REPAIR_ROW as f32
+                } else {
+                    0.
+                };
+                card(89., 158. + repair);
+                heading("启动与后台", 96.);
+                text("开机启动", 134., 15., fg);
+                text("登录 Windows 后自动运行", 155., 13., sub);
+                if repair > 0. {
+                    text(
+                        "启动项指向旧路径，可更新或关闭",
+                        182.,
+                        13.,
+                        if dark { 0xffbd7a } else { 0x8d4f1e },
+                    );
                 }
+                line(176. + repair);
+                row("启动方式", "驻留托盘", 184. + repair, None);
+                line(210. + repair);
+                row("关闭设置窗口后", "继续后台运行", 218. + repair, None);
+
+                card(261. + repair, 163.);
+                heading("截图完成后", 268. + repair);
+                row(
+                    "复制",
+                    "复制到剪贴板后退出截图",
+                    303. + repair,
+                    Some("\u{e8c8}"),
+                );
+                line(330. + repair);
+                row(
+                    "保存",
+                    "保存成功后退出截图",
+                    335. + repair,
+                    Some("\u{e74e}"),
+                );
+                line(362. + repair);
+                row(
+                    "贴图",
+                    "生成置顶贴图后退出截图",
+                    367. + repair,
+                    Some("\u{e718}"),
+                );
+                line(394. + repair);
+                text("复制和贴图不会自动保存文件", 398. + repair, 13., sub);
+
+                card(437. + repair, 138.);
+                heading("文件保存", 444. + repair);
+                row("图片格式", "PNG", 480. + repair, None);
+                line(505. + repair);
+                row("保存位置", "每次询问，记住上次目录", 512. + repair, None);
+                line(538. + repair);
+                row("默认文件名", "kiki_年月日_时分秒.png", 545. + repair, None);
             }
             1 => {
                 card(104., 216.);
-                text("开始截图", 116., 16., fg);
+                heading("开始截图", 111.);
                 text(
                     &format!(
                         "当前组合：{}{}",
@@ -543,27 +615,17 @@ fn paint(hwnd: HWND, p: *mut State) -> Result<()> {
             }
             2 => {
                 card(104., 94.);
-                text("显示操作提示", 116., 16., fg);
+                heading("操作提示", 111.);
                 card(214., 110.);
-                text("新截图的默认颜色", 226., 16., fg);
+                heading("新截图的默认颜色", 221.);
                 card(340., 110.);
-                text(
-                    &format!("默认线宽 · 当前 {} px", cfg.stroke_width),
-                    352.,
-                    16.,
-                    fg,
-                );
+                heading(&format!("默认线宽 · 当前 {} px", cfg.stroke_width), 347.);
                 card(466., 96.);
-                text(
-                    &format!("默认字号 · 当前 {} px", cfg.text_size),
-                    472.,
-                    16.,
-                    fg,
-                );
+                heading(&format!("默认字号 · 当前 {} px", cfg.text_size), 473.);
             }
             3 => {
                 card(104., 294.);
-                text("独立贴图窗口", 116., 16., fg);
+                heading("独立贴图窗口", 111.);
                 text("拖动移动；滚轮缩放；Ctrl+0 恢复原始比例", 160., 14., fg);
                 text(
                     "Ctrl+C 复制 / Ctrl+S 保存 / Esc 关闭当前贴图",
@@ -576,41 +638,48 @@ fn paint(hwnd: HWND, p: *mut State) -> Result<()> {
             }
             4 => {
                 card(104., 196.);
-                text("主题", 116., 16., fg);
+                heading("主题", 111.);
                 text("立即应用到设置、截图工具、文字输入和贴图。", 224., 14., sub);
                 text("跟随系统会在 Windows 主题变化时更新。", 258., 13., sub);
             }
             _ => {
                 card(104., 244.);
-                text(
-                    &format!("kiki {}", env!("CARGO_PKG_VERSION")),
-                    116.,
-                    22.,
-                    fg,
-                );
+                heading(&format!("kiki {}", env!("CARGO_PKG_VERSION")), 111.);
                 text("Windows 11 · x64 · 原生截图与贴图", 158., 14., sub);
                 text(&format!("截图热键：{}", cfg.hotkey.label()), 196., 14., fg);
             }
         }
         // Header and footer cover scrolling content; controls are clipped by visibility rules.
-        c.fill(204., 0., width - 204., 94., bg);
-        c.text(PAGES[state.page], 244., 24., w - 24., 26., fg);
+        c.fill(
+            SIDEBAR as f32,
+            0.,
+            width - SIDEBAR as f32,
+            HEADER as f32,
+            bg,
+        );
+        c.heading(PAGES[state.page], x, 15., w, 28., fg);
         c.text(
             [
-                "设置立即生效，自动保存到当前用户。",
+                "管理启动方式与截图后的行为",
                 "随时可从系统托盘开始截图或恢复默认。",
                 "仅影响新截图，不更改已有标注。",
                 "贴图保留原图，缩放只影响显示。",
                 "选择适合当前桌面的颜色。",
                 "轻量截图，随手贴图。",
             ][state.page],
-            244.,
-            66.,
-            w - 24.,
-            13.,
+            x,
+            52.,
+            w,
+            15.,
             sub,
         );
-        c.fill(204., height - 48., width - 204., 48., bg);
+        c.fill(
+            SIDEBAR as f32,
+            height - FOOTER as f32,
+            width - SIDEBAR as f32,
+            FOOTER as f32,
+            bg,
+        );
         let status = state
             .error
             .clone()
@@ -620,10 +689,19 @@ fn paint(hwnd: HWND, p: *mut State) -> Result<()> {
                 SaveStatus::Saved => "设置已自动保存".into(),
                 SaveStatus::Failed(e) => format!("保存失败：{e}"),
             });
+        let saved = state.error.is_none() && matches!(preferences::status(), SaveStatus::Saved);
+        if saved {
+            c.glyph(
+                "\u{e73e}",
+                x + 4.,
+                height - 34.,
+                if dark { 0x81dfa5 } else { 0x14863a },
+            );
+        }
         c.text(
             &status,
-            244.,
-            height - 34.,
+            x + if saved { 28. } else { 4. },
+            height - 33.,
             (w - 138.).max(100.),
             12.,
             if state.error.is_some() || matches!(preferences::status(), SaveStatus::Failed(_)) {
@@ -724,99 +802,179 @@ fn action(hwnd: HWND, id: u16) {
     }
 }
 fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
+    // SAFETY: WM_DRAWITEM lends the device context and item bounds on this window thread.
     unsafe {
+        let state = &*p;
         let dark = system_dark();
         let id = item.CtlID as u16;
-        let selected = if (100..=105).contains(&id) {
-            usize::from(id - 100) == (*p).page
-        } else {
-            let cfg = preferences::current();
-            match id {
-                410..=417 => cfg.color == COLORS[(id - 410) as usize],
-                420..=423 => cfg.stroke_width == [1, 3, 5, 8][(id - 420) as usize],
-                430..=433 => cfg.text_size == [16, 24, 32, 48][(id - 430) as usize],
-                400 => cfg.show_hints,
-                600..=602 => {
-                    preferences::current().theme
-                        == [Theme::System, Theme::Light, Theme::Dark][(id - 600) as usize]
-                }
-                _ => false,
+        let dpi = state.dpi;
+        let dip = |value: i32| ((value as f32 * dpi as f32) / 96.).round() as i32;
+        if id == 200 {
+            draw_startup_toggle(
+                item,
+                dip,
+                dark,
+                matches!(
+                    state.startup,
+                    Ok(startup::State::Enabled | startup::State::Moved)
+                ),
+            );
+            return;
+        }
+        let cfg = preferences::current();
+        let nav = (100..=105).contains(&id);
+        let selected = match id {
+            100..=105 => usize::from(id - 100) == state.page,
+            410..=417 => cfg.color == COLORS[(id - 410) as usize],
+            420..=423 => cfg.stroke_width == [1, 3, 5, 8][(id - 420) as usize],
+            430..=433 => cfg.text_size == [16, 24, 32, 48][(id - 430) as usize],
+            400 => cfg.show_hints,
+            600..=602 => {
+                cfg.theme == [Theme::System, Theme::Light, Theme::Dark][(id - 600) as usize]
             }
+            _ => false,
         };
         let pressed = item.itemState.0 & ODS_SELECTED.0 != 0;
-        let nav = (100..=105).contains(&id);
-        let bg = if pressed || selected {
-            if dark { 0x173e60 } else { 0xdcecff }
-        } else if nav {
-            if dark { 0x252525 } else { 0xececec }
-        } else if dark {
-            0x333333
+        let backdrop = if nav {
+            appearance::sidebar(dark)
         } else {
-            0xf5f5f5
+            appearance::card_body(dark)
         };
-        let brush = CreateSolidBrush(rgb(bg));
-        let background = CreateSolidBrush(rgb(if nav {
-            if dark { 0x252525 } else { 0xececec }
+        let fill = if pressed {
+            if dark { 0x34597f } else { 0xb9d3f6 }
+        } else if selected {
+            if dark { 0x294c70 } else { 0xcbdef8 }
+        } else if nav {
+            backdrop
         } else if dark {
-            0x2b2b2b
+            0x344155
         } else {
-            0xffffff
-        }));
-        FillRect(item.hDC, &item.rcItem, background);
-        let _ = DeleteObject(background.into());
-        let rect = item.rcItem;
-        let radius = (8 * (*p).dpi / 96) as i32;
+            0xf4f7fc
+        };
+        let dc = item.hDC;
+        let mut rect = item.rcItem;
+        let brush = CreateSolidBrush(rgb(backdrop));
+        FillRect(dc, &rect, brush);
+        let _ = DeleteObject(brush.into());
         let region = CreateRoundRectRgn(
             rect.left,
             rect.top,
             rect.right + 1,
             rect.bottom + 1,
-            radius,
-            radius,
+            dip(14),
+            dip(14),
         );
-        let _ = FillRgn(item.hDC, region, brush);
+        let brush = CreateSolidBrush(rgb(fill));
+        let _ = FillRgn(dc, region, brush);
+        let _ = DeleteObject(brush.into());
         if !nav {
             let edge = CreateSolidBrush(rgb(if selected {
                 0x0078d4
-            } else if dark {
-                0x555555
             } else {
-                0xcccccc
+                appearance::divider(dark)
             }));
-            let _ = FrameRgn(item.hDC, region, edge, 1, 1);
+            let _ = FrameRgn(dc, region, edge, 1, 1);
             let _ = DeleteObject(edge.into());
         }
         let _ = DeleteObject(region.into());
-        let _ = DeleteObject(brush.into());
-        SetBkMode(item.hDC, TRANSPARENT);
-        SetTextColor(item.hDC, rgb(if dark { 0xf2f2f2 } else { 0x202020 }));
-        let old = SelectObject(item.hDC, (*p).font.into());
-        let length = GetWindowTextLengthW(item.hwndItem);
-        let mut text = vec![0u16; length.max(0) as usize + 1];
-        GetWindowTextW(item.hwndItem, &mut text);
-        let mut rect = item.rcItem;
-        rect.left += 8;
-        DrawTextW(
-            item.hDC,
-            &mut text[..length as usize],
-            &mut rect,
-            DT_CENTER | DT_VCENTER | DT_SINGLELINE,
-        );
-        SelectObject(item.hDC, old);
-        if selected && (100..=105).contains(&id) {
-            let brush = CreateSolidBrush(rgb(0x0078d4));
-            let mut mark = item.rcItem;
-            mark.right = mark.left + 3;
-            FillRect(item.hDC, &mark, brush);
-            let _ = DeleteObject(brush.into());
+        SetBkMode(dc, TRANSPARENT);
+        let fg = if nav && selected {
+            if dark { 0xd5eaff } else { 0x12365c }
+        } else {
+            appearance::foreground(dark)
+        };
+        SetTextColor(dc, rgb(fg));
+        if nav {
+            const ICONS: [u16; 6] = [0xe713, 0xe765, 0xe739, 0xe718, 0xe790, 0xe946];
+            let mut glyph_rect = rect;
+            glyph_rect.left += dip(16);
+            let old = SelectObject(dc, state.icon_font.into());
+            DrawTextW(
+                dc,
+                &mut [ICONS[(id - 100) as usize]],
+                &mut glyph_rect,
+                DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+            );
+            SelectObject(dc, old);
+            rect.left += dip(49);
+            if selected {
+                let brush = CreateSolidBrush(rgb(if dark { 0x75b7ff } else { 0x006ded }));
+                let mut mark = item.rcItem;
+                mark.left += dip(1);
+                mark.right = mark.left + dip(3);
+                mark.top += dip(4);
+                mark.bottom -= dip(4);
+                FillRect(dc, &mark, brush);
+                let _ = DeleteObject(brush.into());
+            }
         }
+        let old = SelectObject(dc, state.font.into());
+        let length = GetWindowTextLengthW(item.hwndItem).max(0) as usize;
+        let mut text = vec![0u16; length + 1];
+        let read = GetWindowTextW(item.hwndItem, &mut text).max(0) as usize;
+        DrawTextW(
+            dc,
+            &mut text[..read],
+            &mut rect,
+            (if nav { DT_LEFT } else { DT_CENTER })
+                | DT_VCENTER
+                | DT_SINGLELINE
+                | DT_NOPREFIX
+                | DT_END_ELLIPSIS,
+        );
+        SelectObject(dc, old);
         if item.itemState.0 & ODS_FOCUS.0 != 0 {
-            let mut r = item.rcItem;
-            r.left += 3;
-            r.top += 3;
-            r.right -= 3;
-            r.bottom -= 3;
-            let _ = DrawFocusRect(item.hDC, &r);
+            let r = item.rcItem;
+            let _ = DrawFocusRect(
+                dc,
+                &RECT {
+                    left: r.left + 3,
+                    top: r.top + 3,
+                    right: r.right - 3,
+                    bottom: r.bottom - 3,
+                },
+            );
+        }
+    }
+}
+fn draw_startup_toggle(item: &DRAWITEMSTRUCT, dip: impl Fn(i32) -> i32, dark: bool, on: bool) {
+    // SAFETY: the DC is borrowed from WM_DRAWITEM. Restore the original pen and brush before releasing temporary objects.
+    unsafe {
+        let r = item.rcItem;
+        let dc = item.hDC;
+        let body = CreateSolidBrush(rgb(appearance::card_body(dark)));
+        FillRect(dc, &r, body);
+        let _ = DeleteObject(body.into());
+        let (width, height) = (dip(42), dip(22));
+        let left = r.left + (r.right - r.left - width) / 2;
+        let top = r.top + (r.bottom - r.top - height) / 2;
+        let pressed = item.itemState.0 & ODS_SELECTED.0 != 0;
+        let track = CreateSolidBrush(rgb(match (on, dark, pressed) {
+            (true, _, true) => 0x0054b8,
+            (true, _, false) => 0x0875e6,
+            (false, true, _) => 0x667487,
+            (false, false, true) => 0xa9b4c3,
+            (false, false, false) => 0xc7ced8,
+        }));
+        let old_pen = SelectObject(dc, GetStockObject(NULL_PEN));
+        let old_brush = SelectObject(dc, track.into());
+        let _ = RoundRect(dc, left, top, left + width, top + height, height, height);
+        let knob = CreateSolidBrush(rgb(0xffffff));
+        SelectObject(dc, knob.into());
+        let padding = dip(2);
+        let size = height - 2 * padding;
+        let x = if on {
+            left + width - padding - size
+        } else {
+            left + padding
+        };
+        let _ = Ellipse(dc, x, top + padding, x + size, top + padding + size);
+        SelectObject(dc, old_brush);
+        SelectObject(dc, old_pen);
+        let _ = DeleteObject(knob.into());
+        let _ = DeleteObject(track.into());
+        if item.itemState.0 & ODS_FOCUS.0 != 0 {
+            let _ = DrawFocusRect(dc, &r);
         }
     }
 }
@@ -851,8 +1009,8 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             }
             WM_CTLCOLORSTATIC | WM_CTLCOLOREDIT => {
                 let dc = HDC(wp.0 as *mut _);
-                SetTextColor(dc, rgb(if system_dark() { 0xf2f2f2 } else { 0x202020 }));
-                SetBkColor(dc, rgb(if system_dark() { 0x2b2b2b } else { 0xffffff }));
+                SetTextColor(dc, rgb(appearance::foreground(system_dark())));
+                SetBkColor(dc, rgb(appearance::card_body(system_dark())));
                 LRESULT((*p).brush.0 as isize)
             }
             WM_PAINT => {
@@ -912,7 +1070,9 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             }
             WM_DPICHANGED => {
                 (*p).dpi = (wp.0 & 65535) as u32;
-                let next = font((*p).dpi);
+                let next = font((*p).dpi, 15, w!("Segoe UI"));
+                let old_icons = std::mem::replace(&mut (*p).icon_font, font_for_icons((*p).dpi));
+                let _ = DeleteObject(old_icons.into());
                 let old = std::mem::replace(&mut (*p).font, next);
                 let controls: Vec<_> = (*p).controls.iter().map(|c| c.hwnd).collect();
                 for child in controls {

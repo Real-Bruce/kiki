@@ -297,3 +297,9 @@
 - 125% 单屏在运行中的 Release 诊断版截图上核对浅色与深色主栏。全特性 43 项测试、严格 Clippy、rustfmt 和两种 Release 构建通过。
 - 已重新生成便携 ZIP 与校验文件并验证 16 个解压文件。截图和数据详见 [界面优化验证](validation/UI_POLISH.md)。下轮继续验证高 DPI、跨屏及文字编辑实机遗留。
 - 关联提交主题：fix(selection): match capture toolbar to approved artwork。
+
+## P6 设置页按 03-settings.png 对照修订
+
+- 设置窗口调整为蓝灰分栏、带图标的导航、粗体页标题与细边框卡片。通用页对齐三组设置，开机启动保留原生操作并绘制为开关。
+- 核对 125% 下的浅色通用页与贴图页。全特性 43 项测试、严格 Clippy、rustfmt 和两种 Release 构建通过。深色实际界面和其他缩放比例继续待验。
+- 已重新打包并验证全部 16 个解压文件。产物和截图见 [P6 验证](validation/P6.md)。关联提交主题：fix(settings): align settings window with approved design。
