@@ -2,7 +2,7 @@
 
 轻量的 Windows 11 截图、标注与置顶贴图工具。使用 Rust 和 Windows 原生图形能力实现，解压即可运行。
 
-![kiki 截图与标注](docs/screenshots/capture-dark.png)
+![kiki 截图与标注](docs/screenshots/capture-light.png)
 
 ## 功能
 
@@ -27,11 +27,11 @@
 
 ## 界面
 
-以下为当前源码实际运行截图，采用暖灰与松绿主题。
+以下为用户提供的软件实际运行截图，采用暖灰与松绿主题。
 
-![浅色截图设置](docs/screenshots/settings-light.jpg)
+![浅色截图设置](docs/screenshots/settings-light.png)
 
-![深色截图设置](docs/screenshots/settings-dark.jpg)
+![深色截图设置](docs/screenshots/settings-dark.png)
 
 截图环境与采集方式见[截图说明](docs/screenshots/README.md)。
 
