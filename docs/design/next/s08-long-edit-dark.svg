@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="900" viewBox="0 0 1280 900" role="img" aria-label="S08  长图完成后继续标注"><title>S08  长图完成后继续标注</title><defs><pattern id="checker" width="20" height="20" patternUnits="userSpaceOnUse"><rect width="20" height="20" fill="#D4D8D1"/><path d="M0 0H10V10H0ZM10 10H20V20H10Z" fill="#F2F2ED"/></pattern></defs><g font-family="Segoe UI, Microsoft YaHei, sans-serif"><rect x="0" y="0" width="1280" height="900" rx="0" fill="#1A1C19" stroke="none" stroke-width="1"/>
+<text x="40" y="55" font-size="30" fill="#F3F1EA" font-weight="600" text-anchor="start">S08  长图完成后继续标注</text>
+<text x="40" y="91" font-size="17" fill="#B6BAB0" font-weight="400" text-anchor="start">F11 · 实时捕获已停止；主画布调参数，右侧缩略图定位</text>
+<rect x="1060" y="28" width="180" height="32" rx="16" fill="#354B40" stroke="none" stroke-width="1"/>
+<text x="1150" y="50" font-size="15" fill="#A0CEBB" font-weight="500" text-anchor="middle">深色 · 设计草图</text>
+<rect x="45" y="140" width="1188" height="640" rx="12" fill="#262824" stroke="#484C43" stroke-width="1"/>
+<text x="70" y="177" font-size="23" fill="#F3F1EA" font-weight="600" text-anchor="start">长图编辑</text>
+<text x="915" y="177" font-size="17" fill="#B6BAB0" font-weight="400" text-anchor="start">755 × 4200 px</text>
+<line x1="65" y1="196" x2="1213" y2="196" stroke="#484C43" stroke-width="1"  stroke-linecap="round"/>
+<rect x="80" y="218" width="855" height="426" rx="5" fill="#2E302B" stroke="none" stroke-width="1"/>
+<rect x="225" y="218" width="565" height="426" rx="0" fill="#22251F" stroke="#484C43" stroke-width="1"/>
+<rect x="260" y="256" width="490" height="9" rx="4" fill="#42473D" stroke="none" stroke-width="1"/>
+<rect x="260" y="296" width="450" height="9" rx="4" fill="#42473D" stroke="none" stroke-width="1"/>
+<rect x="260" y="336" width="410" height="9" rx="4" fill="#42473D" stroke="none" stroke-width="1"/>
+<rect x="260" y="376" width="490" height="9" rx="4" fill="#42473D" stroke="none" stroke-width="1"/>
+<rect x="260" y="416" width="450" height="9" rx="4" fill="#42473D" stroke="none" stroke-width="1"/>
+<rect x="260" y="456" width="410" height="9" rx="4" fill="#42473D" stroke="none" stroke-width="1"/>
+<rect x="260" y="496" width="490" height="9" rx="4" fill="#42473D" stroke="none" stroke-width="1"/>
+<circle cx="280" cy="410" r="20" fill="none" stroke="#FF3B40" stroke-width="2.5"/>
+<text x="280" y="416.8" font-size="22.400000000000002" fill="#FF3B40" font-weight="500" text-anchor="middle">1</text>
+<rect x="312" y="382" width="370" height="55" rx="0" fill="none" stroke="#FF3B40" stroke-width="3"/>
+<text x="315" y="484" font-size="24" fill="#FF3B40" font-weight="400" text-anchor="start">继续添加标注</text>
+<rect x="970" y="218" width="225" height="426" rx="5" fill="#22251F" stroke="#484C43" stroke-width="1"/>
+<rect x="990" y="244" width="180" height="9" rx="4" fill="#42473D" stroke="none" stroke-width="1"/>
+<rect x="990" y="284" width="140" height="9" rx="4" fill="#42473D" stroke="none" stroke-width="1"/>
+<rect x="990" y="324" width="100" height="9" rx="4" fill="#42473D" stroke="none" stroke-width="1"/>
+<rect x="990" y="364" width="180" height="9" rx="4" fill="#42473D" stroke="none" stroke-width="1"/>
+<rect x="990" y="404" width="140" height="9" rx="4" fill="#42473D" stroke="none" stroke-width="1"/>
+<rect x="990" y="444" width="100" height="9" rx="4" fill="#42473D" stroke="none" stroke-width="1"/>
+<rect x="990" y="484" width="180" height="9" rx="4" fill="#42473D" stroke="none" stroke-width="1"/>
+<rect x="990" y="524" width="140" height="9" rx="4" fill="#42473D" stroke="none" stroke-width="1"/>
+<rect x="990" y="564" width="100" height="9" rx="4" fill="#42473D" stroke="none" stroke-width="1"/>
+<rect x="981" y="318" width="202" height="95" rx="3" fill="none" stroke="#A0CEBB" stroke-width="2"/>
+<text x="980" y="680" font-size="16" fill="#B6BAB0" font-weight="400" text-anchor="start">拖动视口框定位</text>
+<rect x="170" y="672" width="588" height="58" rx="12" fill="#262824" stroke="#484C43" stroke-width="1"/>
+<g transform="translate(189 687)">
+<path d="M3 3H25V25H3Z" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g transform="translate(237 687)">
+<path d="M3 25L25 3M10 3H25V18" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g transform="translate(285 687)">
+<path d="M3 25C8 11 9 2 15 3C23 4 5 23 17 21C21 19 24 16 25 18" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g transform="translate(333 687)">
+<path d="M3 4H25M14 4V25M9 25H19" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g transform="translate(381 687)">
+<rect x="3" y="3" width="6" height="6" rx="0" fill="none" stroke="#F3F1EA" stroke-width="1"/>
+<rect x="3" y="11" width="6" height="6" rx="0" fill="#F3F1EA" stroke="#F3F1EA" stroke-width="1"/>
+<rect x="3" y="19" width="6" height="6" rx="0" fill="none" stroke="#F3F1EA" stroke-width="1"/>
+<rect x="11" y="3" width="6" height="6" rx="0" fill="#F3F1EA" stroke="#F3F1EA" stroke-width="1"/>
+<rect x="11" y="11" width="6" height="6" rx="0" fill="none" stroke="#F3F1EA" stroke-width="1"/>
+<rect x="11" y="19" width="6" height="6" rx="0" fill="#F3F1EA" stroke="#F3F1EA" stroke-width="1"/>
+<rect x="19" y="3" width="6" height="6" rx="0" fill="none" stroke="#F3F1EA" stroke-width="1"/>
+<rect x="19" y="11" width="6" height="6" rx="0" fill="#F3F1EA" stroke="#F3F1EA" stroke-width="1"/>
+<rect x="19" y="19" width="6" height="6" rx="0" fill="none" stroke="#F3F1EA" stroke-width="1"/>
+</g>
+<rect x="422" y="679" width="42" height="44" rx="7" fill="#354B40" stroke="none" stroke-width="1"/>
+<g transform="translate(429 687)">
+<circle cx="14" cy="14" r="12" fill="none" stroke="#A0CEBB" stroke-width="2"/>
+<text x="14" y="20" font-size="18" fill="#A0CEBB" font-weight="500" text-anchor="middle">1</text>
+</g>
+<line x1="474" y1="687" x2="474" y2="715" stroke="#484C43" stroke-width="1"  stroke-linecap="round"/>
+<g transform="translate(489 687)">
+<path d="M19 3L26 10L21 15L14 8ZM16 11L5 22V26H9L20 15M3 28L5 26" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<line x1="534" y1="687" x2="534" y2="715" stroke="#484C43" stroke-width="1"  stroke-linecap="round"/>
+<g transform="translate(549 687)">
+<path d="M8 3L25 20M8 3L4 7L9 12L6 19L11 22L16 16L21 21L25 20M9 21L3 27" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g transform="translate(597 687)">
+<path d="M4 3H22L26 7V26H3V3H4M8 3V12H21V3M8 26V17H21V26" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g transform="translate(645 687)">
+<path d="M10 3H26V21H10ZM5 8H3V27H20V24" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<line x1="690" y1="687" x2="690" y2="715" stroke="#484C43" stroke-width="1"  stroke-linecap="round"/>
+<g transform="translate(705 687)">
+<path d="M5 5L23 23M23 5L5 23" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<text x="65" y="809" font-size="18" fill="#B6BAB0" font-weight="400" text-anchor="start">右侧可点击 / 拖动 / 滚轮浏览；输出完整长图。新一轮长截图需重新开始截图。</text>
+<line x1="40" y1="825" x2="1240" y2="825" stroke="#484C43" stroke-width="1"  stroke-linecap="round"/>
+<text x="40" y="859" font-size="15" fill="#B6BAB0" font-weight="400" text-anchor="start">kiki · 2026-11-10 · 工具条为 F12 终态，过渡版本保留旧入口</text>
+<text x="1240" y="859" font-size="15" fill="#B6BAB0" font-weight="400" text-anchor="end">非应用实机截图 · 演示内容不进入产品</text></g></svg>

@@ -12,6 +12,9 @@
 ## 规格与状态
 
 - [当前进度与待验项](PROGRESS.md)
+- [已确认功能开发说明（F01–F12）](FEATURE_PLAN.md)
+- [功能验收计划与放行标准](ACCEPTANCE_PLAN.md)
+- [新功能浅深色设计草图](design/next/README.md)
 - [产品规格](PRODUCT_SPEC.md)
 - [视觉规范](DESIGN_SPEC.md)
 - [实施与验收清单](IMPLEMENTATION_PLAN.md)
@@ -20,6 +23,8 @@
 
 ## 验证记录
 
+- [逐功能验收报告模板](validation/FEATURE_ACCEPTANCE_TEMPLATE.md)
+- F01–F12 初始报告均为待执行，入口见 [验收计划](ACCEPTANCE_PLAN.md) 和 [进度表](PROGRESS.md)；下列为历史实测记录。
 - [本轮构建与界面检查](validation/DOCS_REFRESH.md)
 - [交付验收与限制](validation/P8.md)
 - [性能与资源生命周期](validation/P7.md)

@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="900" viewBox="0 0 1280 900" role="img" aria-label="S03  截图设置与输出"><title>S03  截图设置与输出</title><defs><pattern id="checker" width="20" height="20" patternUnits="userSpaceOnUse"><rect width="20" height="20" fill="#D4D8D1"/><path d="M0 0H10V10H0ZM10 10H20V20H10Z" fill="#F2F2ED"/></pattern></defs><g font-family="Segoe UI, Microsoft YaHei, sans-serif"><rect x="0" y="0" width="1280" height="900" rx="0" fill="#1A1C19" stroke="none" stroke-width="1"/>
+<text x="40" y="55" font-size="30" fill="#F3F1EA" font-weight="600" text-anchor="start">S03  截图设置与输出</text>
+<text x="40" y="91" font-size="17" fill="#B6BAB0" font-weight="400" text-anchor="start">F02–F07 · 保持六页导航与无卡片分组；新增工具默认关闭</text>
+<rect x="1060" y="28" width="180" height="32" rx="16" fill="#354B40" stroke="none" stroke-width="1"/>
+<text x="1150" y="50" font-size="15" fill="#A0CEBB" font-weight="500" text-anchor="middle">深色 · 设计草图</text>
+<rect x="40" y="135" width="770" height="660" rx="12" fill="#262824" stroke="#484C43" stroke-width="1"/>
+<rect x="41" y="136" width="170" height="658" rx="11" fill="#2E302B" stroke="none" stroke-width="1"/>
+<text x="68" y="184" font-size="27" fill="#A0CEBB" font-weight="600" text-anchor="start">kiki</text>
+<text x="77" y="235" font-size="18" fill="#F3F1EA" font-weight="400" text-anchor="start">通用</text>
+<text x="77" y="275" font-size="18" fill="#F3F1EA" font-weight="400" text-anchor="start">快捷键</text>
+<rect x="54" y="289" width="141" height="41" rx="7" fill="#354B40" stroke="none" stroke-width="1"/>
+<text x="77" y="315" font-size="18" fill="#A0CEBB" font-weight="400" text-anchor="start">截图</text>
+<text x="77" y="355" font-size="18" fill="#F3F1EA" font-weight="400" text-anchor="start">贴图</text>
+<text x="77" y="395" font-size="18" fill="#F3F1EA" font-weight="400" text-anchor="start">外观</text>
+<text x="77" y="435" font-size="18" fill="#F3F1EA" font-weight="400" text-anchor="start">关于</text>
+<text x="239" y="181" font-size="27" fill="#F3F1EA" font-weight="600" text-anchor="start">截图</text>
+<text x="239" y="208" font-size="14" fill="#B6BAB0" font-weight="400" text-anchor="start">中段视图 · 上方保留操作提示与颜色，尺寸为实际 px</text>
+<rect x="795" y="225" width="4" height="465" rx="2" fill="#484C43" stroke="none" stroke-width="1"/>
+<rect x="795" y="343" width="4" height="172" rx="2" fill="#A0CEBB" stroke="none" stroke-width="1"/>
+<text x="240" y="250" font-size="17" fill="#F3F1EA" font-weight="400" text-anchor="start">矩形线宽</text>
+<line x1="350" y1="244" x2="560" y2="244" stroke="#484C43" stroke-width="4"  stroke-linecap="round"/>
+<line x1="350" y1="244" x2="356.6666666666667" y2="244" stroke="#A0CEBB" stroke-width="4"  stroke-linecap="round"/>
+<circle cx="356.6666666666667" cy="244" r="7" fill="#A0CEBB" stroke="none" stroke-width="1"/>
+<rect x="580" y="227" width="66" height="34" rx="6" fill="#262824" stroke="#484C43" stroke-width="1"/>
+<text x="613" y="250" font-size="17" fill="#F3F1EA" font-weight="400" text-anchor="middle">3</text>
+<text x="658" y="250" font-size="15" fill="#B6BAB0" font-weight="400" text-anchor="start">px</text>
+<text x="240" y="291" font-size="17" fill="#F3F1EA" font-weight="400" text-anchor="start">箭头线宽</text>
+<line x1="350" y1="285" x2="560" y2="285" stroke="#484C43" stroke-width="4"  stroke-linecap="round"/>
+<line x1="350" y1="285" x2="356.6666666666667" y2="285" stroke="#A0CEBB" stroke-width="4"  stroke-linecap="round"/>
+<circle cx="356.6666666666667" cy="285" r="7" fill="#A0CEBB" stroke="none" stroke-width="1"/>
+<rect x="580" y="268" width="66" height="34" rx="6" fill="#262824" stroke="#484C43" stroke-width="1"/>
+<text x="613" y="291" font-size="17" fill="#F3F1EA" font-weight="400" text-anchor="middle">3</text>
+<text x="658" y="291" font-size="15" fill="#B6BAB0" font-weight="400" text-anchor="start">px</text>
+<text x="240" y="332" font-size="17" fill="#F3F1EA" font-weight="400" text-anchor="start">画笔线宽</text>
+<line x1="350" y1="326" x2="560" y2="326" stroke="#484C43" stroke-width="4"  stroke-linecap="round"/>
+<line x1="350" y1="326" x2="356.6666666666667" y2="326" stroke="#A0CEBB" stroke-width="4"  stroke-linecap="round"/>
+<circle cx="356.6666666666667" cy="326" r="7" fill="#A0CEBB" stroke="none" stroke-width="1"/>
+<rect x="580" y="309" width="66" height="34" rx="6" fill="#262824" stroke="#484C43" stroke-width="1"/>
+<text x="613" y="332" font-size="17" fill="#F3F1EA" font-weight="400" text-anchor="middle">3</text>
+<text x="658" y="332" font-size="15" fill="#B6BAB0" font-weight="400" text-anchor="start">px</text>
+<text x="240" y="373" font-size="17" fill="#F3F1EA" font-weight="400" text-anchor="start">文字字号</text>
+<line x1="350" y1="367" x2="560" y2="367" stroke="#484C43" stroke-width="4"  stroke-linecap="round"/>
+<line x1="350" y1="367" x2="363.5483870967742" y2="367" stroke="#A0CEBB" stroke-width="4"  stroke-linecap="round"/>
+<circle cx="363.5483870967742" cy="367" r="7" fill="#A0CEBB" stroke="none" stroke-width="1"/>
+<rect x="580" y="350" width="66" height="34" rx="6" fill="#262824" stroke="#484C43" stroke-width="1"/>
+<text x="613" y="373" font-size="17" fill="#F3F1EA" font-weight="400" text-anchor="middle">24</text>
+<text x="658" y="373" font-size="15" fill="#B6BAB0" font-weight="400" text-anchor="start">px</text>
+<line x1="239" y1="394" x2="778" y2="394" stroke="#484C43" stroke-width="1"  stroke-linecap="round"/>
+<text x="240" y="433" font-size="17" fill="#F3F1EA" font-weight="400" text-anchor="start">圆角半径</text>
+<line x1="350" y1="427" x2="560" y2="427" stroke="#484C43" stroke-width="4"  stroke-linecap="round"/>
+<line x1="350" y1="427" x2="350" y2="427" stroke="#A0CEBB" stroke-width="4"  stroke-linecap="round"/>
+<circle cx="350" cy="427" r="7" fill="#A0CEBB" stroke="none" stroke-width="1"/>
+<rect x="580" y="410" width="66" height="34" rx="6" fill="#262824" stroke="#484C43" stroke-width="1"/>
+<text x="613" y="433" font-size="17" fill="#F3F1EA" font-weight="400" text-anchor="middle">0</text>
+<text x="658" y="433" font-size="15" fill="#B6BAB0" font-weight="400" text-anchor="start">px</text>
+<text x="240" y="479" font-size="17" fill="#F3F1EA" font-weight="400" text-anchor="start">输出格式</text>
+<rect x="350" y="454" width="118" height="38" rx="7" fill="#262824" stroke="#484C43" stroke-width="1"/>
+<text x="409" y="479" font-size="16" fill="#F3F1EA" font-weight="500" text-anchor="middle">PNG   ⌄</text>
+<text x="486" y="479" font-size="15" fill="#B6BAB0" font-weight="400" text-anchor="start">可选择 JPEG</text>
+<line x1="239" y1="503" x2="778" y2="503" stroke="#484C43" stroke-width="1"  stroke-linecap="round"/>
+<text x="240" y="533" font-size="20" fill="#F3F1EA" font-weight="600" text-anchor="start">工具显示</text>
+<text x="240" y="570" font-size="16" fill="#F3F1EA" font-weight="400" text-anchor="start">矩形</text>
+<rect x="432" y="553" width="38" height="21" rx="11" fill="#A0CEBB" stroke="none" stroke-width="1"/>
+<circle cx="459" cy="563.5" r="7.5" fill="#262824" stroke="none" stroke-width="1"/>
+<text x="510" y="570" font-size="16" fill="#F3F1EA" font-weight="400" text-anchor="start">箭头</text>
+<rect x="702" y="553" width="38" height="21" rx="11" fill="#A0CEBB" stroke="none" stroke-width="1"/>
+<circle cx="729" cy="563.5" r="7.5" fill="#262824" stroke="none" stroke-width="1"/>
+<text x="240" y="606" font-size="16" fill="#F3F1EA" font-weight="400" text-anchor="start">画笔</text>
+<rect x="432" y="589" width="38" height="21" rx="11" fill="#A0CEBB" stroke="none" stroke-width="1"/>
+<circle cx="459" cy="599.5" r="7.5" fill="#262824" stroke="none" stroke-width="1"/>
+<text x="510" y="606" font-size="16" fill="#F3F1EA" font-weight="400" text-anchor="start">文字</text>
+<rect x="702" y="589" width="38" height="21" rx="11" fill="#A0CEBB" stroke="none" stroke-width="1"/>
+<circle cx="729" cy="599.5" r="7.5" fill="#262824" stroke="none" stroke-width="1"/>
+<text x="240" y="642" font-size="16" fill="#F3F1EA" font-weight="400" text-anchor="start">长截图</text>
+<rect x="432" y="625" width="38" height="21" rx="11" fill="#B6BAB0" stroke="none" stroke-width="1"/>
+<circle cx="443" cy="635.5" r="7.5" fill="#262824" stroke="none" stroke-width="1"/>
+<text x="510" y="642" font-size="16" fill="#F3F1EA" font-weight="400" text-anchor="start">马赛克</text>
+<rect x="702" y="625" width="38" height="21" rx="11" fill="#B6BAB0" stroke="none" stroke-width="1"/>
+<circle cx="713" cy="635.5" r="7.5" fill="#262824" stroke="none" stroke-width="1"/>
+<text x="240" y="678" font-size="16" fill="#F3F1EA" font-weight="400" text-anchor="start">编号</text>
+<rect x="432" y="661" width="38" height="21" rx="11" fill="#B6BAB0" stroke="none" stroke-width="1"/>
+<circle cx="443" cy="671.5" r="7.5" fill="#262824" stroke="none" stroke-width="1"/>
+<text x="510" y="678" font-size="16" fill="#F3F1EA" font-weight="400" text-anchor="start">取色</text>
+<rect x="702" y="661" width="38" height="21" rx="11" fill="#B6BAB0" stroke="none" stroke-width="1"/>
+<circle cx="713" cy="671.5" r="7.5" fill="#262824" stroke="none" stroke-width="1"/>
+<rect x="239" y="711" width="184" height="38" rx="7" fill="#262824" stroke="#484C43" stroke-width="1"/>
+<text x="331" y="736" font-size="16" fill="#F3F1EA" font-weight="500" text-anchor="middle">恢复截图默认设置</text>
+<text x="239" y="774" font-size="15" fill="#A0CEBB" font-weight="400" text-anchor="start">✓ 设置已保存</text>
+<text x="845" y="174" font-size="20" fill="#F3F1EA" font-weight="600" text-anchor="start">圆角效果对照（示例 30 px）</text>
+<rect x="845" y="198" width="170" height="105" rx="0" fill="url(#checker)" stroke="#484C43" stroke-width="1"/>
+<rect x="845" y="198" width="170" height="105" rx="30" fill="#A0CEBB" stroke="none" stroke-width="1"/>
+<text x="930" y="260" font-size="22" fill="#262824" font-weight="600" text-anchor="middle">PNG</text>
+<text x="845" y="328" font-size="16" fill="#B6BAB0" font-weight="400" text-anchor="start">四角透明</text>
+<rect x="1040" y="198" width="170" height="105" rx="0" fill="#FFFFFF" stroke="#484C43" stroke-width="1"/>
+<rect x="1040" y="198" width="170" height="105" rx="30" fill="#A0CEBB" stroke="none" stroke-width="1"/>
+<text x="1125" y="260" font-size="22" fill="#262824" font-weight="600" text-anchor="middle">JPEG</text>
+<text x="1040" y="328" font-size="16" fill="#B6BAB0" font-weight="400" text-anchor="start">四角白底</text>
+<text x="845" y="370" font-size="17" fill="#B6BAB0" font-weight="400" text-anchor="start">半径 0–256 px，默认 0</text>
+<text x="845" y="399" font-size="17" fill="#B6BAB0" font-weight="400" text-anchor="start">JPEG 品质 90%；默认输出 PNG</text>
+<rect x="840" y="450" width="390" height="284" rx="12" fill="#262824" stroke="#484C43" stroke-width="1"/>
+<text x="864" y="491" font-size="22" fill="#F3F1EA" font-weight="600" text-anchor="start">恢复截图默认设置</text>
+<text x="864" y="532" font-size="16" fill="#B6BAB0" font-weight="400" text-anchor="start">恢复标注参数、圆角、输出格式、</text>
+<text x="864" y="560" font-size="16" fill="#B6BAB0" font-weight="400" text-anchor="start">操作提示及工具显示。</text>
+<text x="864" y="588" font-size="16" fill="#B6BAB0" font-weight="400" text-anchor="start">热键、主题、自启和保存目录</text>
+<text x="864" y="616" font-size="16" fill="#B6BAB0" font-weight="400" text-anchor="start">保持不变。</text>
+<rect x="995" y="676" width="84" height="38" rx="7" fill="#262824" stroke="#484C43" stroke-width="1"/>
+<text x="1037" y="701" font-size="16" fill="#F3F1EA" font-weight="500" text-anchor="middle">取消</text>
+<rect x="1091" y="676" width="113" height="38" rx="7" fill="#354B40" stroke="#A0CEBB" stroke-width="1"/>
+<text x="1147.5" y="701" font-size="16" fill="#A0CEBB" font-weight="500" text-anchor="middle">恢复默认</text>
+<text x="845" y="774" font-size="16" fill="#B6BAB0" font-weight="400" text-anchor="start">启用新工具后，展开其默认参数。</text>
+<line x1="40" y1="825" x2="1240" y2="825" stroke="#484C43" stroke-width="1"  stroke-linecap="round"/>
+<text x="40" y="859" font-size="15" fill="#B6BAB0" font-weight="400" text-anchor="start">kiki · 2026-11-10 · 工具条为 F12 终态，过渡版本保留旧入口</text>
+<text x="1240" y="859" font-size="15" fill="#B6BAB0" font-weight="400" text-anchor="end">非应用实机截图 · 演示内容不进入产品</text></g></svg>

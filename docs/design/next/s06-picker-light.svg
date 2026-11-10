@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="900" viewBox="0 0 1280 900" role="img" aria-label="S06  屏幕取色"><title>S06  屏幕取色</title><defs><pattern id="checker" width="20" height="20" patternUnits="userSpaceOnUse"><rect width="20" height="20" fill="#D4D8D1"/><path d="M0 0H10V10H0ZM10 10H20V20H10Z" fill="#F2F2ED"/></pattern></defs><g font-family="Segoe UI, Microsoft YaHei, sans-serif"><rect x="0" y="0" width="1280" height="900" rx="0" fill="#EEEBE5" stroke="none" stroke-width="1"/>
+<text x="40" y="55" font-size="30" fill="#252722" font-weight="600" text-anchor="start">S06  屏幕取色</text>
+<text x="40" y="91" font-size="17" fill="#696D65" font-weight="400" text-anchor="start">F10 · 单击复制并留在截图；每按一次 Shift 持续切换格式</text>
+<rect x="1060" y="28" width="180" height="32" rx="16" fill="#E2EBE5" stroke="none" stroke-width="1"/>
+<text x="1150" y="50" font-size="15" fill="#365F56" font-weight="500" text-anchor="middle">浅色 · 设计草图</text>
+<rect x="55" y="185" width="790" height="420" rx="0" fill="#FFFFFF" stroke="#365F56" stroke-width="1.5"/>
+<rect x="51" y="181" width="8" height="8" rx="0" fill="#365F56" stroke="#FAF9F6" stroke-width="1"/>
+<rect x="446" y="181" width="8" height="8" rx="0" fill="#365F56" stroke="#FAF9F6" stroke-width="1"/>
+<rect x="841" y="181" width="8" height="8" rx="0" fill="#365F56" stroke="#FAF9F6" stroke-width="1"/>
+<rect x="51" y="391" width="8" height="8" rx="0" fill="#365F56" stroke="#FAF9F6" stroke-width="1"/>
+<rect x="841" y="391" width="8" height="8" rx="0" fill="#365F56" stroke="#FAF9F6" stroke-width="1"/>
+<rect x="51" y="601" width="8" height="8" rx="0" fill="#365F56" stroke="#FAF9F6" stroke-width="1"/>
+<rect x="446" y="601" width="8" height="8" rx="0" fill="#365F56" stroke="#FAF9F6" stroke-width="1"/>
+<rect x="841" y="601" width="8" height="8" rx="0" fill="#365F56" stroke="#FAF9F6" stroke-width="1"/>
+<rect x="55" y="153" width="145" height="26" rx="5" fill="#365F56" stroke="none" stroke-width="1"/>
+<text x="67" y="172" font-size="15" fill="#FAF9F6" font-weight="400" text-anchor="start">790 × 420 px</text>
+<rect x="115" y="250" width="220" height="220" rx="15" fill="#365F56" stroke="none" stroke-width="1"/>
+<rect x="355" y="250" width="190" height="220" rx="15" fill="#A0CEBB" stroke="none" stroke-width="1"/>
+<rect x="565" y="250" width="220" height="220" rx="15" fill="#E4D9C4" stroke="none" stroke-width="1"/>
+<line x1="200" y1="330" x2="230" y2="330" stroke="#FFFFFF" stroke-width="1.5"  stroke-linecap="round"/>
+<line x1="215" y1="315" x2="215" y2="345" stroke="#FFFFFF" stroke-width="1.5"  stroke-linecap="round"/>
+<rect x="237" y="342" width="235" height="85" rx="9" fill="#FAF9F6" stroke="#D7D5CC" stroke-width="1"/>
+<rect x="253" y="359" width="25" height="25" rx="4" fill="#365F56" stroke="#D7D5CC" stroke-width="1"/>
+<text x="292" y="380" font-size="22" fill="#252722" font-weight="400" text-anchor="start">#365F56</text>
+<text x="253" y="409" font-size="14" fill="#696D65" font-weight="400" text-anchor="start">单击复制 · Shift 切换 RGB</text>
+<text x="100" y="540" font-size="19" fill="#696D65" font-weight="400" text-anchor="start">采样冻结底图，不包含标注、遮罩与工具控件。</text>
+<rect x="110" y="634" width="480" height="58" rx="12" fill="#FAF9F6" stroke="#D7D5CC" stroke-width="1"/>
+<g transform="translate(129 649)">
+<path d="M3 3H25V25H3Z" fill="none" stroke="#252722" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g transform="translate(177 649)">
+<path d="M3 25L25 3M10 3H25V18" fill="none" stroke="#252722" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g transform="translate(225 649)">
+<path d="M3 25C8 11 9 2 15 3C23 4 5 23 17 21C21 19 24 16 25 18" fill="none" stroke="#252722" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g transform="translate(273 649)">
+<path d="M3 4H25M14 4V25M9 25H19" fill="none" stroke="#252722" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<rect x="314" y="641" width="42" height="44" rx="7" fill="#E2EBE5" stroke="none" stroke-width="1"/>
+<g transform="translate(321 649)">
+<path d="M19 3L26 10L21 15L14 8ZM16 11L5 22V26H9L20 15M3 28L5 26" fill="none" stroke="#365F56" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<line x1="366" y1="649" x2="366" y2="677" stroke="#D7D5CC" stroke-width="1"  stroke-linecap="round"/>
+<g transform="translate(381 649)">
+<path d="M8 3L25 20M8 3L4 7L9 12L6 19L11 22L16 16L21 21L25 20M9 21L3 27" fill="none" stroke="#252722" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g transform="translate(429 649)">
+<path d="M4 3H22L26 7V26H3V3H4M8 3V12H21V3M8 26V17H21V26" fill="none" stroke="#252722" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g transform="translate(477 649)">
+<path d="M10 3H26V21H10ZM5 8H3V27H20V24" fill="none" stroke="#252722" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<line x1="522" y1="649" x2="522" y2="677" stroke="#D7D5CC" stroke-width="1"  stroke-linecap="round"/>
+<g transform="translate(537 649)">
+<path d="M5 5L23 23M23 5L5 23" fill="none" stroke="#252722" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<text x="900" y="220" font-size="21" fill="#365F56" font-weight="600" text-anchor="start">进入时默认 HEX</text>
+<text x="900" y="255" font-size="17" fill="#696D65" font-weight="400" text-anchor="start">按一次 Shift → RGB</text>
+<text x="900" y="284" font-size="17" fill="#696D65" font-weight="400" text-anchor="start">松开 Shift 后保持 RGB</text>
+<text x="900" y="313" font-size="17" fill="#696D65" font-weight="400" text-anchor="start">再按一次 → HEX</text>
+<text x="900" y="342" font-size="17" fill="#696D65" font-weight="400" text-anchor="start">长按不重复触发切换</text>
+<rect x="900" y="435" width="320" height="92" rx="9" fill="#FAF9F6" stroke="#D7D5CC" stroke-width="1"/>
+<rect x="919" y="455" width="25" height="25" rx="4" fill="#365F56" stroke="#D7D5CC" stroke-width="1"/>
+<text x="957" y="477" font-size="20" fill="#252722" font-weight="400" text-anchor="start">RGB(54, 95, 86)</text>
+<text x="920" y="509" font-size="15" fill="#696D65" font-weight="400" text-anchor="start">单击复制 · Shift 切换 HEX</text>
+<text x="900" y="600" font-size="21" fill="#365F56" font-weight="600" text-anchor="start">连续取色</text>
+<text x="900" y="635" font-size="17" fill="#696D65" font-weight="400" text-anchor="start">复制成功后保持会话</text>
+<text x="900" y="664" font-size="17" fill="#696D65" font-weight="400" text-anchor="start">透明间隙显示“无像素”</text>
+<text x="900" y="693" font-size="17" fill="#696D65" font-weight="400" text-anchor="start">复制失败保留状态并提示</text>
+<line x1="40" y1="825" x2="1240" y2="825" stroke="#D7D5CC" stroke-width="1"  stroke-linecap="round"/>
+<text x="40" y="859" font-size="15" fill="#696D65" font-weight="400" text-anchor="start">kiki · 2026-11-10 · 工具条为 F12 终态，过渡版本保留旧入口</text>
+<text x="1240" y="859" font-size="15" fill="#696D65" font-weight="400" text-anchor="end">非应用实机截图 · 演示内容不进入产品</text></g></svg>

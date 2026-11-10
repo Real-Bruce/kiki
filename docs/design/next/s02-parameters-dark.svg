@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="900" viewBox="0 0 1280 900" role="img" aria-label="S02  连续参数与滚轮调节"><title>S02  连续参数与滚轮调节</title><defs><pattern id="checker" width="20" height="20" patternUnits="userSpaceOnUse"><rect width="20" height="20" fill="#D4D8D1"/><path d="M0 0H10V10H0ZM10 10H20V20H10Z" fill="#F2F2ED"/></pattern></defs><g font-family="Segoe UI, Microsoft YaHei, sans-serif"><rect x="0" y="0" width="1280" height="900" rx="0" fill="#1A1C19" stroke="none" stroke-width="1"/>
+<text x="40" y="55" font-size="30" fill="#F3F1EA" font-weight="600" text-anchor="start">S02  连续参数与滚轮调节</text>
+<text x="40" y="91" font-size="17" fill="#B6BAB0" font-weight="400" text-anchor="start">F02 / F03 · 实际成图像素；各工具独立记忆；与设置双向同步</text>
+<rect x="1060" y="28" width="180" height="32" rx="16" fill="#354B40" stroke="none" stroke-width="1"/>
+<text x="1150" y="50" font-size="15" fill="#A0CEBB" font-weight="500" text-anchor="middle">深色 · 设计草图</text>
+<rect x="45" y="140" width="1190" height="610" rx="14" fill="#262824" stroke="#484C43" stroke-width="1"/>
+<text x="80" y="185" font-size="24" fill="#F3F1EA" font-weight="600" text-anchor="start">矩形 / 箭头 / 画笔</text>
+<rect x="80" y="209" width="432" height="58" rx="12" fill="#262824" stroke="#484C43" stroke-width="1"/>
+<g transform="translate(99 224)">
+<path d="M3 3H25V25H3Z" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<rect x="140" y="216" width="42" height="44" rx="7" fill="#354B40" stroke="none" stroke-width="1"/>
+<g transform="translate(147 224)">
+<path d="M3 25L25 3M10 3H25V18" fill="none" stroke="#A0CEBB" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g transform="translate(195 224)">
+<path d="M3 25C8 11 9 2 15 3C23 4 5 23 17 21C21 19 24 16 25 18" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g transform="translate(243 224)">
+<path d="M3 4H25M14 4V25M9 25H19" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<line x1="288" y1="224" x2="288" y2="252" stroke="#484C43" stroke-width="1"  stroke-linecap="round"/>
+<g transform="translate(303 224)">
+<path d="M8 3L25 20M8 3L4 7L9 12L6 19L11 22L16 16L21 21L25 20M9 21L3 27" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g transform="translate(351 224)">
+<path d="M4 3H22L26 7V26H3V3H4M8 3V12H21V3M8 26V17H21V26" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g transform="translate(399 224)">
+<path d="M10 3H26V21H10ZM5 8H3V27H20V24" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<line x1="444" y1="224" x2="444" y2="252" stroke="#484C43" stroke-width="1"  stroke-linecap="round"/>
+<g transform="translate(459 224)">
+<path d="M5 5L23 23M23 5L5 23" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<rect x="80" y="281" width="630" height="56" rx="10" fill="#262824" stroke="#484C43" stroke-width="1"/>
+<circle cx="104" cy="309" r="9" fill="#FF3B40" stroke="#484C43" stroke-width="1"/>
+<circle cx="136" cy="309" r="9" fill="#FF9800" stroke="#484C43" stroke-width="1"/>
+<circle cx="168" cy="309" r="9" fill="#FFC900" stroke="#484C43" stroke-width="1"/>
+<circle cx="200" cy="309" r="9" fill="#28BC4C" stroke="#484C43" stroke-width="1"/>
+<circle cx="232" cy="309" r="9" fill="#1684F8" stroke="#484C43" stroke-width="1"/>
+<circle cx="264" cy="309" r="9" fill="#A254DE" stroke="#484C43" stroke-width="1"/>
+<circle cx="296" cy="309" r="9" fill="#FFFFFF" stroke="#484C43" stroke-width="1"/>
+<circle cx="328" cy="309" r="9" fill="#171815" stroke="#484C43" stroke-width="1"/>
+<circle cx="104" cy="309" r="13" fill="none" stroke="#A0CEBB" stroke-width="1.5"/>
+<line x1="349" y1="294" x2="349" y2="324" stroke="#484C43" stroke-width="1"  stroke-linecap="round"/>
+<text x="366" y="315" font-size="17" fill="#F3F1EA" font-weight="400" text-anchor="start">线宽</text>
+<line x1="476" y1="309" x2="586" y2="309" stroke="#484C43" stroke-width="4"  stroke-linecap="round"/>
+<line x1="476" y1="309" x2="479.4920634920635" y2="309" stroke="#A0CEBB" stroke-width="4"  stroke-linecap="round"/>
+<circle cx="479.4920634920635" cy="309" r="7" fill="#A0CEBB" stroke="none" stroke-width="1"/>
+<rect x="606" y="292" width="66" height="34" rx="6" fill="#262824" stroke="#484C43" stroke-width="1"/>
+<text x="639" y="315" font-size="17" fill="#F3F1EA" font-weight="400" text-anchor="middle">3</text>
+<text x="684" y="315" font-size="15" fill="#B6BAB0" font-weight="400" text-anchor="start">px</text>
+<line x1="95" y1="381" x2="610" y2="381" stroke="#FF3B40" stroke-width="3"  stroke-linecap="round"/>
+<text x="735" y="242" font-size="25" fill="#A0CEBB" font-weight="600" text-anchor="start">1–64 px</text>
+<text x="735" y="282" font-size="18" fill="#B6BAB0" font-weight="400" text-anchor="start">默认 3 px；滚轮每格 ±1 px</text>
+<text x="735" y="316" font-size="18" fill="#B6BAB0" font-weight="400" text-anchor="start">绘制中立即改变当前对象整体线宽</text>
+<text x="735" y="350" font-size="18" fill="#B6BAB0" font-weight="400" text-anchor="start">选中对象时同时更新对象与默认值</text>
+<line x1="80" y1="420" x2="1195" y2="420" stroke="#484C43" stroke-width="1"  stroke-linecap="round"/>
+<text x="80" y="467" font-size="24" fill="#F3F1EA" font-weight="600" text-anchor="start">文字</text>
+<rect x="80" y="492" width="432" height="58" rx="12" fill="#262824" stroke="#484C43" stroke-width="1"/>
+<g transform="translate(99 507)">
+<path d="M3 3H25V25H3Z" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g transform="translate(147 507)">
+<path d="M3 25L25 3M10 3H25V18" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g transform="translate(195 507)">
+<path d="M3 25C8 11 9 2 15 3C23 4 5 23 17 21C21 19 24 16 25 18" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<rect x="236" y="499" width="42" height="44" rx="7" fill="#354B40" stroke="none" stroke-width="1"/>
+<g transform="translate(243 507)">
+<path d="M3 4H25M14 4V25M9 25H19" fill="none" stroke="#A0CEBB" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<line x1="288" y1="507" x2="288" y2="535" stroke="#484C43" stroke-width="1"  stroke-linecap="round"/>
+<g transform="translate(303 507)">
+<path d="M8 3L25 20M8 3L4 7L9 12L6 19L11 22L16 16L21 21L25 20M9 21L3 27" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g transform="translate(351 507)">
+<path d="M4 3H22L26 7V26H3V3H4M8 3V12H21V3M8 26V17H21V26" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g transform="translate(399 507)">
+<path d="M10 3H26V21H10ZM5 8H3V27H20V24" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<line x1="444" y1="507" x2="444" y2="535" stroke="#484C43" stroke-width="1"  stroke-linecap="round"/>
+<g transform="translate(459 507)">
+<path d="M5 5L23 23M23 5L5 23" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<rect x="80" y="563" width="630" height="56" rx="10" fill="#262824" stroke="#484C43" stroke-width="1"/>
+<circle cx="104" cy="591" r="9" fill="#FF3B40" stroke="#484C43" stroke-width="1"/>
+<circle cx="136" cy="591" r="9" fill="#FF9800" stroke="#484C43" stroke-width="1"/>
+<circle cx="168" cy="591" r="9" fill="#FFC900" stroke="#484C43" stroke-width="1"/>
+<circle cx="200" cy="591" r="9" fill="#28BC4C" stroke="#484C43" stroke-width="1"/>
+<circle cx="232" cy="591" r="9" fill="#1684F8" stroke="#484C43" stroke-width="1"/>
+<circle cx="264" cy="591" r="9" fill="#A254DE" stroke="#484C43" stroke-width="1"/>
+<circle cx="296" cy="591" r="9" fill="#FFFFFF" stroke="#484C43" stroke-width="1"/>
+<circle cx="328" cy="591" r="9" fill="#171815" stroke="#484C43" stroke-width="1"/>
+<circle cx="104" cy="591" r="13" fill="none" stroke="#A0CEBB" stroke-width="1.5"/>
+<line x1="349" y1="576" x2="349" y2="606" stroke="#484C43" stroke-width="1"  stroke-linecap="round"/>
+<text x="366" y="597" font-size="17" fill="#F3F1EA" font-weight="400" text-anchor="start">字号</text>
+<line x1="476" y1="591" x2="586" y2="591" stroke="#484C43" stroke-width="4"  stroke-linecap="round"/>
+<line x1="476" y1="591" x2="483.0967741935484" y2="591" stroke="#A0CEBB" stroke-width="4"  stroke-linecap="round"/>
+<circle cx="483.0967741935484" cy="591" r="7" fill="#A0CEBB" stroke="none" stroke-width="1"/>
+<rect x="606" y="574" width="66" height="34" rx="6" fill="#262824" stroke="#484C43" stroke-width="1"/>
+<text x="639" y="597" font-size="17" fill="#F3F1EA" font-weight="400" text-anchor="middle">24</text>
+<text x="684" y="597" font-size="15" fill="#B6BAB0" font-weight="400" text-anchor="start">px</text>
+<text x="100" y="665" font-size="24" fill="#FF3B40" font-weight="400" text-anchor="start">透明文字编辑框保留中文输入</text>
+<text x="735" y="525" font-size="25" fill="#A0CEBB" font-weight="600" text-anchor="start">8–256 px</text>
+<text x="735" y="565" font-size="18" fill="#B6BAB0" font-weight="400" text-anchor="start">默认 24 px；滚轮每格 ±1 px</text>
+<text x="735" y="599" font-size="18" fill="#B6BAB0" font-weight="400" text-anchor="start">输入数值、滑杆、滚轮使用同一参数</text>
+<text x="735" y="633" font-size="18" fill="#B6BAB0" font-weight="400" text-anchor="start">重新截图与重启后保持</text>
+<text x="65" y="790" font-size="18" fill="#B6BAB0" font-weight="400" text-anchor="start">仅选中旧对象不覆盖默认值；连续滚轮合并撤销记录与后台配置写入。</text>
+<line x1="40" y1="825" x2="1240" y2="825" stroke="#484C43" stroke-width="1"  stroke-linecap="round"/>
+<text x="40" y="859" font-size="15" fill="#B6BAB0" font-weight="400" text-anchor="start">kiki · 2026-11-10 · 工具条为 F12 终态，过渡版本保留旧入口</text>
+<text x="1240" y="859" font-size="15" fill="#B6BAB0" font-weight="400" text-anchor="end">非应用实机截图 · 演示内容不进入产品</text></g></svg>

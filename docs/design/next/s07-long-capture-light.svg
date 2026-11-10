@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="900" viewBox="0 0 1280 900" role="img" aria-label="S07  长截图 · 手动滚动采集"><title>S07  长截图 · 手动滚动采集</title><defs><pattern id="checker" width="20" height="20" patternUnits="userSpaceOnUse"><rect width="20" height="20" fill="#D4D8D1"/><path d="M0 0H10V10H0ZM10 10H20V20H10Z" fill="#F2F2ED"/></pattern></defs><g font-family="Segoe UI, Microsoft YaHei, sans-serif"><rect x="0" y="0" width="1280" height="900" rx="0" fill="#EEEBE5" stroke="none" stroke-width="1"/>
+<text x="40" y="55" font-size="30" fill="#252722" font-weight="600" text-anchor="start">S07  长截图 · 手动滚动采集</text>
+<text x="40" y="91" font-size="17" fill="#696D65" font-weight="400" text-anchor="start">F11 · 进入时丢弃旧标注、草稿及撤销/重做；单屏纵向滚动</text>
+<rect x="1060" y="28" width="180" height="32" rx="16" fill="#E2EBE5" stroke="none" stroke-width="1"/>
+<text x="1150" y="50" font-size="15" fill="#365F56" font-weight="500" text-anchor="middle">浅色 · 设计草图</text>
+<rect x="50" y="140" width="860" height="590" rx="12" fill="#F0EDE7" stroke="#D7D5CC" stroke-width="1"/>
+<text x="75" y="178" font-size="16" fill="#696D65" font-weight="400" text-anchor="start">实时页面 · 示意内容</text>
+<rect x="90" y="220" width="755" height="420" rx="0" fill="#FFFFFF" stroke="#365F56" stroke-width="1.5"/>
+<rect x="90" y="188" width="145" height="26" rx="5" fill="#365F56" stroke="none" stroke-width="1"/>
+<text x="102" y="207" font-size="15" fill="#FAF9F6" font-weight="400" text-anchor="start">755 × 420 px</text>
+<text x="590" y="207" font-size="15" fill="#696D65" font-weight="400" text-anchor="start">采集中 · 选区锁定</text>
+<text x="124" y="270" font-size="26" fill="#252722" font-weight="600" text-anchor="start">可滚动正文</text>
+<rect x="124" y="310" width="650" height="9" rx="4" fill="#E6E6DF" stroke="none" stroke-width="1"/>
+<rect x="124" y="350" width="610" height="9" rx="4" fill="#E6E6DF" stroke="none" stroke-width="1"/>
+<rect x="124" y="390" width="570" height="9" rx="4" fill="#E6E6DF" stroke="none" stroke-width="1"/>
+<rect x="124" y="430" width="650" height="9" rx="4" fill="#E6E6DF" stroke="none" stroke-width="1"/>
+<rect x="124" y="470" width="610" height="9" rx="4" fill="#E6E6DF" stroke="none" stroke-width="1"/>
+<rect x="124" y="510" width="570" height="9" rx="4" fill="#E6E6DF" stroke="none" stroke-width="1"/>
+<rect x="124" y="550" width="650" height="9" rx="4" fill="#E6E6DF" stroke="none" stroke-width="1"/>
+<rect x="935" y="140" width="300" height="590" rx="12" fill="#FAF9F6" stroke="#D7D5CC" stroke-width="1"/>
+<text x="960" y="180" font-size="23" fill="#252722" font-weight="600" text-anchor="start">长图预览</text>
+<rect x="969" y="204" width="231" height="380" rx="6" fill="#FFFFFF" stroke="#D7D5CC" stroke-width="1"/>
+<rect x="990" y="229" width="185" height="9" rx="4" fill="#E6E6DF" stroke="none" stroke-width="1"/>
+<rect x="990" y="269" width="145" height="9" rx="4" fill="#E6E6DF" stroke="none" stroke-width="1"/>
+<rect x="990" y="309" width="105" height="9" rx="4" fill="#E6E6DF" stroke="none" stroke-width="1"/>
+<rect x="990" y="349" width="185" height="9" rx="4" fill="#E6E6DF" stroke="none" stroke-width="1"/>
+<rect x="990" y="389" width="145" height="9" rx="4" fill="#E6E6DF" stroke="none" stroke-width="1"/>
+<rect x="990" y="429" width="105" height="9" rx="4" fill="#E6E6DF" stroke="none" stroke-width="1"/>
+<rect x="990" y="469" width="185" height="9" rx="4" fill="#E6E6DF" stroke="none" stroke-width="1"/>
+<rect x="990" y="509" width="145" height="9" rx="4" fill="#E6E6DF" stroke="none" stroke-width="1"/>
+<rect x="981" y="440" width="207" height="121" rx="3" fill="none" stroke="#365F56" stroke-width="2"/>
+<text x="960" y="621" font-size="18" fill="#365F56" font-weight="600" text-anchor="start">755 × 4200 px</text>
+<rect x="960" y="658" width="111" height="38" rx="7" fill="#E2EBE5" stroke="#365F56" stroke-width="1"/>
+<text x="1015.5" y="683" font-size="16" fill="#365F56" font-weight="500" text-anchor="middle">完成</text>
+<rect x="1083" y="658" width="111" height="38" rx="7" fill="#FAF9F6" stroke="#D7D5CC" stroke-width="1"/>
+<text x="1138.5" y="683" font-size="16" fill="#252722" font-weight="500" text-anchor="middle">取消</text>
+<text x="90" y="686" font-size="18" fill="#365F56" font-weight="400" text-anchor="start">在正文滚动鼠标，自动拼接新增内容。</text>
+<text x="57" y="770" font-size="18" fill="#696D65" font-weight="400" text-anchor="start">框选时避开固定页头、底栏和悬浮内容；拼接不可靠时暂停并保留已成功部分。</text>
+<text x="57" y="801" font-size="18" fill="#696D65" font-weight="400" text-anchor="start">右侧预览内滚轮仅浏览预览；取消结束会话，下次仍默认普通截图。</text>
+<line x1="40" y1="825" x2="1240" y2="825" stroke="#D7D5CC" stroke-width="1"  stroke-linecap="round"/>
+<text x="40" y="859" font-size="15" fill="#696D65" font-weight="400" text-anchor="start">kiki · 2026-11-10 · 工具条为 F12 终态，过渡版本保留旧入口</text>
+<text x="1240" y="859" font-size="15" fill="#696D65" font-weight="400" text-anchor="end">非应用实机截图 · 演示内容不进入产品</text></g></svg>
