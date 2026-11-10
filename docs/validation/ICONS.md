@@ -17,7 +17,7 @@
 - 默认及 diagnostics Release 构建通过。沙箱临时目录曾造成 rustc 归档重命名拒绝访问；将本次命令的 TEMP/TMP 指向忽略的 `artifacts/rust-tmp` 后成功，未改变系统设置。
 - 真实资源管理器中已见 EXE 的蓝底白猫爪图标；界面证据在忽略的 `artifacts/visual/icons/`。
 - 用 System.Drawing 从最终 EXE 提取关联图标并实际查看，与用户图案一致，证据 `artifacts/icon-from-exe.png`。
-- 读取 ICO 目录确认九种尺寸；原文件 SHA-256 记录在 `resources/icons/README.md`。
+- 读取 ICO 目录确认九种尺寸；原文件 SHA-256 记录在 `docs/ICONS.md`。
 
 ## 验证边界
 
