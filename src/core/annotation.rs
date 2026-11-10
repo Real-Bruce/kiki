@@ -56,6 +56,16 @@ pub struct Object {
     pub style: Style,
 }
 impl Object {
+    pub fn matches_tool(&self, tool: Tool) -> bool {
+        matches!(
+            (&self.shape, tool),
+            (_, Tool::Select)
+                | (Shape::Rectangle(_), Tool::Rectangle)
+                | (Shape::Arrow(..), Tool::Arrow)
+                | (Shape::Pen(_), Tool::Pen)
+                | (Shape::Text { .. }, Tool::Text)
+        )
+    }
     pub fn bounds(&self) -> PixelRect {
         match &self.shape {
             Shape::Text { bounds, .. } => *bounds,
@@ -95,17 +105,7 @@ impl Object {
         let Shape::Text { bounds, angle, .. } = self.shape else {
             return None;
         };
-        let (cx, _) = text_center(bounds);
-        let (x, y) = rotate_point(
-            bounds,
-            angle,
-            cx,
-            f64::from(bounds.top) - 16. * f64::from(scale),
-        );
-        Some(PixelPoint {
-            x: x.round() as i32,
-            y: y.round() as i32,
-        })
+        Some(text_rotation_handle(bounds, angle, scale))
     }
     fn hit(&self, p: PixelPoint, tolerance: f64) -> bool {
         let t = tolerance + f64::from(self.style.width) / 2.;
@@ -175,6 +175,41 @@ pub fn rotate_point(bounds: PixelRect, angle: f64, x: f64, y: f64) -> (f64, f64)
     (cx + x * cos - y * sin, cy + x * sin + y * cos)
 }
 
+pub fn text_frame(bounds: PixelRect, scale: f32) -> PixelRect {
+    pad_text_bounds(bounds, (5. * scale).ceil() as i32)
+}
+
+pub fn text_frame_hit_bounds(bounds: PixelRect, scale: f32) -> PixelRect {
+    pad_text_bounds(text_frame(bounds, scale), (7. * scale).ceil() as i32)
+}
+
+fn pad_text_bounds(bounds: PixelRect, padding: i32) -> PixelRect {
+    PixelRect {
+        left: bounds.left.saturating_sub(padding),
+        top: bounds.top.saturating_sub(padding),
+        right: bounds.right.saturating_add(padding),
+        bottom: bounds.bottom.saturating_add(padding),
+    }
+}
+
+pub fn text_rotation_handle(bounds: PixelRect, angle: f64, scale: f32) -> PixelPoint {
+    let (cx, _) = text_center(bounds);
+    let (x, y) = rotate_point(
+        bounds,
+        angle,
+        cx,
+        f64::from(text_frame(bounds, scale).top) - 16. * f64::from(scale),
+    );
+    PixelPoint {
+        x: x.round() as i32,
+        y: y.round() as i32,
+    }
+}
+
+pub fn hits_text_rotation(p: PixelPoint, handle: PixelPoint, scale: f32) -> bool {
+    distance(p, handle, handle) <= 9. * f64::from(scale)
+}
+
 fn rect(a: PixelPoint, b: PixelPoint) -> PixelRect {
     PixelRect {
         left: a.x.min(b.x),
@@ -182,6 +217,10 @@ fn rect(a: PixelPoint, b: PixelPoint) -> PixelRect {
         right: a.x.max(b.x),
         bottom: a.y.max(b.y),
     }
+}
+fn offset(value: i32, start: i32, end: i32) -> i32 {
+    (i64::from(value) + i64::from(end) - i64::from(start))
+        .clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
 }
 fn distance(p: PixelPoint, a: PixelPoint, b: PixelPoint) -> f64 {
     let (x, y) = (
@@ -206,6 +245,14 @@ struct Change {
     before: Option<Object>,
     after: Option<Object>,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ObjectHit {
+    Move(usize),
+    Handle(usize, usize),
+    Rotate(usize),
+    Text(usize),
+}
+
 enum DragKind {
     Create,
     Move,
@@ -375,61 +422,126 @@ impl Editor {
             });
         }
     }
-    pub fn rotation_at(&self, p: PixelPoint, tolerance: i32, scale: f32) -> bool {
-        self.tool == Tool::Select
-            && self
-                .selected
-                .and_then(|i| self.objects.get(i))
-                .and_then(|o| o.rotation_handle(scale))
-                .is_some_and(|handle| distance(p, handle, handle) <= f64::from(tolerance))
+    pub fn hit_at(
+        &self,
+        p: PixelPoint,
+        tolerance: i32,
+        scale: f32,
+        inside_selection: bool,
+    ) -> Option<ObjectHit> {
+        let tolerance = f64::from(tolerance);
+        let selected = self
+            .selected
+            .filter(|i| self.objects[*i].matches_tool(self.tool));
+        if let Some(index) = selected {
+            let object = &self.objects[index];
+            if object
+                .rotation_handle(scale)
+                .is_some_and(|handle| hits_text_rotation(p, handle, scale))
+            {
+                return Some(ObjectHit::Rotate(index));
+            }
+            if inside_selection {
+                if let Some(handle) = object
+                    .handles()
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, h)| (i, distance(p, h, h)))
+                    .filter(|(_, d)| *d <= tolerance)
+                    .min_by(|a, b| a.1.total_cmp(&b.1))
+                    .map(|(i, _)| i)
+                {
+                    return Some(ObjectHit::Handle(index, handle));
+                }
+            }
+        }
+        if !inside_selection {
+            return None;
+        }
+        self.objects
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(index, object)| {
+                if !object.matches_tool(self.tool) {
+                    return None;
+                }
+                if self.tool == Tool::Text {
+                    let Shape::Text { bounds, angle, .. } = object.shape else {
+                        return None;
+                    };
+                    let (x, y) = rotate_point(bounds, -angle, f64::from(p.x), f64::from(p.y));
+                    let inset = (x - f64::from(bounds.left))
+                        .min(f64::from(bounds.right) - x)
+                        .min(y - f64::from(bounds.top))
+                        .min(f64::from(bounds.bottom) - y);
+                    if inset > 0.5 {
+                        return Some(ObjectHit::Text(index));
+                    }
+                    let frame = if selected == Some(index) {
+                        text_frame_hit_bounds(bounds, scale)
+                    } else {
+                        bounds
+                    };
+                    if x >= f64::from(frame.left)
+                        && x <= f64::from(frame.right)
+                        && y >= f64::from(frame.top)
+                        && y <= f64::from(frame.bottom)
+                    {
+                        return Some(ObjectHit::Move(index));
+                    }
+                } else if object.hit(p, tolerance) {
+                    if self.tool == Tool::Arrow {
+                        if let Shape::Arrow(a, b) = object.shape {
+                            let from = distance(p, a, a);
+                            let to = distance(p, b, b);
+                            if from.min(to) <= tolerance {
+                                return Some(ObjectHit::Handle(index, usize::from(to < from)));
+                            }
+                        }
+                    }
+                    return Some(ObjectHit::Move(index));
+                }
+                None
+            })
     }
+    #[cfg(any(test, feature = "diagnostics"))]
     pub fn begin(
         &mut self,
         p: PixelPoint,
         tolerance: i32,
         scale: f32,
     ) -> Result<bool, &'static str> {
+        let hit = self.hit_at(p, tolerance, scale, true);
+        self.begin_at(p, scale, hit)
+    }
+    pub fn begin_at(
+        &mut self,
+        p: PixelPoint,
+        scale: f32,
+        hit: Option<ObjectHit>,
+    ) -> Result<bool, &'static str> {
         self.cancel();
         self.warning = None;
-        if self.tool == Tool::Select {
-            if let Some(index) = self.selected {
-                let object = &self.objects[index];
-                if self.rotation_at(p, tolerance, scale) {
-                    self.drag = Some(Drag {
-                        index,
-                        start: p,
-                        before: Some(object.clone()),
-                        kind: DragKind::Rotate,
-                    });
-                    return Ok(true);
-                }
-                if let Some(handle) = object
-                    .handles()
-                    .iter()
-                    .position(|h| distance(p, *h, *h) <= f64::from(tolerance))
-                {
-                    self.drag = Some(Drag {
-                        index,
-                        start: p,
-                        before: Some(object.clone()),
-                        kind: DragKind::Handle(handle),
-                    });
-                    return Ok(true);
-                }
-            }
-            self.selected = self
-                .objects
-                .iter()
-                .rposition(|o| o.hit(p, f64::from(tolerance)));
-            if let Some(index) = self.selected {
-                self.drag = Some(Drag {
-                    index,
-                    start: p,
-                    before: Some(self.objects[index].clone()),
-                    kind: DragKind::Move,
-                });
-                return Ok(true);
-            }
+        if let Some(hit) = hit {
+            let (index, kind) = match hit {
+                ObjectHit::Move(index) => (index, DragKind::Move),
+                ObjectHit::Handle(index, handle) => (index, DragKind::Handle(handle)),
+                ObjectHit::Rotate(index) => (index, DragKind::Rotate),
+                ObjectHit::Text(_) => return Ok(false),
+            };
+            let before = self.objects.get(index).ok_or("标注对象已失效")?.clone();
+            self.selected = Some(index);
+            self.drag = Some(Drag {
+                index,
+                start: p,
+                before: Some(before),
+                kind,
+            });
+            return Ok(true);
+        }
+        if matches!(self.tool, Tool::Select | Tool::Text) {
+            self.selected = None;
             return Ok(false);
         }
         if self.objects.len() >= 1024 {
@@ -562,20 +674,22 @@ impl Editor {
             }
             DragKind::Handle(index) => {
                 if let Some(before) = &drag.before {
+                    let x = |value| offset(value, drag.start.x, p.x);
+                    let y = |value| offset(value, drag.start.y, p.y);
                     match &before.shape {
                         Shape::Rectangle(original) => {
                             let mut r = *original;
                             if [0, 6, 7].contains(index) {
-                                r.left = p.x;
+                                r.left = x(r.left);
                             }
                             if [2, 3, 4].contains(index) {
-                                r.right = p.x;
+                                r.right = x(r.right);
                             }
                             if [0, 1, 2].contains(index) {
-                                r.top = p.y;
+                                r.top = y(r.top);
                             }
                             if [4, 5, 6].contains(index) {
-                                r.bottom = p.y;
+                                r.bottom = y(r.bottom);
                             }
                             object.shape = Shape::Rectangle(rect(
                                 PixelPoint {
@@ -589,10 +703,14 @@ impl Editor {
                             ));
                         }
                         Shape::Arrow(a, b) => {
+                            let shift = |end: PixelPoint| PixelPoint {
+                                x: x(end.x),
+                                y: y(end.y),
+                            };
                             object.shape = if *index == 0 {
-                                Shape::Arrow(p, *b)
+                                Shape::Arrow(shift(*a), *b)
                             } else {
-                                Shape::Arrow(*a, p)
+                                Shape::Arrow(*a, shift(*b))
                             }
                         }
                         Shape::Pen(_) | Shape::Text { .. } => {}
@@ -663,7 +781,10 @@ impl Editor {
             (Some(_), Some(object)) => self.objects[index] = object.clone(),
             _ => {}
         }
-        self.selected = to.as_ref().map(|_| index);
+        self.selected = to
+            .as_ref()
+            .filter(|o| o.matches_tool(self.tool))
+            .map(|_| index);
     }
     pub fn undo(&mut self) {
         self.cancel();
@@ -832,16 +953,21 @@ mod tests {
     }
     #[test]
     fn arrow_keeps_start_in_four_directions_and_pen_keeps_release() {
-        let mut e = Editor::default();
         let start = p(-40, 20);
         for end in [p(50, -50), p(50, 50), p(-100, -50), p(-100, 50)] {
-            e.tool = Tool::Arrow;
+            let mut e = Editor {
+                tool: Tool::Arrow,
+                ..Default::default()
+            };
             assert!(e.begin(start, 5, 1.).unwrap());
             e.update(p(0, 0));
             e.finish(end);
             assert_eq!(e.objects().last().unwrap().shape, Shape::Arrow(start, end));
         }
-        e.tool = Tool::Pen;
+        let mut e = Editor {
+            tool: Tool::Pen,
+            ..Default::default()
+        };
         e.begin(start, 5, 1.).unwrap();
         e.update(start);
         e.finish(p(1, 4));
@@ -849,9 +975,10 @@ mod tests {
             e.objects().last().unwrap().shape,
             Shape::Pen(vec![start, p(1, 4)])
         );
-        e.begin(start, 5, 1.).unwrap();
-        e.finish(start);
-        assert_eq!(e.objects().last().unwrap().shape, Shape::Pen(vec![start]));
+        let dot = p(100, 100);
+        e.begin(dot, 5, 1.).unwrap();
+        e.finish(dot);
+        assert_eq!(e.objects().last().unwrap().shape, Shape::Pen(vec![dot]));
     }
 
     #[test]
@@ -926,12 +1053,83 @@ mod tests {
         e.finish(p(40, 30));
         assert_eq!(e.objects[0].bounds(), rect(p(20, 10), p(40, 30)));
         for i in 0..105 {
-            draw(&mut e, Tool::Arrow, p(i, 0), p(i, 10));
+            draw(&mut e, Tool::Arrow, p(i * 20, 0), p(i * 20, 10));
         }
         assert_eq!(e.undo.len(), 100);
         for _ in 0..100 {
             e.undo();
         }
         assert_eq!(e.objects.len(), 6);
+    }
+
+    #[test]
+    fn same_tool_edits_topmost_match_and_allows_nested_rectangles() {
+        let mut e = Editor::default();
+        draw(&mut e, Tool::Rectangle, p(0, 0), p(100, 100));
+        draw(&mut e, Tool::Rectangle, p(25, 40), p(80, 100));
+        draw(&mut e, Tool::Pen, p(50, 90), p(50, 115));
+        e.tool = Tool::Rectangle;
+        assert_eq!(e.hit_at(p(65, 100), 6, 1., true), Some(ObjectHit::Move(1)));
+        assert!(e.begin(p(65, 100), 6, 1.).unwrap());
+        e.update(p(70, 105));
+        e.finish(p(75, 110));
+        assert_eq!(e.objects()[0].bounds(), rect(p(0, 0), p(100, 100)));
+        assert_eq!(e.objects()[1].bounds(), rect(p(35, 50), p(90, 110)));
+        assert_eq!(e.undo.len(), 4);
+        e.undo();
+        assert_eq!(e.objects()[1].bounds(), rect(p(25, 40), p(80, 100)));
+        e.redo();
+        assert_eq!(e.objects()[1].bounds(), rect(p(35, 50), p(90, 110)));
+    }
+
+    #[test]
+    fn direct_handles_preserve_grab_offset_and_text_uses_rotated_local_bounds() {
+        let mut e = Editor::default();
+        draw(&mut e, Tool::Arrow, p(0, 0), p(100, 0));
+        e.selected = None;
+        assert_eq!(
+            e.hit_at(p(98, 2), 6, 1., true),
+            Some(ObjectHit::Handle(0, 1))
+        );
+        e.begin(p(98, 2), 6, 1.).unwrap();
+        e.finish(p(98, 2));
+        assert_eq!(e.undo.len(), 1);
+        e.begin(p(98, 2), 6, 1.).unwrap();
+        e.finish(p(-12, 22));
+        assert_eq!(e.objects()[0].shape, Shape::Arrow(p(0, 0), p(-10, 20)));
+
+        e.tool = Tool::Text;
+        let mut object = text("中文\n两行");
+        let Shape::Text {
+            bounds,
+            ref mut angle,
+            ..
+        } = object.shape
+        else {
+            unreachable!();
+        };
+        *angle = std::f64::consts::FRAC_PI_2;
+        e.commit_text(None, object.clone()).unwrap();
+        let (cx, cy) = text_center(bounds);
+        let center = p(cx.round() as i32, cy.round() as i32);
+        let (x, y) = rotate_point(
+            bounds,
+            std::f64::consts::FRAC_PI_2,
+            cx,
+            f64::from(bounds.top),
+        );
+        let border = p(x.round() as i32, y.round() as i32);
+        assert_eq!(e.hit_at(center, 6, 1., true), Some(ObjectHit::Text(1)));
+        assert_eq!(e.hit_at(border, 6, 1., true), Some(ObjectHit::Move(1)));
+        assert_eq!(
+            e.hit_at(p(border.x + 7, border.y), 6, 1., true),
+            Some(ObjectHit::Move(1))
+        );
+        let handle = object.rotation_handle(1.).unwrap();
+        assert_eq!(e.hit_at(handle, 6, 1., false), Some(ObjectHit::Rotate(1)));
+        e.begin(border, 6, 1.).unwrap();
+        e.update(p(border.x + 12, border.y + 24));
+        assert!(e.cancel());
+        assert_eq!(e.objects()[1], object);
     }
 }

@@ -1,5 +1,9 @@
 //! Windowless Windows Rich Edit. The capture canvas owns all visible pixels.
-use crate::core::{annotation::Style, geometry::PixelRect, selection::PixelPoint};
+use crate::core::{
+    annotation::{Style, hits_text_rotation, text_frame_hit_bounds, text_rotation_handle},
+    geometry::PixelRect,
+    selection::{PixelPoint, contains},
+};
 use std::{cell::Cell, ffi::c_void, ptr::null_mut, rc::Rc};
 use windows::{
     Win32::{
@@ -280,6 +284,13 @@ pub struct TextStart<'a> {
     pub angle: f64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextHit {
+    Content,
+    Move,
+    Rotate,
+}
+
 impl TextInput {
     pub fn open(hwnd: HWND, start: TextStart<'_>) -> Result<Self> {
         let [r, g, b] = start.style.color;
@@ -472,23 +483,35 @@ impl TextInput {
     pub fn owns_timer(id: usize) -> bool {
         id == CARET_TIMER || id >= TIMER_PREFIX
     }
-    pub fn bounds(&self) -> RECT {
+    pub fn content_bounds(&self) -> PixelRect {
         let r = self.view.rect.get();
-        RECT {
-            left: r.left.saturating_sub(3),
-            top: r.top.saturating_sub(3),
-            right: r.right.saturating_add(3),
-            bottom: r.bottom.saturating_add(3),
+        PixelRect {
+            left: r.left.saturating_add(self.desktop.left),
+            top: r.top.saturating_add(self.desktop.top),
+            right: r.right.saturating_add(self.desktop.left),
+            bottom: r.bottom.saturating_add(self.desktop.top),
+        }
+    }
+    pub fn hit_at(&self, p: PixelPoint, scale: f32) -> Option<TextHit> {
+        let bounds = self.content_bounds();
+        if self.drag.is_some() {
+            Some(TextHit::Move)
+        } else if self.view.mouse_captured.get() || contains(bounds, p) {
+            Some(TextHit::Content)
+        } else if hits_text_rotation(p, text_rotation_handle(bounds, 0., scale), scale) {
+            Some(TextHit::Rotate)
+        } else if contains(text_frame_hit_bounds(bounds, scale), p) {
+            Some(TextHit::Move)
+        } else {
+            None
         }
     }
     pub fn mouse_captured(&self) -> bool {
         self.view.mouse_captured.get() || self.drag.is_some()
     }
-    pub fn mouse(&mut self, msg: u32, wp: WPARAM, p: PixelPoint) -> Result<bool> {
+    pub fn mouse(&mut self, msg: u32, wp: WPARAM, p: PixelPoint, hit: TextHit) -> Result<()> {
         let x = p.x.saturating_sub(self.desktop.left);
         let y = p.y.saturating_sub(self.desktop.top);
-        let outer = self.bounds();
-        let inside = |r: RECT| x >= r.left && x < r.right && y >= r.top && y < r.bottom;
         if let Some((start, origin)) = self.drag {
             if msg == WM_MOUSEMOVE || msg == WM_LBUTTONUP {
                 self.origin.x = (i64::from(origin.x) + i64::from(p.x) - i64::from(start.x))
@@ -506,22 +529,23 @@ impl TextInput {
                     }
                 }
             }
-            return Ok(true);
+            return Ok(());
         }
-        if !inside(outer) && !self.view.mouse_captured.get() {
-            return Ok(false);
-        }
-        if msg == WM_LBUTTONDOWN && !inside(self.view.rect.get()) {
-            self.drag = Some((p, self.origin));
-            // SAFETY: capture routes this drag to the live HWND on the same thread.
-            unsafe {
-                SetCapture(self.hwnd);
+        match hit {
+            TextHit::Move if matches!(msg, WM_LBUTTONDOWN | WM_LBUTTONDBLCLK) => {
+                self.drag = Some((p, self.origin));
+                // SAFETY: capture routes this drag to the live HWND on the same thread.
+                unsafe {
+                    SetCapture(self.hwnd);
+                }
             }
-        } else {
-            let packed = u32::from(x as u16) | (u32::from(y as u16) << 16);
-            self.send(msg, wp, LPARAM(packed as isize))?;
+            TextHit::Content => {
+                let packed = u32::from(x as u16) | (u32::from(y as u16) << 16);
+                self.send(msg, wp, LPARAM(packed as isize))?;
+            }
+            _ => {}
         }
-        Ok(true)
+        Ok(())
     }
     pub fn capture_lost(&mut self) {
         if let Some((_, origin)) = self.drag.take() {
@@ -633,13 +657,13 @@ mod tests {
                 },
             )
             .unwrap();
-            let empty = input.bounds();
+            let empty = input.content_bounds();
             for c in "透明文字".encode_utf16() {
                 input
                     .message(WM_CHAR, WPARAM(c as usize), LPARAM(1))
                     .unwrap();
             }
-            let line = input.bounds();
+            let line = input.content_bounds();
             assert_eq!(input.content().unwrap(), "透明文字");
             assert!(
                 line.right > empty.right && (line.bottom - empty.bottom).abs() <= 2,
@@ -651,10 +675,10 @@ mod tests {
                 .message(WM_CHAR, WPARAM('F' as usize), LPARAM(1))
                 .unwrap();
             assert_eq!(input.content().unwrap(), "透明文字\nF");
-            assert!(input.bounds().bottom > line.bottom);
+            assert!(input.content_bounds().bottom > line.bottom);
             input.send(EM_SETSEL, WPARAM(0), LPARAM(-1)).unwrap();
             input.message(WM_CLEAR, WPARAM(0), LPARAM(0)).unwrap();
-            assert_eq!(input.bounds(), empty);
+            assert_eq!(input.content_bounds(), empty);
             input.message(WM_UNDO, WPARAM(0), LPARAM(0)).unwrap();
             assert_eq!(input.content().unwrap(), "透明文字\nF");
             drop(input);

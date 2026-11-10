@@ -1,6 +1,8 @@
 use super::{text_input::TextInput, toolbar_icons::ToolbarIcons, ui_palette as palette};
 use crate::core::{
-    annotation::{Editor, Shape, Tool, rotate_point, text_center},
+    annotation::{
+        Editor, Shape, Tool, rotate_point, text_center, text_frame, text_rotation_handle,
+    },
     display::DisplayInfo,
     geometry::PixelRect,
     image::Image,
@@ -349,19 +351,7 @@ impl Canvas {
                         bottom: area.bottom as i32,
                     },
                 );
-                let bounds = input.bounds();
-                self.brush.SetColor(&tone(palette::accent(self.dark), 1.));
-                self.target.DrawRectangle(
-                    &D2D_RECT_F {
-                        left: bounds.left as f32,
-                        top: bounds.top as f32,
-                        right: bounds.right as f32,
-                        bottom: bounds.bottom as f32,
-                    },
-                    &self.brush,
-                    1.,
-                    None,
-                );
+                self.paint_text_frame(input.content_bounds(), 0.);
                 result
             } else {
                 Ok(())
@@ -721,10 +711,23 @@ impl Canvas {
                         right: p.X + 3. * self.scale,
                         bottom: p.Y + 3. * self.scale,
                     };
-                    self.fill(r, tone(palette::accent(self.dark), 1.));
-                    self.brush
-                        .SetColor(&tone(palette::on_accent(self.dark), 1.));
-                    self.target.DrawRectangle(&r, &self.brush, 1., None);
+                    if matches!(object.shape, Shape::Arrow(..)) {
+                        let circle = D2D1_ELLIPSE {
+                            point: p,
+                            radiusX: 3. * self.scale,
+                            radiusY: 3. * self.scale,
+                        };
+                        self.brush.SetColor(&tone(palette::accent(self.dark), 1.));
+                        self.target.FillEllipse(&circle, &self.brush);
+                        self.brush
+                            .SetColor(&tone(palette::on_accent(self.dark), 1.));
+                        self.target.DrawEllipse(&circle, &self.brush, 1., None);
+                    } else {
+                        self.fill(r, tone(palette::accent(self.dark), 1.));
+                        self.brush
+                            .SetColor(&tone(palette::on_accent(self.dark), 1.));
+                        self.target.DrawRectangle(&r, &self.brush, 1., None);
+                    }
                 }
             }
             self.target.PopAxisAlignedClip();
@@ -734,42 +737,47 @@ impl Canvas {
                 .and_then(|i| editor.objects().get(i))
             {
                 if let Shape::Text { bounds, angle, .. } = object.shape {
-                    let c = tone(palette::accent(self.dark), 1.);
-                    self.brush.SetColor(&c);
-                    let mut prior = Matrix3x2::default();
-                    self.target.GetTransform(&mut prior);
-                    self.target.SetTransform(
-                        &(super::annotation_render::text_transform(bounds, self.bounds(), angle)
-                            * prior),
-                    );
-                    self.target
-                        .DrawRectangle(&self.local(bounds), &self.brush, 1., None);
-                    self.target.SetTransform(&prior);
-                    if editor.tool == Tool::Select {
-                        if let Some(handle) = object.rotation_handle(self.scale) {
-                            let (cx, _) = text_center(bounds);
-                            let (x, y) = rotate_point(bounds, angle, cx, f64::from(bounds.top));
-                            let origin = self.bounds();
-                            let tip = Vector2 {
-                                X: (x - f64::from(origin.left)) as f32,
-                                Y: (y - f64::from(origin.top)) as f32,
-                            };
-                            let handle = point(handle);
-                            self.target.DrawLine(tip, handle, &self.brush, 1., None);
-                            let circle = D2D1_ELLIPSE {
-                                point: handle,
-                                radiusX: 4. * self.scale,
-                                radiusY: 4. * self.scale,
-                            };
-                            self.brush
-                                .SetColor(&tone(palette::background(self.dark), 1.));
-                            self.target.FillEllipse(&circle, &self.brush);
-                            self.brush.SetColor(&c);
-                            self.target.DrawEllipse(&circle, &self.brush, 1., None);
-                        }
-                    }
+                    self.paint_text_frame(bounds, angle);
                 }
             }
+        }
+    }
+    fn paint_text_frame(&self, bounds: PixelRect, angle: f64) {
+        let origin = self.bounds();
+        let frame = text_frame(bounds, self.scale);
+        let (cx, _) = text_center(bounds);
+        let (x, y) = rotate_point(bounds, angle, cx, f64::from(frame.top));
+        let local = |x: f64, y: f64| Vector2 {
+            X: (x - f64::from(origin.left)) as f32,
+            Y: (y - f64::from(origin.top)) as f32,
+        };
+        let handle = text_rotation_handle(bounds, angle, self.scale);
+        let handle = local(f64::from(handle.x), f64::from(handle.y));
+        let circle = D2D1_ELLIPSE {
+            point: handle,
+            radiusX: 5. * self.scale,
+            radiusY: 5. * self.scale,
+        };
+        let accent = tone(palette::accent(self.dark), 1.);
+        // SAFETY: called during Canvas drawing on the UI thread. Restore the transform before
+        // drawing the handle in canvas coordinates.
+        unsafe {
+            self.brush.SetColor(&accent);
+            let mut prior = Matrix3x2::default();
+            self.target.GetTransform(&mut prior);
+            self.target.SetTransform(
+                &(super::annotation_render::text_transform(bounds, origin, angle) * prior),
+            );
+            self.target
+                .DrawRectangle(&self.local(frame), &self.brush, 1., None);
+            self.target.SetTransform(&prior);
+            self.target
+                .DrawLine(local(x, y), handle, &self.brush, 1., None);
+            self.brush
+                .SetColor(&tone(palette::background(self.dark), 1.));
+            self.target.FillEllipse(&circle, &self.brush);
+            self.brush.SetColor(&accent);
+            self.target.DrawEllipse(&circle, &self.brush, 1., None);
         }
     }
     fn icon(&self, index: usize, r: D2D_RECT_F, c: D2D1_COLOR_F, scale: f32) {

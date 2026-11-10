@@ -2,10 +2,10 @@
 use super::{
     capture::CaptureResult,
     selection_render::{Canvas, PaintInput, system_dark},
-    text_input::{TextInput, TextStart},
+    text_input::{TextHit, TextInput, TextStart},
 };
 use crate::core::{
-    annotation::{Editor, Shape, Tool, text_center},
+    annotation::{Editor, ObjectHit, Shape, Tool, text_center},
     display::DisplayInfo,
     geometry::PixelRect,
     selection::{PixelPoint, Selection, contains},
@@ -173,6 +173,13 @@ struct State {
     focus: usize,
     keyboard_focus: bool,
 }
+enum CanvasHit {
+    ResizeSelection(usize),
+    MoveSelection,
+    Object(ObjectHit),
+    Blank,
+}
+
 impl State {
     fn activate(&mut self, index: usize) -> bool {
         if !self.editor.enabled(index) {
@@ -181,27 +188,22 @@ impl State {
         match index {
             0..=4 => {
                 self.editor.cancel();
-                let tool = [
+                let mut tool = [
                     Tool::Select,
                     Tool::Rectangle,
                     Tool::Arrow,
                     Tool::Pen,
                     Tool::Text,
                 ][index];
+                if tool == self.editor.tool {
+                    tool = Tool::Select;
+                }
                 if tool != Tool::Select {
                     let matching = self
                         .editor
                         .selected
                         .and_then(|i| self.editor.objects().get(i))
-                        .filter(|o| {
-                            matches!(
-                                (&o.shape, tool),
-                                (Shape::Rectangle(_), Tool::Rectangle)
-                                    | (Shape::Arrow(_, _), Tool::Arrow)
-                                    | (Shape::Pen(_), Tool::Pen)
-                                    | (Shape::Text { .. }, Tool::Text)
-                            )
-                        })
+                        .filter(|o| o.matches_tool(tool))
                         .map(|o| o.style);
                     if let Some(mut style) = matching {
                         style.width /= self.scale();
@@ -287,11 +289,46 @@ impl State {
             .find(|s| contains(s.bounds, self.pointer))
             .map_or(1., |s| s.scale_percent as f32 / 100.)
     }
-    fn radius(&self) -> i32 {
-        self.screens
-            .iter()
-            .find(|s| contains(s.bounds, self.pointer))
-            .map_or(6, |s| (6 * s.scale_percent / 100).max(4))
+    fn hit_scale(&self) -> f32 {
+        self.selection.rect.map_or_else(
+            || self.scale(),
+            |rect| {
+                self.canvas
+                    .layout(rect, &self.screens, self.editor.tool != Tool::Select)
+                    .scale
+            },
+        )
+    }
+    fn canvas_at(&self, p: PixelPoint, space: bool, scale: f32) -> CanvasHit {
+        let radius = hit_radius(scale);
+        if let Some(handle) = self.selection.resize_at(p, radius) {
+            return CanvasHit::ResizeSelection(handle);
+        }
+        let inside = self.selection.rect.is_some_and(|r| contains(r, p));
+        if inside && space {
+            return CanvasHit::MoveSelection;
+        }
+        if let Some(hit) = self.editor.hit_at(p, radius, scale, inside) {
+            return CanvasHit::Object(hit);
+        }
+        if inside && self.editor.tool == Tool::Select {
+            CanvasHit::MoveSelection
+        } else {
+            CanvasHit::Blank
+        }
+    }
+}
+
+fn hit_radius(scale: f32) -> i32 {
+    (6. * scale).round().max(4.) as i32
+}
+
+fn resize_cursor(handle: usize) -> windows::core::PCWSTR {
+    match handle {
+        0 | 4 => IDC_SIZENWSE,
+        2 | 6 => IDC_SIZENESW,
+        1 | 5 => IDC_SIZENS,
+        _ => IDC_SIZEWE,
     }
 }
 fn position() -> Option<PixelPoint> {
@@ -300,6 +337,24 @@ fn position() -> Option<PixelPoint> {
         GetCursorPos(&mut p).ok()?;
     }
     Some(PixelPoint { x: p.x, y: p.y })
+}
+fn mouse_position(lp: LPARAM, desktop: PixelRect) -> PixelPoint {
+    // Client coordinates are relative to the frozen desktop origin. Use the coordinates
+    // attached to the mouse event, since the cursor may already have moved by dispatch time.
+    let x = lp.0 as i16;
+    let y = (lp.0 >> 16) as i16;
+    if desktop
+        .size()
+        .is_some_and(|(w, h)| w > i16::MAX as u32 || h > i16::MAX as u32)
+    {
+        if let Some(p) = position() {
+            return p;
+        }
+    }
+    PixelPoint {
+        x: desktop.left.saturating_add(i32::from(x)),
+        y: desktop.top.saturating_add(i32::from(y)),
+    }
 }
 pub fn register(instance: HINSTANCE) -> Result<()> {
     // SAFETY: static class name/callback, system-owned cursor; all visible windows use the main UI thread.
@@ -346,7 +401,12 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         if (*pointer).busy
             && matches!(
                 msg,
-                WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP | WM_LBUTTONDBLCLK | WM_KEYDOWN
+                WM_MOUSEMOVE
+                    | WM_LBUTTONDOWN
+                    | WM_LBUTTONUP
+                    | WM_LBUTTONDBLCLK
+                    | WM_KEYDOWN
+                    | WM_KEYUP
             )
         {
             return LRESULT(0);
@@ -433,21 +493,10 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 LRESULT(0)
             }
 
-            WM_LBUTTONDBLCLK => {
-                (*pointer).pointer = position().unwrap_or((*pointer).pointer);
-                if (*pointer).editor.text_at((*pointer).pointer).is_some() {
-                    if let Err(error) = start_text(hwnd, pointer) {
-                        super::show_error(&error.to_string());
-                    }
-                    let _ = InvalidateRect(Some(hwnd), None, false);
-                }
-                LRESULT(0)
-            }
-
             WM_MOUSEMOVE => {
                 {
                     let state = &mut *pointer;
-                    state.pointer = position().unwrap_or(state.pointer);
+                    state.pointer = mouse_position(lp, state.canvas.bounds());
                     state.selection.update(state.pointer);
                     state.editor.update(state.pointer);
                     state.hover = state.window_at(state.pointer);
@@ -455,16 +504,20 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 let _ = InvalidateRect(Some(hwnd), None, false);
                 LRESULT(0)
             }
-            WM_LBUTTONDOWN => {
+            WM_LBUTTONDOWN | WM_LBUTTONDBLCLK => {
+                if (*pointer).selection.active() || (*pointer).editor.active() {
+                    return LRESULT(0);
+                }
+                let space = (*pointer).text_input.is_none() && GetKeyState(VK_SPACE.0 as i32) < 0;
                 if let Err(error) = finish_text(hwnd, pointer) {
                     super::show_error(&error.to_string());
                     return LRESULT(0);
                 }
-                let mut request_text = false;
+                let mut request_text = None;
                 let mut error = None;
                 {
                     let state = &mut *pointer;
-                    state.pointer = position().unwrap_or(state.pointer);
+                    state.pointer = mouse_position(lp, state.canvas.bounds());
                     state.pressed_window = state.window_at(state.pointer);
                     state.parameter_down = false;
                     state.keyboard_focus = false;
@@ -481,41 +534,57 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                         }
                     } else {
                         state.focus = usize::MAX;
-                        let object = if state
-                            .selection
-                            .rect
-                            .is_some_and(|r| contains(r, state.pointer))
-                            || state.editor.rotation_at(
-                                state.pointer,
-                                state.radius(),
-                                state.scale(),
-                            ) {
-                            if state.editor.tool == Tool::Text {
-                                request_text = true;
-                                true
-                            } else {
-                                match state.editor.begin(
-                                    state.pointer,
-                                    state.radius(),
-                                    state.scale(),
-                                ) {
-                                    Ok(active) => active,
-                                    Err(message) => {
+                        let scale = state.hit_scale();
+                        let p = state.pointer;
+                        match state.canvas_at(p, space, scale) {
+                            hit @ (CanvasHit::ResizeSelection(_) | CanvasHit::MoveSelection) => {
+                                if matches!(hit, CanvasHit::MoveSelection)
+                                    && state.editor.tool == Tool::Select
+                                    && !space
+                                {
+                                    state.editor.selected = None;
+                                }
+                                state.selection.begin(p, hit_radius(scale));
+                            }
+                            CanvasHit::Object(ObjectHit::Text(index)) => {
+                                request_text = Some(Some(index));
+                            }
+                            CanvasHit::Object(hit) => {
+                                let double_clicked_text = msg == WM_LBUTTONDBLCLK
+                                    && state.editor.tool == Tool::Select
+                                    && matches!(hit, ObjectHit::Move(_));
+                                if let Some(index) = double_clicked_text
+                                    .then(|| state.editor.text_at(p))
+                                    .flatten()
+                                {
+                                    request_text = Some(Some(index));
+                                } else if let Err(message) =
+                                    state.editor.begin_at(p, state.scale(), Some(hit))
+                                {
+                                    error = Some(message);
+                                }
+                            }
+                            CanvasHit::Blank => {
+                                if state.editor.tool == Tool::Select
+                                    || state.selection.rect.is_none()
+                                {
+                                    state.editor.selected = None;
+                                    state.selection.begin(p, hit_radius(scale));
+                                } else if state.selection.rect.is_some_and(|r| contains(r, p)) {
+                                    if state.editor.tool == Tool::Text {
+                                        request_text = Some(None);
+                                    } else if let Err(message) =
+                                        state.editor.begin_at(p, state.scale(), None)
+                                    {
                                         error = Some(message);
-                                        true
                                     }
                                 }
                             }
-                        } else {
-                            false
-                        };
-                        if !object && state.editor.tool == Tool::Select {
-                            state.selection.begin(state.pointer, state.radius());
                         }
                     }
                 }
-                if request_text {
-                    if let Err(e) = start_text(hwnd, pointer) {
+                if let Some(index) = request_text {
+                    if let Err(e) = start_text(hwnd, pointer, index) {
                         super::show_error(&e.to_string());
                     }
                     let _ = InvalidateRect(Some(hwnd), None, false);
@@ -533,7 +602,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 let warning;
                 let close = {
                     let state = &mut *pointer;
-                    state.pointer = position().unwrap_or(state.pointer);
+                    state.pointer = mouse_position(lp, state.canvas.bounds());
                     warning = state.editor.take_warning();
                     if let Some(button) = state.down_button.take() {
                         if state.button_at(state.pointer) == Some(button) {
@@ -578,7 +647,12 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 let _ = InvalidateRect(Some(hwnd), None, false);
                 LRESULT(0)
             }
-            WM_KEYDOWN => {
+            WM_KEYDOWN | WM_KEYUP if msg == WM_KEYDOWN || wp.0 == VK_SPACE.0 as usize => {
+                if wp.0 != VK_ESCAPE.0 as usize
+                    && ((*pointer).selection.active() || (*pointer).editor.active())
+                {
+                    return LRESULT(0);
+                }
                 let mut release = false;
                 let close = {
                     let state = &mut *pointer;
@@ -628,15 +702,17 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                             state.focus = next;
                             false
                         }
-                        13 => {
-                            if state.keyboard_focus && state.focus < 22 {
-                                state.activate(state.focus)
-                            } else {
-                                state.pending_output = Some(9);
-                                false
-                            }
+                        13 | 32
+                            if (wp.0 == 13 || msg == WM_KEYUP)
+                                && state.keyboard_focus
+                                && state.focus < 22 =>
+                        {
+                            state.activate(state.focus)
                         }
-                        32 => state.keyboard_focus && state.activate(state.focus),
+                        13 => {
+                            state.pending_output = Some(9);
+                            false
+                        }
                         80 if GetKeyState(VK_CONTROL.0 as i32) < 0 => {
                             state.pending_output = Some(7);
                             false
@@ -681,34 +757,31 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             }
             WM_SETCURSOR => {
                 let state = &*pointer;
-                let cursor = if state.button_at(state.pointer).is_some()
-                    || state.parameter_at(state.pointer).is_some()
-                {
+                if state.selection.active() || state.editor.active() {
+                    return LRESULT(1);
+                }
+                let p = position().unwrap_or(state.pointer);
+                let cursor = if state.button_at(p).is_some() || state.parameter_at(p).is_some() {
                     IDC_ARROW
-                } else if state
-                    .editor
-                    .rotation_at(state.pointer, state.radius(), state.scale())
-                {
-                    IDC_SIZEALL
-                } else if state.editor.tool != Tool::Select {
-                    IDC_CROSS
-                } else if let Some(handle) =
-                    state.selection.handle_at(state.pointer, state.radius())
-                {
-                    match handle {
-                        0 | 4 => IDC_SIZENWSE,
-                        2 | 6 => IDC_SIZENESW,
-                        1 | 5 => IDC_SIZENS,
-                        _ => IDC_SIZEWE,
-                    }
-                } else if state
-                    .selection
-                    .rect
-                    .is_some_and(|r| contains(r, state.pointer))
-                {
-                    IDC_SIZEALL
                 } else {
-                    IDC_CROSS
+                    let space = state.text_input.is_none() && GetKeyState(VK_SPACE.0 as i32) < 0;
+                    match state.canvas_at(p, space, state.hit_scale()) {
+                        CanvasHit::ResizeSelection(handle) => resize_cursor(handle),
+                        CanvasHit::MoveSelection
+                        | CanvasHit::Object(ObjectHit::Move(_) | ObjectHit::Rotate(_)) => {
+                            IDC_SIZEALL
+                        }
+                        CanvasHit::Object(ObjectHit::Handle(index, handle))
+                            if matches!(
+                                state.editor.objects()[index].shape,
+                                Shape::Rectangle(_)
+                            ) =>
+                        {
+                            resize_cursor(handle)
+                        }
+                        CanvasHit::Object(ObjectHit::Text(_)) => IDC_IBEAM,
+                        _ => IDC_CROSS,
+                    }
                 };
                 if let Ok(cursor) = LoadCursorW(None, cursor) {
                     SetCursor(Some(cursor));
@@ -770,36 +843,50 @@ fn dispatch_text(
                 return Some(LRESULT(0));
             }
         }
-        if msg == WM_SETCURSOR {
-            let p = position()?;
-            let r = input.bounds();
-            let desktop = (*pointer).canvas.bounds();
-            let x = p.x.saturating_sub(desktop.left);
-            let y = p.y.saturating_sub(desktop.top);
-            if x >= r.left && x < r.right && y >= r.top && y < r.bottom {
-                if let Ok(cursor) = LoadCursorW(None, IDC_IBEAM) {
+        if matches!(
+            msg,
+            WM_SETCURSOR | WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP | WM_LBUTTONDBLCLK
+        ) {
+            let state = &*pointer;
+            let p = if msg == WM_SETCURSOR {
+                position().unwrap_or(state.pointer)
+            } else {
+                mouse_position(lp, state.canvas.bounds())
+            };
+            if !input.mouse_captured()
+                && (state.button_at(p).is_some() || state.parameter_at(p).is_some())
+            {
+                return None;
+            }
+            let hit = input.hit_at(p, state.hit_scale())?;
+            if msg == WM_SETCURSOR {
+                let cursor = match hit {
+                    TextHit::Content => IDC_IBEAM,
+                    TextHit::Move | TextHit::Rotate => IDC_SIZEALL,
+                };
+                if let Ok(cursor) = LoadCursorW(None, cursor) {
                     SetCursor(Some(cursor));
                 }
                 return Some(LRESULT(1));
             }
-            return None;
+            (*pointer).pointer = p;
+            let result =
+                if hit == TextHit::Rotate && matches!(msg, WM_LBUTTONDOWN | WM_LBUTTONDBLCLK) {
+                    start_text_rotation(hwnd, pointer, p)
+                } else {
+                    let mut input = (*pointer).text_input.take()?;
+                    let result = input.mouse(msg, wp, p, hit);
+                    (*pointer).text_input = Some(input);
+                    result
+                };
+            if let Err(error) = result {
+                super::show_error(&error.to_string());
+            }
+            let _ = InvalidateRect(Some(hwnd), None, false);
+            return Some(LRESULT(0));
         }
         let mut input = (*pointer).text_input.take()?;
         let result = match msg {
-            WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP | WM_LBUTTONDBLCLK => {
-                let p = position().unwrap_or((*pointer).pointer);
-                let state = &mut *pointer;
-                state.pointer = p;
-                if !input.mouse_captured()
-                    && (state.button_at(p).is_some() || state.parameter_at(p).is_some())
-                {
-                    Ok(None)
-                } else {
-                    input
-                        .mouse(msg, wp, p)
-                        .map(|handled| handled.then_some(LRESULT(0)))
-                }
-            }
             WM_CAPTURECHANGED if input.mouse_captured() => {
                 input.capture_lost();
                 Ok(Some(LRESULT(0)))
@@ -839,7 +926,30 @@ fn dispatch_text(
     }
 }
 
-fn start_text(hwnd: HWND, pointer: *mut State) -> Result<()> {
+fn start_text_rotation(hwnd: HWND, pointer: *mut State, p: PixelPoint) -> Result<()> {
+    finish_text(hwnd, pointer)?;
+    // SAFETY: this UI-thread callback owns the live State. End the borrow before SetCapture.
+    unsafe {
+        let started = {
+            let state = &mut *pointer;
+            state.keyboard_focus = false;
+            if let Some(index) = state.editor.selected {
+                state
+                    .editor
+                    .begin_at(p, state.hit_scale(), Some(ObjectHit::Rotate(index)))
+                    .map_err(|message| Error::new(E_FAIL, message))?
+            } else {
+                false
+            }
+        };
+        if started {
+            SetCapture(hwnd);
+        }
+    }
+    Ok(())
+}
+
+fn start_text(hwnd: HWND, pointer: *mut State, index: Option<usize>) -> Result<()> {
     // SAFETY: caller owns the live State. Open the service after releasing the borrow.
     let (index, origin, content, size, style, wrap_width, angle, desktop, area) = unsafe {
         let state = &mut *pointer;
@@ -853,7 +963,6 @@ fn start_text(hwnd: HWND, pointer: *mut State) -> Result<()> {
             .ok_or_else(|| Error::new(E_FAIL, "请先选择截图范围"))?;
         let desktop = state.canvas.bounds();
         let scale = state.scale();
-        let index = state.editor.text_at(state.pointer);
         let (origin, content, size, style, wrap_width, angle) = if let Some(index) = index {
             let object = &state.editor.objects()[index];
             let Shape::Text {
@@ -1203,6 +1312,139 @@ mod tests {
             (*p).selection.rect = Some(bounds);
             (*p).editor = editor;
             (preview, p)
+        }
+    }
+    #[test]
+    fn selection_edges_win_over_annotation_handles_and_space_moves_selection() {
+        super::super::tests::graphics_runtime();
+        let _com = composition::Apartment::enter().unwrap();
+        // SAFETY: the test owns the hidden preview and borrows its state only for synchronous model calls.
+        unsafe {
+            register(GetModuleHandleW(None).unwrap().into()).unwrap();
+            let (_preview, p) = setup();
+            let state = &mut *p;
+            state.editor.tool = Tool::Rectangle;
+            state.editor.selected = Some(0);
+            let r = state.editor.objects()[0].bounds();
+            let corner = PixelPoint {
+                x: r.left,
+                y: r.top,
+            };
+            let inner = PixelPoint {
+                x: r.left + 50,
+                y: r.top + 20,
+            };
+            assert!(matches!(
+                state.canvas_at(corner, false, 1.),
+                CanvasHit::Object(ObjectHit::Handle(0, 0))
+            ));
+            assert!(matches!(
+                state.canvas_at(inner, false, 1.),
+                CanvasHit::Blank
+            ));
+            assert!(matches!(
+                state.canvas_at(inner, true, 1.),
+                CanvasHit::MoveSelection
+            ));
+            state.selection.rect.as_mut().unwrap().left = r.left;
+            assert!(matches!(
+                state.canvas_at(corner, false, 1.),
+                CanvasHit::ResizeSelection(7)
+            ));
+            assert!(matches!(
+                state.canvas_at(corner, true, 1.),
+                CanvasHit::ResizeSelection(7)
+            ));
+            state.activate(Tool::Rectangle.button());
+            assert_eq!(state.editor.tool, Tool::Select);
+            assert!(matches!(
+                state.canvas_at(inner, false, 1.),
+                CanvasHit::MoveSelection
+            ));
+        }
+    }
+    #[test]
+    fn draft_text_rotation_starts_on_first_press_and_keeps_the_text() {
+        super::super::tests::graphics_runtime();
+        let _com = composition::Apartment::enter().unwrap();
+        // SAFETY: the test owns the hidden preview on this thread, with no state borrow across native calls.
+        unsafe {
+            register(GetModuleHandleW(None).unwrap().into()).unwrap();
+            let (preview, pointer) = setup();
+            let hwnd = preview.hwnd().unwrap();
+            (*pointer).editor.tool = Tool::Text;
+            let start = PixelPoint { x: 20, y: 90 };
+            (*pointer).pointer = start;
+            start_text(hwnd, pointer, None).unwrap();
+            let phrase = "文字 移动";
+            for c in phrase.encode_utf16() {
+                dispatch_text(hwnd, pointer, WM_CHAR, WPARAM(c as usize), LPARAM(1)).unwrap();
+            }
+            let desktop = (*pointer).canvas.bounds();
+            let send_mouse = |msg, p: PixelPoint| {
+                let x = (p.x - desktop.left) as u16;
+                let y = (p.y - desktop.top) as u16;
+                let packed = u32::from(x) | (u32::from(y) << 16);
+                SendMessageW(hwnd, msg, Some(WPARAM(0)), Some(LPARAM(packed as isize)));
+            };
+            let bounds = {
+                let input = (*pointer).text_input.as_ref().unwrap();
+                let bounds = input.content_bounds();
+                assert_eq!(input.hit_at(start, 1.5), Some(TextHit::Content));
+                let border = PixelPoint {
+                    x: bounds.left - 10,
+                    y: start.y + 6,
+                };
+                assert_eq!(input.hit_at(border, 1.5), Some(TextHit::Move));
+                let mut grab = crate::core::annotation::text_rotation_handle(bounds, 0., 1.5);
+                grab.x += 8;
+                assert_eq!(input.hit_at(grab, 1.5), Some(TextHit::Rotate));
+                bounds
+            };
+            let border = PixelPoint {
+                x: bounds.left - 6,
+                y: bounds.top + 12,
+            };
+            let moved = PixelPoint {
+                x: border.x + 25,
+                y: border.y + 12,
+            };
+            send_mouse(WM_LBUTTONDOWN, border);
+            send_mouse(WM_MOUSEMOVE, moved);
+            send_mouse(WM_LBUTTONUP, moved);
+            let input = (*pointer).text_input.as_ref().unwrap();
+            assert_eq!(
+                input.origin,
+                PixelPoint {
+                    x: start.x + 25,
+                    y: start.y + 12
+                }
+            );
+            assert_eq!(input.content().unwrap(), phrase);
+            let mut grab = crate::core::annotation::text_rotation_handle(
+                input.content_bounds(),
+                0.,
+                (*pointer).hit_scale(),
+            );
+            grab.x += 5;
+            send_mouse(WM_LBUTTONDOWN, grab);
+            assert!((*pointer).text_input.is_none());
+            assert!((*pointer).editor.active());
+            send_mouse(
+                WM_LBUTTONUP,
+                PixelPoint {
+                    x: grab.x + 80,
+                    y: grab.y + 60,
+                },
+            );
+            let state = &mut *pointer;
+            let object = state.editor.objects().last().unwrap();
+            assert!(
+                matches!(&object.shape, Shape::Text { content, angle, .. } if content == phrase && angle.abs() > 0.5)
+            );
+            state.editor.undo();
+            assert!(matches!(&state.editor.objects().last().unwrap().shape,
+                Shape::Text { content, angle, .. } if content == phrase && *angle == 0.));
         }
     }
     #[test]

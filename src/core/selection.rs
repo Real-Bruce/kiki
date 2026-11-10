@@ -80,10 +80,48 @@ impl Selection {
             .min_by_key(|(_, distance)| *distance)
             .map(|(index, _)| index)
     }
+    pub fn resize_at(&self, p: PixelPoint, radius: i32) -> Option<usize> {
+        let rect = self.rect?;
+        if let Some(handle) = self.handle_at(p, radius) {
+            return Some(handle);
+        }
+        let x = i64::from(p.x);
+        let y = i64::from(p.y);
+        let mut nearest = None;
+        let mut distance = i64::from((radius / 2).max(1)) + 1;
+        for (handle, offset, along_edge) in [
+            (
+                1,
+                y - i64::from(rect.top),
+                (rect.left..=rect.right).contains(&p.x),
+            ),
+            (
+                3,
+                x - i64::from(rect.right),
+                (rect.top..=rect.bottom).contains(&p.y),
+            ),
+            (
+                5,
+                y - i64::from(rect.bottom),
+                (rect.left..=rect.right).contains(&p.x),
+            ),
+            (
+                7,
+                x - i64::from(rect.left),
+                (rect.top..=rect.bottom).contains(&p.y),
+            ),
+        ] {
+            if along_edge && offset.abs() < distance {
+                nearest = Some(handle);
+                distance = offset.abs();
+            }
+        }
+        nearest
+    }
     pub fn begin(&mut self, p: PixelPoint, radius: i32) {
         let p = self.clamp(p);
         let kind = if let Some(rect) = self.rect {
-            if let Some(index) = self.handle_at(p, radius) {
+            if let Some(index) = self.resize_at(p, radius) {
                 DragKind::Resize(index)
             } else if contains(rect, p) {
                 DragKind::Move
@@ -120,17 +158,28 @@ impl Selection {
                 }
             }
             (DragKind::Resize(i), Some(mut r)) => {
+                // Keep the grab offset for a press on either side of an edge.
+                let x = |edge| {
+                    (i64::from(edge) + i64::from(p.x) - i64::from(drag.start.x))
+                        .clamp(i64::from(self.bounds.left), i64::from(self.bounds.right))
+                        as i32
+                };
+                let y = |edge| {
+                    (i64::from(edge) + i64::from(p.y) - i64::from(drag.start.y))
+                        .clamp(i64::from(self.bounds.top), i64::from(self.bounds.bottom))
+                        as i32
+                };
                 if [0, 6, 7].contains(&i) {
-                    r.left = p.x;
+                    r.left = x(r.left);
                 }
                 if [2, 3, 4].contains(&i) {
-                    r.right = p.x;
+                    r.right = x(r.right);
                 }
                 if [0, 1, 2].contains(&i) {
-                    r.top = p.y;
+                    r.top = y(r.top);
                 }
                 if [4, 5, 6].contains(&i) {
-                    r.bottom = p.y;
+                    r.bottom = y(r.bottom);
                 }
                 normalize(
                     PixelPoint {
@@ -155,6 +204,9 @@ impl Selection {
                 self.rect = window.and_then(|r| self.bounds.intersection(r));
             } else {
                 self.update(p);
+                if self.rect.is_none() && matches!(drag.kind, DragKind::Resize(_)) {
+                    self.rect = drag.before;
+                }
             }
         }
         self.drag = None;
@@ -361,6 +413,53 @@ mod tests {
                 })
             );
             assert!(!selection.active());
+        }
+    }
+
+    #[test]
+    fn entire_edges_keep_the_grab_offset_and_only_resize_one_axis() {
+        let bounds = PixelRect {
+            left: -300,
+            top: -300,
+            right: 300,
+            bottom: 300,
+        };
+        let original = PixelRect {
+            left: -100,
+            top: -80,
+            right: 100,
+            bottom: 80,
+        };
+        let cases = [
+            (1, PixelPoint { x: -50, y: -78 }, [-100, -60, 100, 80]),
+            (3, PixelPoint { x: 102, y: 40 }, [-100, -80, 120, 80]),
+            (5, PixelPoint { x: -50, y: 82 }, [-100, -80, 100, 100]),
+            (7, PixelPoint { x: -98, y: -40 }, [-80, -80, 100, 80]),
+        ];
+        for (handle, start, [left, top, right, bottom]) in cases {
+            let mut selection = Selection::new(bounds);
+            selection.rect = Some(original);
+            assert_eq!(selection.handle_at(start, 6), None);
+            assert_eq!(selection.resize_at(start, 6), Some(handle));
+            selection.begin(start, 6);
+            selection.update(start);
+            assert_eq!(selection.rect, Some(original));
+            selection.finish(
+                PixelPoint {
+                    x: start.x + 20,
+                    y: start.y + 20,
+                },
+                None,
+            );
+            assert_eq!(
+                selection.rect,
+                Some(PixelRect {
+                    left,
+                    top,
+                    right,
+                    bottom
+                })
+            );
         }
     }
 
