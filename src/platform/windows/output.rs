@@ -18,7 +18,10 @@ use windows::{
     Win32::{
         Foundation::*,
         Storage::FileSystem::*,
-        System::{Com::*, DataExchange::*, Memory::*, SystemInformation::GetLocalTime},
+        System::{
+            Com::*, DataExchange::*, Memory::*, Ole::CF_UNICODETEXT,
+            SystemInformation::GetLocalTime,
+        },
         UI::Shell::*,
     },
     core::{Error, PCWSTR, Result, w},
@@ -98,11 +101,53 @@ pub fn start(
 pub fn start_image(source: Arc<Image>, owner: usize, destination: Destination) -> Result<Job> {
     launch(source, None, owner, destination)
 }
+pub fn start_color_copy(text: String, owner: usize) -> Result<Job> {
+    start_job("color-output", move |cancel| {
+        let bytes: Vec<u8> = text
+            .encode_utf16()
+            .chain(Some(0))
+            .flat_map(u16::to_le_bytes)
+            .collect();
+        let mut block = Block::from_bytes(&bytes)?;
+        let _clipboard = Clipboard::open(owner, cancel)?;
+        check(cancel)?;
+        // SAFETY: the worker holds the open clipboard, and Block transfers movable memory on success.
+        unsafe {
+            EmptyClipboard()?;
+        }
+        block.publish(u32::from(CF_UNICODETEXT.0))?;
+        Ok(Completed::Done)
+    })
+}
 fn launch(
     source: Arc<Image>,
     scene: Option<(PixelRect, Editor, u16)>,
     owner: usize,
     destination: Destination,
+) -> Result<Job> {
+    start_job("image-output", move |cancel| {
+        let image = match scene {
+            Some((rect, editor, corner_radius)) => Arc::new(super::composition::render(
+                &source,
+                rect,
+                &editor,
+                corner_radius,
+            )?),
+            None => source,
+        };
+        check(cancel)?;
+        match destination {
+            Destination::Clipboard => clipboard(&image, owner, cancel)?,
+            Destination::File(target) => save_atomic(&image, &target, cancel)?,
+            Destination::Pin => return Ok(Completed::Pinned(image)),
+        }
+        Ok(Completed::Done)
+    })
+}
+
+fn start_job(
+    name: &str,
+    work: impl FnOnce(&AtomicBool) -> Result<Completed> + Send + std::panic::UnwindSafe + 'static,
 ) -> Result<Job> {
     if WORKER
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
@@ -115,30 +160,12 @@ fn launch(
     let worker_cancel = cancel.clone();
     let (tx, receiver) = mpsc::sync_channel(1);
     std::thread::Builder::new()
-        .name("image-output".into())
+        .name(name.into())
         .spawn(move || {
             let _permit = permit;
             let result = std::panic::catch_unwind(|| {
                 check(&worker_cancel)?;
-                let image =
-                    match scene {
-                        Some((rect, editor, corner_radius)) => Arc::new(
-                            super::composition::render(&source, rect, &editor, corner_radius)?,
-                        ),
-                        None => source,
-                    };
-                check(&worker_cancel)?;
-                match destination {
-                    Destination::Clipboard => {
-                        clipboard(&image, owner, &worker_cancel)?;
-                        Ok(Completed::Done)
-                    }
-                    Destination::File(target) => {
-                        save_atomic(&image, &target, &worker_cancel)?;
-                        Ok(Completed::Done)
-                    }
-                    Destination::Pin => Ok(Completed::Pinned(image)),
-                }
+                work(&worker_cancel)
             })
             .unwrap_or_else(|_| Err(fail("输出线程失败，编辑内容已保留")));
             let _ = tx.send(result);
@@ -323,6 +350,19 @@ impl Drop for Block {
     }
 }
 struct Clipboard;
+impl Clipboard {
+    fn open(owner: usize, cancel: &AtomicBool) -> Result<Self> {
+        for _ in 0..5 {
+            check(cancel)?;
+            // SAFETY: the caller supplied its owner HWND. A successful open is balanced by Drop on this worker.
+            if unsafe { OpenClipboard(Some(HWND(owner as *mut _))) }.is_ok() {
+                return Ok(Self);
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        Err(fail("剪贴板正被其他应用占用，请稍后重试"))
+    }
+}
 impl Drop for Clipboard {
     fn drop(&mut self) {
         // SAFETY: balances this worker's OpenClipboard.
@@ -384,25 +424,13 @@ fn clipboard(image: &Image, owner: usize, cancel: &AtomicBool) -> Result<()> {
     let mut v5 = Block::from_bytes(&dib(image, true)?)?;
     let mut standard = Block::from_bytes(&dib(image, false)?)?;
     let mut png = Block::from_bytes(&super::image_encode::encode_png(image)?)?;
-    // SAFETY: formats and storage are prepared before touching the clipboard. Open retries are bounded on the worker, never the UI thread.
+    // SAFETY: the format name is static and the worker holds the clipboard while publishing the data.
     unsafe {
         let format = RegisterClipboardFormatW(w!("PNG"));
         if format == 0 {
             return Err(fail("无法注册剪贴板 PNG 格式"));
         }
-        let mut opened = false;
-        for _ in 0..5 {
-            check(cancel)?;
-            if OpenClipboard(Some(HWND(owner as *mut _))).is_ok() {
-                opened = true;
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        if !opened {
-            return Err(fail("剪贴板正被其他应用占用，请稍后重试"));
-        }
-        let _clipboard = Clipboard;
+        let _clipboard = Clipboard::open(owner, cancel)?;
         check(cancel)?;
         EmptyClipboard()?;
         v5.publish(17)?;

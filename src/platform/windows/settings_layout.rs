@@ -9,9 +9,9 @@ pub const PARAMETER_SLIDER: u16 = 420;
 pub const PARAMETER_EDIT: u16 = 440;
 pub const OUTPUT_FORMAT: u16 = 430;
 pub const RESET_CAPTURE: u16 = 431;
-pub const DRAWING_TOOL: u16 = 432;
-pub const DRAWING_TOOL_IDS: std::ops::Range<u16> =
-    DRAWING_TOOL..DRAWING_TOOL + Tool::DRAWING.len() as u16;
+pub const CAPTURE_TOOL: u16 = 432;
+pub const CAPTURE_TOOL_IDS: std::ops::Range<u16> =
+    CAPTURE_TOOL..CAPTURE_TOOL + Tool::TOOLBAR.len() as u16;
 pub const PARAMETER_LABELS: [&str; 7] = [
     "矩形线宽",
     "箭头线宽",
@@ -138,14 +138,14 @@ impl Page {
                 p.note("成图实际像素 · 线宽 1–64 px · 字号 8–256 px", Tone::Muted);
                 if Tool::Mosaic
                     .index()
-                    .is_some_and(|index| cfg.drawing_tools[index])
+                    .is_some_and(|index| cfg.capture_tools[index])
                 {
                     p.parameter_row(5);
                     p.note("成图实际像素 · 马赛克颗粒 2–64 px", Tone::Muted);
                 }
                 if Tool::Sequence
                     .index()
-                    .is_some_and(|index| cfg.drawing_tools[index])
+                    .is_some_and(|index| cfg.capture_tools[index])
                 {
                     p.parameter_row(6);
                     p.note("成图实际像素 · 编号直径 16–128 px", Tone::Muted);
@@ -185,10 +185,10 @@ impl Page {
                 };
                 let gap = 12;
                 let cell = (p.width - (columns - 1) * gap) / columns;
-                for i in 0..Tool::DRAWING.len() {
+                for i in 0..Tool::TOOLBAR.len() {
                     let x = (i as i32 % columns) * (cell + gap);
-                    p.control(DRAWING_TOOL + i as u16, x, -6, cell, 38);
-                    if i as i32 % columns == columns - 1 || i + 1 == Tool::DRAWING.len() {
+                    p.control(CAPTURE_TOOL + i as u16, x, -6, cell, 38);
+                    if i as i32 % columns == columns - 1 || i + 1 == Tool::TOOLBAR.len() {
                         p.y += ROW;
                     }
                 }

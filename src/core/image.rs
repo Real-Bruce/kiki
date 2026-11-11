@@ -1,4 +1,8 @@
-use super::{config::CaptureParameter, geometry::PixelRect};
+use super::{
+    config::CaptureParameter,
+    geometry::PixelRect,
+    selection::{PixelPoint, contains},
+};
 
 pub fn blend_over_white(channel: u8, alpha: u8) -> u8 {
     let alpha = u16::from(alpha);
@@ -24,6 +28,18 @@ impl Image {
     }
     pub fn stride(&self) -> u32 {
         self.stride
+    }
+
+    pub fn rgb_at(&self, point: PixelPoint) -> Option<[u8; 3]> {
+        if !contains(self.bounds, point) {
+            return None;
+        }
+        // In-bounds offsets fit the checked allocation created by Image::new.
+        let x = (i64::from(point.x) - i64::from(self.bounds.left)) as usize;
+        let y = (i64::from(point.y) - i64::from(self.bounds.top)) as usize;
+        let offset = y * self.stride as usize + x * 4;
+        let pixel = self.pixels.get(offset..offset + 4)?;
+        (pixel[3] != 0).then_some([pixel[2], pixel[1], pixel[0]])
     }
 
     /// Copy an independently owned region; uncovered pixels remain transparent.

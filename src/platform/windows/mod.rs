@@ -1,6 +1,7 @@
 mod annotation_render;
 mod capture;
 mod capture_toolbar;
+mod color_picker;
 mod composition;
 #[cfg(feature = "diagnostics")]
 mod diagnostics;

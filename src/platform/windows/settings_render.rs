@@ -296,10 +296,10 @@ impl Canvas {
     pub fn toolbar_preview(
         &self,
         bounds: PixelRect,
-        drawing_tools: [bool; crate::core::annotation::Tool::DRAWING.len()],
+        capture_tools: [bool; crate::core::annotation::Tool::TOOLBAR.len()],
         dark: bool,
     ) {
-        let layout = Layout::preview(bounds, drawing_tools);
+        let layout = Layout::preview(bounds, capture_tools);
         let compact_text = (layout.scale < 1.)
             .then(|| super::selection_render::format(&self.factory, layout.scale).ok())
             .flatten();

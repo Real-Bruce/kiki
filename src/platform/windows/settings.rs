@@ -17,7 +17,7 @@ mod reset_dialog;
 #[path = "settings_layout.rs"]
 mod settings_layout;
 use settings_layout::{
-    DRAWING_TOOL, DRAWING_TOOL_IDS, FOOTER, HEADER, Item, OUTPUT_FORMAT, PARAMETER_EDIT,
+    CAPTURE_TOOL, CAPTURE_TOOL_IDS, FOOTER, HEADER, Item, OUTPUT_FORMAT, PARAMETER_EDIT,
     PARAMETER_LABELS, PARAMETER_SLIDER, Page, RESET_CAPTURE, Rect, START_CAPTURE, Tone,
 };
 use std::{cell::Cell, rc::Rc};
@@ -467,10 +467,10 @@ fn caption(id: u16, cfg: &Config, start: &std::result::Result<startup::State, St
         }
         OUTPUT_FORMAT => format!("输出格式：{}", cfg.output_format.label()),
         RESET_CAPTURE => "恢复默认".into(),
-        id if DRAWING_TOOL_IDS.contains(&id) => {
-            let index = usize::from(id - DRAWING_TOOL);
-            let tool = Tool::DRAWING[index].label();
-            let status = if cfg.drawing_tools[index] {
+        id if CAPTURE_TOOL_IDS.contains(&id) => {
+            let index = usize::from(id - CAPTURE_TOOL);
+            let tool = Tool::TOOLBAR[index].label();
+            let status = if cfg.capture_tools[index] {
                 "开启"
             } else {
                 "关闭"
@@ -520,7 +520,7 @@ fn create_controls(hwnd: HWND) -> Result<()> {
                 800,
             ])
             .chain(410..=417)
-            .chain(DRAWING_TOOL_IDS)
+            .chain(CAPTURE_TOOL_IDS)
             .chain(PARAMETER_SLIDER..PARAMETER_SLIDER + PARAMETER_LABELS.len() as u16)
             .chain(PARAMETER_EDIT..PARAMETER_EDIT + PARAMETER_LABELS.len() as u16)
             .chain(600..=602);
@@ -758,7 +758,7 @@ fn paint(hwnd: HWND, p: *mut State) -> Result<()> {
                             right: r.x + r.w,
                             bottom: r.y + r.h - state.scroll,
                         },
-                        preferences::current().drawing_tools,
+                        preferences::current().capture_tools,
                         dark,
                     );
                 }
@@ -893,8 +893,8 @@ fn action(hwnd: HWND, id: u16) {
                 preferences::update(cfg)
             }
             OUTPUT_FORMAT => choose_output_format(hwnd, cfg.output_format),
-            id if (*p).page == 2 && DRAWING_TOOL_IDS.contains(&id) => {
-                let enabled = &mut cfg.drawing_tools[usize::from(id - DRAWING_TOOL)];
+            id if (*p).page == 2 && CAPTURE_TOOL_IDS.contains(&id) => {
+                let enabled = &mut cfg.capture_tools[usize::from(id - CAPTURE_TOOL)];
                 *enabled = !*enabled;
                 preferences::update(cfg)
             }
@@ -1156,20 +1156,20 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
         let fg = appearance::foreground(dark);
         let labels = appearance::paint_control(dc, r, backdrop, |shapes| {
             let mut labels = Vec::new();
-            if matches!(id, 200 | 400) || DRAWING_TOOL_IDS.contains(&id) {
+            if matches!(id, 200 | 400) || CAPTURE_TOOL_IDS.contains(&id) {
                 let on = match id {
                     400 => cfg.show_hints,
                     200 => matches!(
                         state.startup,
                         Ok(startup::State::Enabled | startup::State::Moved)
                     ),
-                    _ => cfg.drawing_tools[usize::from(id - DRAWING_TOOL)],
+                    _ => cfg.capture_tools[usize::from(id - CAPTURE_TOOL)],
                 };
                 if hovered && !disabled {
                     shapes.rounded(r, dip(12), appearance::hover(dark));
                 }
-                if DRAWING_TOOL_IDS.contains(&id) {
-                    let tool = Tool::DRAWING[usize::from(id - DRAWING_TOOL)];
+                if CAPTURE_TOOL_IDS.contains(&id) {
+                    let tool = Tool::TOOLBAR[usize::from(id - CAPTURE_TOOL)];
                     let toggle = RECT {
                         left: r.right - dip(50),
                         ..r
@@ -2062,18 +2062,18 @@ mod tests {
             assert!(!hotkey_focused());
             // Short logical work areas must scroll; controls outside the viewport must be hidden.
             SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(102)), None);
-            for id in DRAWING_TOOL_IDS.take(4) {
+            for id in CAPTURE_TOOL_IDS.take(4) {
                 SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(usize::from(id))), None);
             }
             let hidden = preferences::current();
-            assert_eq!(hidden.drawing_tools, [false; Tool::DRAWING.len()]);
+            assert_eq!(hidden.capture_tools, [false; Tool::TOOLBAR.len()]);
             assert_eq!(hidden.stroke_widths, [8, 3, 3]);
-            for id in DRAWING_TOOL_IDS.take(4) {
+            for id in CAPTURE_TOOL_IDS.take(4) {
                 SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(usize::from(id))), None);
             }
             assert_eq!(
-                preferences::current().drawing_tools,
-                crate::core::config::DEFAULT_DRAWING_TOOLS
+                preferences::current().capture_tools,
+                crate::core::config::DEFAULT_CAPTURE_TOOLS
             );
             SetWindowPos(hwnd, None, 0, 0, 860, 480, SWP_NOZORDER | SWP_NOACTIVATE).unwrap();
             SendMessageW(hwnd, WM_VSCROLL, Some(WPARAM(SB_PAGEDOWN.0 as usize)), None);

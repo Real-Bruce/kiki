@@ -1,7 +1,8 @@
 //! Native frozen-desktop selection window. Annotation/output controls are staged for P4/P5.
 use super::{
     capture::CaptureResult,
-    capture_toolbar::{self, Layout, MORE, drawing_tool, tool_button, tool_visible},
+    capture_toolbar::{self, Layout, MORE, tool_button, tool_visible, toolbar_tool},
+    color_picker::{Format as PickerFormat, Notice as PickerNotice, Readout as PickerReadout},
     parameter_control::{self, Wheel},
     selection_render::{Canvas, PaintInput, system_dark},
     text_input::{TextHit, TextInput, TextStart},
@@ -24,7 +25,9 @@ use windows::{
     core::{Error, Result, w},
 };
 
+const OUTPUT_TIMER: usize = 5;
 const PARAMETER_TIMER: usize = 6;
+const PICKER_NOTICE_TIMER: usize = 7;
 const PARAMETER_EDIT: u16 = 900;
 
 pub struct Preview(Rc<Cell<Option<HWND>>>);
@@ -108,7 +111,7 @@ impl Preview {
                 canvas,
                 selection,
                 editor,
-                drawing_tools: cfg.drawing_tools,
+                capture_tools: cfg.capture_tools,
                 corner_radius: cfg.corner_radius,
                 parameter_down: false,
                 parameter_slider: false,
@@ -120,6 +123,9 @@ impl Preview {
                 output: None,
                 busy: false,
                 pending_output: None,
+                picker_format: PickerFormat::default(),
+                picker_down: None,
+                picker_notice: None,
                 screens: capture.screens,
                 windows: capture
                     .windows
@@ -177,7 +183,7 @@ struct State {
     canvas: Canvas,
     selection: Selection,
     editor: Editor,
-    drawing_tools: [bool; Tool::DRAWING.len()],
+    capture_tools: [bool; Tool::TOOLBAR.len()],
     corner_radius: u16,
     parameter_down: bool,
     parameter_slider: bool,
@@ -189,6 +195,9 @@ struct State {
     output: Option<super::output::Job>,
     busy: bool,
     pending_output: Option<usize>,
+    picker_format: PickerFormat,
+    picker_down: Option<PixelPoint>,
+    picker_notice: Option<PickerNotice>,
     screens: Vec<DisplayInfo>,
     windows: Vec<PixelRect>,
     pointer: PixelPoint,
@@ -216,6 +225,7 @@ enum CanvasHit {
     ResizeSelection(usize),
     MoveSelection,
     Object(ObjectHit),
+    PickColor,
     Blank,
 }
 
@@ -225,12 +235,12 @@ impl State {
             self.pending_more = self.layout().is_some_and(|l| l.overflow().next().is_some());
             return false;
         }
-        if !tool_visible(self.drawing_tools, index)
+        if !tool_visible(self.capture_tools, index)
             || !capture_toolbar::enabled(&self.editor, index)
         {
             return false;
         }
-        if let Some(mut tool) = drawing_tool(index) {
+        if let Some(mut tool) = toolbar_tool(index) {
             self.editor.finish_parameter_adjustment();
             self.wheel = Wheel::default();
             self.editor.cancel();
@@ -248,6 +258,8 @@ impl State {
                 }
             }
             self.editor.tool = tool;
+            self.picker_format = PickerFormat::default();
+            self.picker_notice = None;
             if tool == Tool::Text
                 && let Some(object) = self
                     .editor
@@ -293,7 +305,7 @@ impl State {
         let rect = self.selection.rect.filter(|_| !self.selection.active())?;
         Some(
             self.canvas
-                .layout(rect, &self.screens, self.editor.tool, self.drawing_tools),
+                .layout(rect, &self.screens, self.editor.tool, self.capture_tools),
         )
     }
     fn can_focus(&self, layout: &Layout, id: usize) -> bool {
@@ -384,19 +396,28 @@ impl State {
             || self.scale(),
             |rect| {
                 self.canvas
-                    .layout(rect, &self.screens, self.editor.tool, self.drawing_tools)
+                    .layout(rect, &self.screens, self.editor.tool, self.capture_tools)
                     .scale
             },
         )
     }
     fn canvas_at(&self, p: PixelPoint, space: bool, scale: f32) -> CanvasHit {
         let radius = hit_radius(scale);
-        if let Some(handle) = self.selection.resize_at(p, radius) {
+        let inside = self.selection.rect.is_some_and(|r| contains(r, p));
+        let resize = if self.editor.tool == Tool::Picker && inside && !space {
+            // Leave the handles available while letting the picker sample inner edge pixels.
+            self.selection.handle_at(p, radius)
+        } else {
+            self.selection.resize_at(p, radius)
+        };
+        if let Some(handle) = resize {
             return CanvasHit::ResizeSelection(handle);
         }
-        let inside = self.selection.rect.is_some_and(|r| contains(r, p));
         if inside && space {
             return CanvasHit::MoveSelection;
+        }
+        if self.picker_at(p) {
+            return CanvasHit::PickColor;
         }
         if let Some(hit) = self.editor.hit_at(p, radius, scale, inside) {
             return CanvasHit::Object(hit);
@@ -406,6 +427,27 @@ impl State {
         } else {
             CanvasHit::Blank
         }
+    }
+
+    fn picker_at(&self, point: PixelPoint) -> bool {
+        self.editor.tool == Tool::Picker
+            && !self.busy
+            && !self.selection.active()
+            && self
+                .selection
+                .rect
+                .is_some_and(|rect| contains(rect, point))
+            && self
+                .layout()
+                .is_none_or(|layout| !contains(layout.toolbar, point))
+    }
+
+    fn picker_readout(&self) -> Option<PickerReadout> {
+        self.picker_at(self.pointer).then(|| PickerReadout {
+            format: self.picker_format,
+            rgb: self.canvas.rgb_at(self.pointer),
+            notice: self.picker_notice,
+        })
     }
 }
 
@@ -596,23 +638,25 @@ fn close_parameter_edit(hwnd: HWND, pointer: *mut State, commit: bool, restore_f
 
 fn refresh_tool_visibility(hwnd: HWND, pointer: *mut State) {
     let config = super::preferences::current();
-    let drawing_tools = config.drawing_tools;
+    let capture_tools = config.capture_tools;
     // SAFETY: pointer belongs to the live preview. Release the state borrow
     // before calling Win32 operations that can synchronously dispatch messages.
     unsafe {
         let state = &mut *pointer;
         state.editor.mosaic_size = config.mosaic_size;
         state.editor.sequence_size = config.sequence_size;
-        if state.drawing_tools == drawing_tools {
+        if state.capture_tools == capture_tools {
             return;
         }
-        state.drawing_tools = drawing_tools;
-        let active_hidden = !tool_visible(drawing_tools, tool_button(state.editor.tool));
+        state.capture_tools = capture_tools;
+        let active_hidden = !tool_visible(capture_tools, tool_button(state.editor.tool));
         let mut release = state.down_button.take().is_some();
         if active_hidden {
             release |= state.editor.cancel() || state.parameter_slider;
+            release |= state.picker_down.take().is_some();
             state.editor.finish_parameter_adjustment();
             state.editor.tool = Tool::Select;
+            state.picker_notice = None;
             state.parameter_slider = false;
             state.parameter_down = false;
             state.wheel = Wheel::default();
@@ -787,7 +831,15 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 (*pointer).editor.finish_parameter_adjustment();
                 LRESULT(0)
             }
-            WM_TIMER if wp.0 == 5 => {
+            WM_TIMER if wp.0 == PICKER_NOTICE_TIMER => {
+                let _ = KillTimer(Some(hwnd), PICKER_NOTICE_TIMER);
+                if (*pointer).picker_notice != Some(PickerNotice::Copying) {
+                    (*pointer).picker_notice = None;
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                }
+                LRESULT(0)
+            }
+            WM_TIMER if wp.0 == OUTPUT_TIMER => {
                 let result =
                     (*pointer)
                         .output
@@ -802,8 +854,19 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 if let Some(result) = result {
                     let job = (*pointer).output.take();
                     drop(job);
+                    let _ = KillTimer(Some(hwnd), OUTPUT_TIMER);
+                    if !(*pointer).busy {
+                        if (*pointer).picker_notice == Some(PickerNotice::Copying) {
+                            let notice = if result.is_ok() {
+                                PickerNotice::Copied
+                            } else {
+                                PickerNotice::Failed
+                            };
+                            show_picker_notice(hwnd, pointer, notice);
+                        }
+                        return LRESULT(0);
+                    }
                     (*pointer).busy = false;
-                    let _ = KillTimer(Some(hwnd), 5);
                     match result {
                         Ok(completed) => {
                             let opened = match completed {
@@ -873,6 +936,12 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 let result = {
                     let state = &mut *pointer;
                     let parameter = state.parameter();
+                    let picker = state.picker_readout();
+                    let message = if picker.is_none() && state.editor.tool == Tool::Picker {
+                        state.picker_notice.map(PickerNotice::label)
+                    } else {
+                        state.parameter_message()
+                    };
                     state.canvas.paint(PaintInput {
                         selection: &state.selection,
                         editor: &state.editor,
@@ -881,7 +950,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                         busy: state.busy,
                         hover: state.hover,
                         screens: &state.screens,
-                        drawing_tools: state.drawing_tools,
+                        capture_tools: state.capture_tools,
                         pointer: state.pointer,
                         focus: if state.keyboard_focus {
                             state.focus
@@ -891,7 +960,8 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                         pressed: state.down_button,
                         editing_parameter: state.parameter_edit.is_some(),
                         parameter,
-                        parameter_error: state.parameter_message(),
+                        message,
+                        picker,
                     })
                 };
                 let _ = EndPaint(hwnd, &ps);
@@ -1016,7 +1086,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                             CanvasHit::Object(hit) => {
                                 let double_clicked_text = msg == WM_LBUTTONDBLCLK
                                     && state.editor.tool == Tool::Select
-                                    && tool_visible(state.drawing_tools, tool_button(Tool::Text))
+                                    && tool_visible(state.capture_tools, tool_button(Tool::Text))
                                     && matches!(hit, ObjectHit::Move(_));
                                 if let Some(index) = double_clicked_text
                                     .then(|| state.editor.text_at(p))
@@ -1026,6 +1096,9 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                                 } else if let Err(message) = state.editor.begin_at(p, Some(hit)) {
                                     error = Some(message);
                                 }
+                            }
+                            CanvasHit::PickColor => {
+                                state.picker_down = Some(p);
                             }
                             CanvasHit::Blank => {
                                 if state.editor.tool == Tool::Select
@@ -1067,6 +1140,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     set_parameter_value(pointer, value);
                 }
                 let warning;
+                let mut picked = None;
                 let close = {
                     let state = &mut *pointer;
                     warning = state.editor.take_warning();
@@ -1082,6 +1156,18 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                             state.parameter_slider = false;
                         } else if state.editor.active() {
                             state.editor.finish(state.pointer);
+                        } else if let Some(start) = state.picker_down.take() {
+                            let point = state.pointer;
+                            let radius = hit_radius(state.hit_scale()) as u32;
+                            if start.x.abs_diff(point.x) <= radius
+                                && start.y.abs_diff(point.y) <= radius
+                                && state.picker_at(point)
+                            {
+                                picked = state
+                                    .canvas
+                                    .rgb_at(point)
+                                    .map(|rgb| state.picker_format.encode(rgb));
+                            }
                         } else if !state.parameter_down {
                             state.selection.finish(state.pointer, state.pressed_window);
                         }
@@ -1090,6 +1176,9 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     }
                 };
                 let _ = ReleaseCapture();
+                if let Some(text) = picked {
+                    begin_color_copy(hwnd, pointer, text);
+                }
                 if let Some(message) = warning {
                     super::show_error(message);
                 }
@@ -1118,8 +1207,18 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     }
                     state.parameter_down = false;
                     state.down_button = None;
+                    state.picker_down = None;
                 }
                 let _ = InvalidateRect(Some(hwnd), None, false);
+                LRESULT(0)
+            }
+            WM_KEYDOWN
+                if wp.0 == usize::from(VK_SHIFT.0) && (*pointer).editor.tool == Tool::Picker =>
+            {
+                if lp.0 & (1 << 30) == 0 {
+                    (*pointer).picker_format.toggle();
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                }
                 LRESULT(0)
             }
             WM_KEYDOWN | WM_KEYUP if msg == WM_KEYDOWN || wp.0 == VK_SPACE.0 as usize => {
@@ -1138,7 +1237,9 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                                 state.editor.finish_parameter_adjustment();
                                 state.parameter_slider = false;
                                 false
-                            } else if state.down_button.take().is_some() {
+                            } else if state.down_button.take().is_some()
+                                || state.picker_down.take().is_some()
+                            {
                                 false
                             } else {
                                 !state.editor.cancel() && !state.selection.cancel_drag()
@@ -1653,6 +1754,45 @@ fn restyle_text(
     Ok(())
 }
 
+fn show_picker_notice(hwnd: HWND, pointer: *mut State, notice: PickerNotice) {
+    // SAFETY: the UI dispatcher owns the live state and timer on this window.
+    unsafe {
+        (*pointer).picker_notice = Some(notice);
+        let _ = KillTimer(Some(hwnd), PICKER_NOTICE_TIMER);
+        if notice != PickerNotice::Copying {
+            let _ = SetTimer(Some(hwnd), PICKER_NOTICE_TIMER, 1800, None);
+        }
+        let _ = InvalidateRect(Some(hwnd), None, false);
+    }
+}
+
+fn begin_color_copy(hwnd: HWND, pointer: *mut State, text: String) {
+    // SAFETY: the dispatcher owns the state and its job slot. The worker receives
+    // owned text and the HWND value, with cancellation tied to the job lifetime.
+    unsafe {
+        if (*pointer).output.is_some() {
+            if (*pointer).picker_notice != Some(PickerNotice::Copying) {
+                show_picker_notice(hwnd, pointer, PickerNotice::Failed);
+            }
+            return;
+        }
+        if SetTimer(Some(hwnd), OUTPUT_TIMER, 20, None) == 0 {
+            show_picker_notice(hwnd, pointer, PickerNotice::Failed);
+            return;
+        }
+        match super::output::start_color_copy(text, hwnd.0 as usize) {
+            Ok(job) => {
+                (*pointer).output = Some(job);
+                show_picker_notice(hwnd, pointer, PickerNotice::Copying);
+            }
+            Err(_) => {
+                let _ = KillTimer(Some(hwnd), OUTPUT_TIMER);
+                show_picker_notice(hwnd, pointer, PickerNotice::Failed);
+            }
+        }
+    }
+}
+
 fn begin_output(hwnd: HWND, pointer: *mut State) -> Result<()> {
     // SAFETY: UI dispatch owns this live state; no borrow is held across dialog, capture release or native callbacks.
     let (kind, lifetime) = unsafe {
@@ -1663,6 +1803,9 @@ fn begin_output(hwnd: HWND, pointer: *mut State) -> Result<()> {
         let Some(kind) = state.pending_output.take() else {
             return Ok(());
         };
+        if state.output.is_some() {
+            return Err(Error::new(E_FAIL, "正在复制颜色，请稍后重试"));
+        }
         (kind, state.lifetime.clone())
     };
     if kind != 8 {
@@ -1723,7 +1866,7 @@ fn begin_output(hwnd: HWND, pointer: *mut State) -> Result<()> {
         } else {
             (*pointer).editor.snapshot()
         };
-        if SetTimer(Some(hwnd), 5, 20, None) == 0 {
+        if SetTimer(Some(hwnd), OUTPUT_TIMER, 20, None) == 0 {
             (*pointer).busy = false;
             return Err(Error::new(E_FAIL, "无法启动输出检查，请重试"));
         }
@@ -1743,7 +1886,7 @@ fn begin_output(hwnd: HWND, pointer: *mut State) -> Result<()> {
             Ok(job) => state.output = Some(job),
             Err(e) => {
                 state.busy = false;
-                let _ = KillTimer(Some(hwnd), 5);
+                let _ = KillTimer(Some(hwnd), OUTPUT_TIMER);
                 return Err(e);
             }
         }
@@ -2237,7 +2380,7 @@ mod tests {
             let size = draft.size;
             let angle = draft.angle;
 
-            config.drawing_tools = [false, true, true, false, false, false];
+            config.capture_tools = [false, true, true, false, false, false, false];
             super::super::preferences::update(config.clone()).unwrap();
             let mut message = MSG::default();
             let changed = super::super::preferences::CHANGED;
@@ -2270,7 +2413,7 @@ mod tests {
                 [9, 12, 14]
             );
 
-            config.drawing_tools = crate::core::config::DEFAULT_DRAWING_TOOLS;
+            config.capture_tools = crate::core::config::DEFAULT_CAPTURE_TOOLS;
             super::super::preferences::update(config.clone()).unwrap();
             SendMessageW(hwnd, changed, None, None);
             (*pointer).activate(tool_button(Tool::Text));

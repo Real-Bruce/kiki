@@ -1,6 +1,6 @@
 //! Outline shapes measured against the capture design, in toolbar DIPs.
 use super::{
-    capture_toolbar::{BUTTON_HEIGHT, Layout, MORE, MOSAIC, SEQUENCE},
+    capture_toolbar::{BUTTON_HEIGHT, Layout, MORE, MOSAIC, PICKER, SEQUENCE},
     ui_palette as palette,
 };
 use crate::core::{geometry::PixelRect, selection::PixelPoint};
@@ -15,6 +15,7 @@ use windows_numerics::{Matrix3x2, Vector2};
 
 pub(super) struct ToolbarIcons {
     paths: [ID2D1PathGeometry; 10],
+    picker: ID2D1PathGeometry,
     stroke: ID2D1StrokeStyle,
 }
 
@@ -164,6 +165,19 @@ const CLOSE: &[Figure] = &[
     Figure((-6.5, -6.5), &[L((6.5, 6.5))], false),
     Figure((6.5, -6.5), &[L((-6.5, 6.5))], false),
 ];
+const EYEDROPPER: &[Figure] = &[
+    Figure(
+        (3.5, -8.),
+        &[L((8., -3.5)), L((4.8, -0.3)), L((0.3, -4.8))],
+        true,
+    ),
+    Figure(
+        (1.5, -3.6),
+        &[L((-6.5, 4.4)), L((-6.5, 7.)), L((-3.9, 7.)), L((3.6, -1.5))],
+        false,
+    ),
+    Figure((-6.5, 7.), &[L((-8., 8.5))], false),
+];
 
 impl ToolbarIcons {
     pub fn new(factory: &ID2D1Factory) -> Result<Self> {
@@ -220,6 +234,7 @@ impl ToolbarIcons {
                     path(COPY, false)?,
                     path(CLOSE, false)?,
                 ],
+                picker: path(EYEDROPPER, false)?,
                 stroke,
             })
         }
@@ -296,7 +311,12 @@ impl ToolbarIcons {
                 }
                 return;
             }
-            let Some(path) = index.checked_sub(1).and_then(|i| self.paths.get(i)) else {
+            let path = if index == PICKER {
+                Some(&self.picker)
+            } else {
+                index.checked_sub(1).and_then(|i| self.paths.get(i))
+            };
+            let Some(path) = path else {
                 return;
             };
             let mut prior = Matrix3x2::default();

@@ -18,19 +18,21 @@ pub enum Tool {
     Text,
     Mosaic,
     Sequence,
+    Picker,
 }
 impl Tool {
-    pub const DRAWING: [Self; CAPTURE_TOOL_COUNT] = [
+    pub const TOOLBAR: [Self; CAPTURE_TOOL_COUNT] = [
         Self::Rectangle,
         Self::Arrow,
         Self::Pen,
         Self::Text,
         Self::Mosaic,
         Self::Sequence,
+        Self::Picker,
     ];
 
     pub fn index(self) -> Option<usize> {
-        Self::DRAWING.iter().position(|&tool| tool == self)
+        Self::TOOLBAR.iter().position(|&tool| tool == self)
     }
 
     pub fn label(self) -> &'static str {
@@ -42,6 +44,7 @@ impl Tool {
             Self::Text => "文字",
             Self::Mosaic => "马赛克",
             Self::Sequence => "编号",
+            Self::Picker => "取色",
         }
     }
 
@@ -63,7 +66,7 @@ impl Tool {
             Self::Rectangle => Some(0),
             Self::Arrow => Some(1),
             Self::Pen => Some(2),
-            Self::Select | Self::Text | Self::Mosaic | Self::Sequence => None,
+            Self::Select | Self::Text | Self::Mosaic | Self::Sequence | Self::Picker => None,
         }
     }
 }
@@ -800,7 +803,7 @@ impl Editor {
             });
             return Ok(true);
         }
-        if matches!(self.tool, Tool::Select | Tool::Text) {
+        if matches!(self.tool, Tool::Select | Tool::Text | Tool::Picker) {
             self.selected = None;
             return Ok(false);
         }
@@ -822,7 +825,7 @@ impl Editor {
                 center: p,
                 diameter: self.sequence_size,
             },
-            Tool::Select | Tool::Text => return Ok(false),
+            Tool::Select | Tool::Text | Tool::Picker => return Ok(false),
         };
         let style = self.default_style();
         let index = self.objects.len();

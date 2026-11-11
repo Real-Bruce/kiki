@@ -1,5 +1,6 @@
 use super::{
     capture_toolbar::{self, Layout},
+    color_picker::Readout,
     parameter_control,
     text_input::TextInput,
     toolbar_icons::{BarPaint, BarState, ToolbarIcons},
@@ -40,13 +41,14 @@ pub struct PaintInput<'a> {
     pub busy: bool,
     pub hover: Option<PixelRect>,
     pub screens: &'a [DisplayInfo],
-    pub drawing_tools: [bool; Tool::DRAWING.len()],
+    pub capture_tools: [bool; Tool::TOOLBAR.len()],
     pub pointer: PixelPoint,
     pub focus: usize,
     pub pressed: Option<usize>,
     pub editing_parameter: bool,
     pub parameter: Option<(CaptureParameter, u16)>,
-    pub parameter_error: Option<&'static str>,
+    pub message: Option<&'static str>,
+    pub picker: Option<Readout>,
 }
 pub struct Canvas {
     target: ID2D1RenderTarget,
@@ -89,6 +91,9 @@ impl Canvas {
     }
     pub fn bounds(&self) -> PixelRect {
         self.source.bounds()
+    }
+    pub fn rgb_at(&self, point: PixelPoint) -> Option<[u8; 3]> {
+        self.source.rgb_at(point)
     }
     pub fn new(hwnd: HWND, image: Image) -> Result<Self> {
         // SAFETY: UI-thread COM objects, live HWND and call-scoped pixel slice; CreateBitmap copies the source.
@@ -145,10 +150,10 @@ impl Canvas {
         rect: PixelRect,
         screens: &[DisplayInfo],
         tool: Tool,
-        drawing_tools: [bool; Tool::DRAWING.len()],
+        capture_tools: [bool; Tool::TOOLBAR.len()],
     ) -> Layout {
         let (screen, preferred) = self.display(rect, screens);
-        Layout::new(rect, screen, preferred, tool, drawing_tools)
+        Layout::new(rect, screen, preferred, tool, capture_tools)
     }
 
     fn prepare_mosaics(&mut self, editor: &Editor) -> Result<()> {
@@ -228,20 +233,21 @@ impl Canvas {
             busy,
             hover,
             screens,
-            drawing_tools,
+            capture_tools,
             pointer,
             focus,
             pressed,
             editing_parameter,
             parameter,
-            parameter_error,
+            message,
+            picker,
         } = input;
         let editing = text_input.and_then(|input| input.index);
         let text_active = text_input.is_some();
         let layout = selection
             .rect
             .filter(|_| !selection.active())
-            .map(|r| self.layout(r, screens, editor.tool, drawing_tools));
+            .map(|r| self.layout(r, screens, editor.tool, capture_tools));
         let anchor = selection.rect.or(hover).unwrap_or(PixelRect {
             left: pointer.x,
             top: pointer.y,
@@ -395,6 +401,9 @@ impl Canvas {
             } else {
                 Ok(())
             };
+            if let Some(picker) = picker {
+                self.paint_picker(picker, pointer, screens, layout.as_ref());
+            }
             if let Some(layout) = layout {
                 self.paint_toolbar(&layout, editor, pointer, focus, pressed, busy);
                 self.paint_parameters(&layout, editor, focus);
@@ -402,7 +411,7 @@ impl Canvas {
                     self.paint_parameter_slider(&layout, parameter, focus, editing_parameter);
                 }
             }
-            if busy || parameter_error.is_some() || super::preferences::hints() {
+            if busy || message.is_some() || super::preferences::hints() {
                 let selected = selection.rect.is_some();
                 let hint_width = if text_active || selected { 480. } else { 350. };
                 let display = self.local(screen);
@@ -419,7 +428,7 @@ impl Canvas {
                 self.label(
                     if busy {
                         "正在输出，请稍候…"
-                    } else if let Some(message) = parameter_error {
+                    } else if let Some(message) = message {
                         message
                     } else if text_active {
                         "Enter 换行　Ctrl+Enter 完成　Esc 取消文字"
@@ -438,6 +447,84 @@ impl Canvas {
                 .Present(0, windows::Win32::Graphics::Dxgi::DXGI_PRESENT(0))
                 .ok()
         }
+    }
+    fn paint_picker(
+        &self,
+        readout: Readout,
+        pointer: PixelPoint,
+        screens: &[DisplayInfo],
+        layout: Option<&Layout>,
+    ) {
+        let distance = |value: i32, min: i32, max: i32| {
+            i64::from(value.abs_diff(value.max(min).min(max.saturating_sub(1))))
+        };
+        let screen = screens
+            .iter()
+            .min_by_key(|screen| {
+                let r = screen.bounds;
+                distance(pointer.x, r.left, r.right) + distance(pointer.y, r.top, r.bottom)
+            })
+            .map_or(self.bounds(), |screen| screen.bounds);
+        let s = self.scale;
+        let width = (222. * s).round() as i32;
+        let height = (65. * s).round() as i32;
+        let gap = (14. * s).round() as i32;
+        let left = pointer.x.saturating_sub(width).saturating_sub(gap);
+        let right = pointer.x.saturating_add(gap);
+        let top = pointer.y.saturating_sub(height).saturating_sub(gap);
+        let bottom = pointer.y.saturating_add(gap);
+        let positions = [(right, bottom), (left, bottom), (right, top), (left, top)]
+            .map(|(x, y)| fit_panel(PixelPoint { x, y }, screen, width, height));
+        let area = positions
+            .into_iter()
+            .find(|r| {
+                !contains(*r, pointer)
+                    && layout.is_none_or(|layout| layout.bounds.intersection(*r).is_none())
+            })
+            .unwrap_or(positions[0]);
+        let panel = self.local(area);
+        let dark = self.dark;
+        self.panel(panel, 9. * s);
+        let foreground = tone(palette::foreground(dark), 1.);
+        let mut label = D2D_RECT_F {
+            left: panel.left + 9. * s,
+            right: panel.right - 9. * s,
+            top: panel.top + 5. * s,
+            bottom: panel.top + 37. * s,
+        };
+        if let Some([r, g, b]) = readout.rgb {
+            let swatch = D2D_RECT_F {
+                left: panel.left + 13. * s,
+                right: panel.left + 36. * s,
+                top: panel.top + 10. * s,
+                bottom: panel.top + 33. * s,
+            };
+            self.round(swatch, 4. * s, color(r, g, b, 1.));
+            self.outline(swatch, 4. * s, s, tone(palette::divider(dark), 1.));
+            label.left = swatch.right + 4. * s;
+            self.label(&readout.format.encode([r, g, b]), label, foreground);
+        } else {
+            self.label("无像素", label, foreground);
+        }
+        self.label(
+            readout.notice.map_or_else(
+                || {
+                    if readout.rgb.is_some() {
+                        readout.format.hint()
+                    } else {
+                        "移动到有像素的区域"
+                    }
+                },
+                |notice| notice.label(),
+            ),
+            D2D_RECT_F {
+                top: panel.top + 36. * s,
+                bottom: panel.bottom - 4. * s,
+                left: panel.left + 8. * s,
+                right: panel.right - 8. * s,
+            },
+            tone(palette::muted(dark), 1.),
+        );
     }
     fn rounded_selection(
         &self,

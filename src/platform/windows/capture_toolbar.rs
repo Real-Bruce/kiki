@@ -8,35 +8,38 @@ use crate::core::{
 pub const MORE: usize = 21;
 pub const MOSAIC: usize = 22;
 pub const SEQUENCE: usize = 23;
+pub const PICKER: usize = 24;
 pub const BUTTON_HEIGHT: f32 = 36.;
 pub const BAR_HEIGHT: f32 = 48.;
 const PARAM_HEIGHT: f32 = 42.;
 const PARAM_WIDTH: f32 = 506.;
 const BUTTON_GAP: f32 = 4.;
-const DRAWING: &[usize; Tool::DRAWING.len()] = &[1, 2, 3, 4, MOSAIC, SEQUENCE];
+const TOOLS: [usize; Tool::TOOLBAR.len()] = [1, 2, 3, 4, MOSAIC, SEQUENCE, PICKER];
+const DRAWING: &[usize] = TOOLS.split_at(TOOLS.len() - 1).0;
+const PICKING: &[usize] = TOOLS.split_at(TOOLS.len() - 1).1;
 const HISTORY: &[usize] = &[5, 6];
 const OUTPUT: &[usize] = &[7, 8, 9];
 const CANCEL: &[usize] = &[10];
-const FULL: &[&[usize]] = &[DRAWING, HISTORY, OUTPUT, CANCEL];
-const COLLAPSED_DRAWING: &[&[usize]] = &[&[MORE], HISTORY, OUTPUT, CANCEL];
+const FULL: &[&[usize]] = &[DRAWING, PICKING, HISTORY, OUTPUT, CANCEL];
+const COLLAPSED_TOOLS: &[&[usize]] = &[&[MORE], HISTORY, OUTPUT, CANCEL];
 const COLLAPSED_ALL: &[&[usize]] = &[&[MORE], OUTPUT, CANCEL];
 
 pub fn tool_button(tool: Tool) -> usize {
-    tool.index().map_or(0, |index| DRAWING[index])
+    tool.index().map_or(0, |index| TOOLS[index])
 }
 
-pub fn drawing_tool(id: usize) -> Option<Tool> {
-    DRAWING
+pub fn toolbar_tool(id: usize) -> Option<Tool> {
+    TOOLS
         .iter()
         .position(|&button| button == id)
-        .map(|index| Tool::DRAWING[index])
+        .map(|index| Tool::TOOLBAR[index])
 }
 
-pub fn tool_visible(drawing_tools: [bool; Tool::DRAWING.len()], id: usize) -> bool {
-    DRAWING
+pub fn tool_visible(capture_tools: [bool; Tool::TOOLBAR.len()], id: usize) -> bool {
+    TOOLS
         .iter()
         .position(|&button| button == id)
-        .is_none_or(|index| drawing_tools[index])
+        .is_none_or(|index| capture_tools[index])
 }
 
 pub fn enabled(editor: &Editor, id: usize) -> bool {
@@ -46,7 +49,7 @@ pub fn enabled(editor: &Editor, id: usize) -> bool {
         11..=18 => editor.tool.has_color(),
         19..=20 => editor.tool.parameter().is_some(),
         7..=10 | MORE => true,
-        _ => drawing_tool(id).is_some(),
+        _ => toolbar_tool(id).is_some(),
     }
 }
 
@@ -59,7 +62,7 @@ pub fn name(id: usize) -> &'static str {
         9 => "复制",
         10 => "取消（Esc）",
         MORE => "更多",
-        _ => drawing_tool(id).map_or("", Tool::label),
+        _ => toolbar_tool(id).map_or("", Tool::label),
     }
 }
 
@@ -103,9 +106,9 @@ pub struct Layout {
     pub toolbar: PixelRect,
     pub parameters: Option<PixelRect>,
     pub screen: PixelRect,
-    buttons: [Option<Button>; DRAWING.len() + HISTORY.len() + OUTPUT.len() + CANCEL.len()],
-    dividers: [Option<i32>; 3],
-    overflow: [Option<usize>; DRAWING.len() + HISTORY.len()],
+    buttons: [Option<Button>; TOOLS.len() + HISTORY.len() + OUTPUT.len() + CANCEL.len()],
+    dividers: [Option<i32>; FULL.len() - 1],
+    overflow: [Option<usize>; TOOLS.len() + HISTORY.len()],
     pub scale: f32,
     pub parameter_scale: f32,
     parameter_tool: Tool,
@@ -117,13 +120,13 @@ impl Layout {
         screen: PixelRect,
         preferred: f32,
         tool: Tool,
-        drawing_tools: [bool; Tool::DRAWING.len()],
+        capture_tools: [bool; Tool::TOOLBAR.len()],
     ) -> Self {
-        Self::build(rect, screen, preferred, tool, drawing_tools, true)
+        Self::build(rect, screen, preferred, tool, capture_tools, true)
     }
 
-    pub fn preview(bounds: PixelRect, drawing_tools: [bool; Tool::DRAWING.len()]) -> Self {
-        Self::build(bounds, bounds, 1., Tool::Select, drawing_tools, false)
+    pub fn preview(bounds: PixelRect, capture_tools: [bool; Tool::TOOLBAR.len()]) -> Self {
+        Self::build(bounds, bounds, 1., Tool::Select, capture_tools, false)
     }
 
     fn build(
@@ -131,22 +134,22 @@ impl Layout {
         screen: PixelRect,
         preferred: f32,
         tool: Tool,
-        drawing_tools: [bool; Tool::DRAWING.len()],
+        capture_tools: [bool; Tool::TOOLBAR.len()],
         allow_overflow: bool,
     ) -> Self {
-        let visible = |id| tool_visible(drawing_tools, id);
+        let visible = |id| tool_visible(capture_tools, id);
         let available = (i64::from(screen.right) - i64::from(screen.left)) as f32;
         let available_height = (i64::from(screen.bottom) - i64::from(screen.top)) as f32;
         let mut groups = FULL;
         let mut padding = 18.;
         let mut group_gap = 18.;
-        let mut overflow = [None; DRAWING.len() + HISTORY.len()];
+        let mut overflow = [None; TOOLS.len() + HISTORY.len()];
         if allow_overflow && bar_width(FULL, visible, padding, group_gap) * preferred > available {
-            if drawing_tools.into_iter().any(|enabled| enabled) {
-                groups = COLLAPSED_DRAWING;
+            if capture_tools.into_iter().any(|enabled| enabled) {
+                groups = COLLAPSED_TOOLS;
                 for (slot, id) in overflow
                     .iter_mut()
-                    .zip(DRAWING.iter().copied().filter(|&id| visible(id)))
+                    .zip(TOOLS.iter().copied().filter(|&id| visible(id)))
                 {
                     *slot = Some(id);
                 }
@@ -157,7 +160,7 @@ impl Layout {
                 group_gap = 14.;
                 overflow.fill(None);
                 for (slot, id) in overflow.iter_mut().zip(
-                    DRAWING
+                    TOOLS
                         .iter()
                         .chain(HISTORY)
                         .copied()
@@ -201,9 +204,9 @@ impl Layout {
         let x = |offset: f32| left + (offset * scale).round() as i32;
         let y = |offset: f32| area.top + (offset * scale).round() as i32;
         let mut offset = padding;
-        let mut buttons = [None; DRAWING.len() + HISTORY.len() + OUTPUT.len() + CANCEL.len()];
+        let mut buttons = [None; TOOLS.len() + HISTORY.len() + OUTPUT.len() + CANCEL.len()];
         let mut button_count = 0;
-        let mut dividers = [None; 3];
+        let mut dividers = [None; FULL.len() - 1];
         let present = groups
             .iter()
             .filter(|group| group.iter().any(|&id| visible(id)));
@@ -322,20 +325,20 @@ mod tests {
         let display = rect(-2200, -900, 2000, 1200);
         let selection = rect(-2100, 10, 2020, 275);
         for scale in [1., 1.25, 1.5, 2.] {
-            for mask in 0u32..1 << Tool::DRAWING.len() {
+            for mask in 0u32..1 << Tool::TOOLBAR.len() {
                 let tools = std::array::from_fn(|i| mask & (1 << i) != 0);
                 let layout = Layout::new(selection, display, scale, Tool::Select, tools);
-                let expected: Vec<_> = [1, 2, 3, 4, MOSAIC, SEQUENCE, 5, 6, 7, 8, 9, 10]
+                let expected: Vec<_> = [1, 2, 3, 4, MOSAIC, SEQUENCE, PICKER, 5, 6, 7, 8, 9, 10]
                     .into_iter()
                     .filter(|&id| tool_visible(tools, id))
                     .collect();
                 assert_eq!(layout.buttons().map(|b| b.id).collect::<Vec<_>>(), expected);
-                assert_eq!(layout.dividers().count(), if mask == 0 { 2 } else { 3 });
+                let groups =
+                    usize::from(tools[..6].iter().any(|&enabled| enabled)) + usize::from(tools[6]);
+                assert_eq!(layout.dividers().count(), 2 + groups);
                 assert_eq!(layout.overflow().count(), 0);
                 assert_eq!(layout.toolbar.intersection(display), Some(layout.toolbar));
-                let width = ((667 - (6 - mask.count_ones()) * 46 - if mask == 0 { 14 } else { 0 })
-                    as f32
-                    * scale)
+                let width = ((377 + mask.count_ones() * 46 + groups as u32 * 14) as f32 * scale)
                     .round() as i32;
                 assert_eq!(layout.toolbar.right - layout.toolbar.left, width);
                 for button in layout.buttons() {
@@ -354,18 +357,18 @@ mod tests {
 
     #[test]
     fn narrow_display_overflow_keeps_full_size_output_and_has_no_hidden_tools() {
-        let tools = [true, false, true, true, true, false];
+        let tools = [true, false, true, true, true, false, false];
         let selection = rect(-320, 700, 470, 200);
         let medium = Layout::new(
             selection,
             rect(-1020, 0, 1000, 900),
             2.,
             Tool::Select,
-            [true; Tool::DRAWING.len()],
+            [true; Tool::TOOLBAR.len()],
         );
         assert_eq!(
             medium.overflow().collect::<Vec<_>>(),
-            [1, 2, 3, 4, MOSAIC, SEQUENCE]
+            [1, 2, 3, 4, MOSAIC, SEQUENCE, PICKER]
         );
         assert_eq!(
             medium.buttons().map(|b| b.id).collect::<Vec<_>>(),

@@ -107,9 +107,9 @@ pub const DEFAULT_STROKE_WIDTH: u8 = 3;
 pub const DEFAULT_TEXT_SIZE: u16 = 24;
 pub const DEFAULT_MOSAIC_SIZE: u16 = 12;
 pub const DEFAULT_SEQUENCE_SIZE: u16 = 28;
-pub const CAPTURE_TOOL_COUNT: usize = DRAWING_TOOL_KEYS.len();
-pub const DEFAULT_DRAWING_TOOLS: [bool; CAPTURE_TOOL_COUNT] =
-    [true, true, true, true, false, false];
+pub const CAPTURE_TOOL_COUNT: usize = CAPTURE_TOOL_KEYS.len();
+pub const DEFAULT_CAPTURE_TOOLS: [bool; CAPTURE_TOOL_COUNT] =
+    [true, true, true, true, false, false, false];
 pub const MAX_CORNER_RADIUS: u16 = 256;
 const STROKE_KEYS: [&str; 3] = ["rectangle_width", "arrow_width", "pen_width"];
 
@@ -194,7 +194,7 @@ pub struct Config {
     pub text_size: u16,
     pub corner_radius: u16,
     pub output_format: OutputFormat,
-    pub drawing_tools: [bool; CAPTURE_TOOL_COUNT],
+    pub capture_tools: [bool; CAPTURE_TOOL_COUNT],
     pub mosaic_size: u16,
     pub sequence_size: u16,
     pub last_directory: Option<String>,
@@ -212,7 +212,7 @@ impl Default for Config {
             text_size: DEFAULT_TEXT_SIZE,
             corner_radius: 0,
             output_format: OutputFormat::Png,
-            drawing_tools: DEFAULT_DRAWING_TOOLS,
+            capture_tools: DEFAULT_CAPTURE_TOOLS,
             mosaic_size: DEFAULT_MOSAIC_SIZE,
             sequence_size: DEFAULT_SEQUENCE_SIZE,
             last_directory: None,
@@ -229,7 +229,7 @@ impl Config {
         self.text_size = defaults.text_size;
         self.corner_radius = defaults.corner_radius;
         self.output_format = defaults.output_format;
-        self.drawing_tools = defaults.drawing_tools;
+        self.capture_tools = defaults.capture_tools;
         self.mosaic_size = defaults.mosaic_size;
         self.sequence_size = defaults.sequence_size;
     }
@@ -289,7 +289,7 @@ impl Config {
         for (key, value) in STROKE_KEYS.into_iter().zip(self.stroke_widths) {
             let _ = writeln!(text, "{key}={value}");
         }
-        for (key, value) in DRAWING_TOOL_KEYS.into_iter().zip(self.drawing_tools) {
+        for (key, value) in CAPTURE_TOOL_KEYS.into_iter().zip(self.capture_tools) {
             let _ = writeln!(text, "{key}={value}");
         }
         for (key, value) in &self.extra {
@@ -378,9 +378,9 @@ impl Config {
                                 CaptureParameter::Stroke(index).parse(value)? as u8;
                         }
                     } else if let Some(index) =
-                        DRAWING_TOOL_KEYS.iter().position(|name| *name == key)
+                        CAPTURE_TOOL_KEYS.iter().position(|name| *name == key)
                     {
-                        config.drawing_tools[index] = value
+                        config.capture_tools[index] = value
                             .parse()
                             .map_err(|_| format!("工具显示设置无效：{key}"))?;
                     } else {
@@ -394,13 +394,14 @@ impl Config {
     }
 }
 
-const DRAWING_TOOL_KEYS: [&str; 6] = [
+const CAPTURE_TOOL_KEYS: [&str; 7] = [
     "rectangle_enabled",
     "arrow_enabled",
     "pen_enabled",
     "text_enabled",
     "mosaic_enabled",
     "sequence_enabled",
+    "picker_enabled",
 ];
 #[cfg(test)]
 mod tests {
@@ -409,16 +410,19 @@ mod tests {
     fn drawing_switches_default_on_for_old_files_and_roundtrip_independently() {
         for old in ["version=1\nstroke_width=8", "version=2\nrectangle_width=8"] {
             let config = Config::decode(old).unwrap().0;
-            assert_eq!(config.drawing_tools, DEFAULT_DRAWING_TOOLS);
+            assert_eq!(config.capture_tools, DEFAULT_CAPTURE_TOOLS);
             assert_eq!(config.mosaic_size, DEFAULT_MOSAIC_SIZE);
             assert_eq!(config.sequence_size, DEFAULT_SEQUENCE_SIZE);
         }
         let mut config = Config::decode(
-            "version=2\ntheme=dark\nrectangle_enabled=false\npen_enabled=false\nmosaic_enabled=true\nmosaic_size=29\nsequence_enabled=true\nsequence_size=42\nfuture_tool_enabled=true",
+            "version=2\ntheme=dark\nrectangle_enabled=false\npen_enabled=false\nmosaic_enabled=true\nmosaic_size=29\nsequence_enabled=true\nsequence_size=42\npicker_enabled=true\nfuture_tool_enabled=true",
         )
         .unwrap()
         .0;
-        assert_eq!(config.drawing_tools, [false, true, false, true, true, true]);
+        assert_eq!(
+            config.capture_tools,
+            [false, true, false, true, true, true, true]
+        );
         assert_eq!(config.mosaic_size, 29);
         assert_eq!(config.sequence_size, 42);
         assert_eq!(Config::decode(&config.encode().unwrap()).unwrap().0, config);
@@ -428,7 +432,7 @@ mod tests {
         assert!(Config::decode("version=2\nsequence_size=15").is_err());
         assert!(Config::decode("version=2\nsequence_size=129").is_err());
         config.reset_capture_defaults();
-        assert_eq!(config.drawing_tools, DEFAULT_DRAWING_TOOLS);
+        assert_eq!(config.capture_tools, DEFAULT_CAPTURE_TOOLS);
         assert_eq!(config.mosaic_size, DEFAULT_MOSAIC_SIZE);
         assert_eq!(config.sequence_size, DEFAULT_SEQUENCE_SIZE);
         assert_eq!(config.theme, Theme::Dark);
