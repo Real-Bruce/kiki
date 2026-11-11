@@ -571,6 +571,15 @@ fn layout(hwnd: HWND) {
             ..Default::default()
         };
         SetScrollInfo(hwnd, SB_VERT, &info, true);
+        let mut current_client = RECT::default();
+        if GetClientRect(hwnd, &mut current_client).is_ok()
+            && (current_client.right != client.right || current_client.bottom != client.bottom)
+        {
+            // Showing or hiding the scrollbar synchronously sends WM_SIZE, whose
+            // nested layout uses the new client area. Do not overwrite it with
+            // positions measured before SetScrollInfo changed the window frame.
+            return;
+        }
         let controls: Vec<_> = (*p).controls.iter().map(|c| (c.hwnd, c.id)).collect();
         let failed = matches!(preferences::status(), SaveStatus::Failed(_));
         for (child, id) in controls {
@@ -1724,6 +1733,57 @@ mod tests {
             open_impl(false).unwrap();
             let hwnd = WINDOW.get().unwrap();
             let life = (*pointer(hwnd)).life.clone();
+            // Entering a page that first shows the scrollbar must lay out against
+            // the resulting client width, including native EDIT text and painted frames.
+            SetWindowPos(hwnd, None, 0, 0, 1000, 700, SWP_NOZORDER | SWP_NOACTIVATE).unwrap();
+            for page in [2, 0, 2] {
+                SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(100 + page)), None);
+                let mut client = RECT::default();
+                GetClientRect(hwnd, &mut client).unwrap();
+                let state = &*pointer(hwnd);
+                let scale = state.dpi as f32 / 96.;
+                let px = |value: i32| (value as f32 * scale).round() as i32;
+                let geometry = page_geometry(state, (client.right as f32 / scale).round() as i32);
+                for item in &geometry.items {
+                    let Item::Control(id, bounds) = item else {
+                        continue;
+                    };
+                    let child = GetDlgItem(Some(hwnd), i32::from(*id)).unwrap();
+                    let top = bounds.y - state.scroll;
+                    if top < HEADER
+                        || top + bounds.h > (client.bottom as f32 / scale).round() as i32 - FOOTER
+                    {
+                        continue;
+                    }
+                    let inset = if setting_parameter(*id, PARAMETER_EDIT).is_some() {
+                        (5, 4)
+                    } else {
+                        (0, 0)
+                    };
+                    let mut actual = RECT::default();
+                    GetWindowRect(child, &mut actual).unwrap();
+                    let mut origin = POINT {
+                        x: actual.left,
+                        y: actual.top,
+                    };
+                    assert!(ScreenToClient(hwnd, &mut origin).as_bool());
+                    assert_eq!(
+                        origin.x,
+                        px(bounds.x + inset.0),
+                        "control {id} left after page {page}"
+                    );
+                    assert_eq!(
+                        origin.y,
+                        px(top + inset.1),
+                        "control {id} top after page {page}"
+                    );
+                    assert_eq!(
+                        actual.right - actual.left,
+                        px(bounds.x + bounds.w - inset.0) - origin.x,
+                        "control {id} width"
+                    );
+                }
+            }
             for page in 0..6 {
                 SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(100 + page)), None);
                 assert_eq!((*pointer(hwnd)).page, page);
