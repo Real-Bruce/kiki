@@ -32,6 +32,7 @@ pub enum Item {
     Value(String, Rect),
     Divider(i32),
     CornerPreview(Rect),
+    ToolbarPreview(Rect),
     Control(u16, Rect),
 }
 
@@ -154,24 +155,28 @@ impl Page {
                 p.y += 48;
                 p.divider();
                 p.heading("工具显示");
-                let columns = if p.width >= 380 { 2 } else { 1 };
-                let gap = 32;
+                let columns = if p.width >= 576 {
+                    4
+                } else if p.width >= 276 {
+                    2
+                } else {
+                    1
+                };
+                let gap = 12;
                 let cell = (p.width - (columns - 1) * gap) / columns;
-                for (i, tool) in Tool::DRAWING.into_iter().enumerate() {
+                for i in 0..Tool::DRAWING.len() {
                     let x = (i as i32 % columns) * (cell + gap);
-                    p.text(tool.label(), x, (cell - 64).max(1), Tone::Normal);
-                    p.control(
-                        DRAWING_TOOL + i as u16,
-                        x + (cell - 52).max(0),
-                        -10,
-                        52,
-                        ROW,
-                    );
+                    p.control(DRAWING_TOOL + i as u16, x, -6, cell, 38);
                     if i as i32 % columns == columns - 1 {
                         p.y += ROW;
                     }
                 }
-                p.y += 14;
+                p.y += 3;
+                p.note("工具条预览", Tone::Muted);
+                let preview_height = super::super::capture_toolbar::BAR_HEIGHT as i32;
+                p.items
+                    .push(Item::ToolbarPreview(p.rect(0, 0, p.width, preview_height)));
+                p.y += preview_height + 22;
                 p.control(RESET_CAPTURE, 0, 0, 148, 38);
                 p.y += 38;
             }

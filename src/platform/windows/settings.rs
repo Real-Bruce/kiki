@@ -10,6 +10,7 @@ use super::{
 use crate::core::{
     annotation::Tool,
     config::{CaptureParameter, Config, Hotkey, OutputFormat, Theme},
+    geometry::PixelRect,
 };
 #[path = "settings_reset_dialog.rs"]
 mod reset_dialog;
@@ -742,6 +743,22 @@ fn paint(hwnd: HWND, p: *mut State) -> Result<()> {
                         dark,
                     );
                 }
+                Item::ToolbarPreview(r)
+                    if r.y - state.scroll < height as i32 - FOOTER
+                        && r.y + r.h - state.scroll > HEADER =>
+                {
+                    c.toolbar_preview(
+                        PixelRect {
+                            left: r.x,
+                            top: r.y - state.scroll,
+                            right: r.x + r.w,
+                            bottom: r.y + r.h - state.scroll,
+                        },
+                        preferences::current().drawing_tools,
+                        dark,
+                    );
+                }
+                Item::ToolbarPreview(_) => {}
                 Item::Control(id, r)
                     if setting_parameter(*id, PARAMETER_EDIT).is_some()
                         && r.y - state.scroll >= HEADER
@@ -1147,7 +1164,35 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                 if hovered && !disabled {
                     shapes.rounded(r, dip(12), appearance::hover(dark));
                 }
-                draw_toggle(shapes, r, dip, dark, on, pressed);
+                if DRAWING_TOOL_IDS.contains(&id) {
+                    let tool = Tool::DRAWING[usize::from(id - DRAWING_TOOL)];
+                    let toggle = RECT {
+                        left: r.right - dip(50),
+                        ..r
+                    };
+                    let icon_color = if on { accent } else { appearance::muted(dark) };
+                    shapes.tool_icon(
+                        tool.button(),
+                        r.left + dip(17),
+                        (r.top + r.bottom) / 2,
+                        dpi_scale,
+                        icon_color,
+                    );
+                    labels.push((
+                        state.font,
+                        tool.label().to_owned(),
+                        RECT {
+                            left: r.left + dip(32),
+                            right: toggle.left,
+                            ..r
+                        },
+                        fg,
+                        DT_LEFT,
+                    ));
+                    draw_toggle(shapes, toggle, dip, dark, on, pressed);
+                } else {
+                    draw_toggle(shapes, r, dip, dark, on, pressed);
+                }
             } else if (410..=417).contains(&id) {
                 let color = COLORS[usize::from(id - 410)];
                 let selected = cfg.color == color;

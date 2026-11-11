@@ -1,12 +1,20 @@
 //! Outline shapes measured against the capture design, in toolbar DIPs.
+use super::{
+    capture_toolbar::{BUTTON_HEIGHT, Layout, MORE},
+    ui_palette as palette,
+};
+use crate::core::{geometry::PixelRect, selection::PixelPoint};
 use windows::{
-    Win32::Graphics::Direct2D::{Common::*, *},
+    Win32::Graphics::{
+        Direct2D::{Common::*, *},
+        DirectWrite::*,
+    },
     core::Result,
 };
 use windows_numerics::{Matrix3x2, Vector2};
 
 pub(super) struct ToolbarIcons {
-    paths: [ID2D1PathGeometry; 11],
+    paths: [ID2D1PathGeometry; 10],
     stroke: ID2D1StrokeStyle,
 }
 
@@ -21,18 +29,6 @@ use Segment::{Curve as C, Line as L};
 
 struct Figure(Point, &'static [Segment], bool);
 
-const POINTER: &[Figure] = &[Figure(
-    (-5.5, -8.2),
-    &[
-        L((-5.5, 7.1)),
-        L((-2., 3.5)),
-        L((0.5, 8.1)),
-        L((2.8, 6.8)),
-        L((0.3, 2.)),
-        L((6.1, 1.9)),
-    ],
-    true,
-)];
 const RECTANGLE: &[Figure] = &[Figure(
     (-6.5, -7.3),
     &[
@@ -213,7 +209,6 @@ impl ToolbarIcons {
             };
             Ok(Self {
                 paths: [
-                    path(POINTER, false)?,
                     path(RECTANGLE, false)?,
                     path(ARROW, false)?,
                     path(PEN, false)?,
@@ -240,6 +235,25 @@ impl ToolbarIcons {
     ) {
         // SAFETY: retained render-thread geometry and stroke style. Restore the caller's transform.
         unsafe {
+            if index == MORE {
+                for offset in [-6., 0., 6.] {
+                    target.FillEllipse(
+                        &D2D1_ELLIPSE {
+                            point: Vector2 {
+                                X: center.X + offset * scale,
+                                ..center
+                            },
+                            radiusX: 1.5 * scale,
+                            radiusY: 1.5 * scale,
+                        },
+                        brush,
+                    );
+                }
+                return;
+            }
+            let Some(path) = index.checked_sub(1).and_then(|i| self.paths.get(i)) else {
+                return;
+            };
             let mut prior = Matrix3x2::default();
             target.GetTransform(&mut prior);
             target.SetTransform(
@@ -252,8 +266,167 @@ impl ToolbarIcons {
                     M21: 0.,
                 } * prior),
             );
-            target.DrawGeometry(&self.paths[index], brush, 1.4, &self.stroke);
+            target.DrawGeometry(path, brush, 1.4, &self.stroke);
             target.SetTransform(&prior);
         }
+    }
+}
+
+#[derive(Default)]
+pub(super) struct BarState {
+    pub selected: usize,
+    pub hover: Option<usize>,
+    pub pressed: Option<usize>,
+    pub focus: usize,
+    pub undo: bool,
+    pub redo: bool,
+    pub busy: bool,
+}
+
+pub(super) struct BarPaint<'a> {
+    pub target: &'a ID2D1RenderTarget,
+    pub brush: &'a ID2D1SolidColorBrush,
+    pub icons: &'a ToolbarIcons,
+    pub text: &'a IDWriteTextFormat,
+    pub dark: bool,
+}
+
+impl BarPaint<'_> {
+    pub fn draw(&self, layout: &Layout, origin: PixelPoint, state: BarState) {
+        let local = |bounds: PixelRect| D2D_RECT_F {
+            left: (i64::from(bounds.left) - i64::from(origin.x)) as f32,
+            top: (i64::from(bounds.top) - i64::from(origin.y)) as f32,
+            right: (i64::from(bounds.right) - i64::from(origin.x)) as f32,
+            bottom: (i64::from(bounds.bottom) - i64::from(origin.y)) as f32,
+        };
+        let bar = local(layout.toolbar);
+        let scale = layout.scale;
+        let dark = self.dark;
+        let radius = 10. * scale;
+        let panel = D2D1_ROUNDED_RECT {
+            rect: bar,
+            radiusX: radius,
+            radiusY: radius,
+        };
+        // SAFETY: target and brush are owned by the current settings or preview
+        // paint pass. Text and geometry are consumed synchronously on this UI thread.
+        unsafe {
+            self.brush.SetColor(&color(palette::background(dark), 1.));
+            self.target.FillRoundedRectangle(&panel, self.brush);
+            self.brush.SetColor(&color(palette::divider(dark), 1.));
+            self.target
+                .DrawRoundedRectangle(&panel, self.brush, 1., None);
+            for center in layout.dividers() {
+                let x = (i64::from(center) - i64::from(origin.x)) as f32;
+                self.target.FillRectangle(
+                    &D2D_RECT_F {
+                        left: x - 0.45 * scale,
+                        right: x + 0.45 * scale,
+                        top: bar.top + 14. * scale,
+                        bottom: bar.bottom - 14. * scale,
+                    },
+                    self.brush,
+                );
+            }
+            for button in layout.buttons() {
+                let id = button.id;
+                let b = local(button.bounds);
+                let inset = (BUTTON_HEIGHT - 34.) * scale / 2.;
+                let face = D2D1_ROUNDED_RECT {
+                    rect: D2D_RECT_F {
+                        top: b.top + inset,
+                        bottom: b.bottom - inset,
+                        ..b
+                    },
+                    radiusX: 7. * scale,
+                    radiusY: 7. * scale,
+                };
+                let active = !state.busy
+                    && match id {
+                        5 => state.undo,
+                        6 => state.redo,
+                        _ => true,
+                    };
+                let over = state.hover == Some(id);
+                let selected = id == state.selected
+                    || id == MORE && layout.overflow().any(|id| id == state.selected);
+                let down = over && active && state.pressed == Some(id);
+                let background = match (id == 9, active) {
+                    (true, false) => Some(palette::selected(dark)),
+                    (true, true) if down => Some(palette::accent_pressed(dark)),
+                    (true, true) if over => Some(palette::accent_hover(dark)),
+                    (true, true) => Some(palette::accent(dark)),
+                    _ if down => Some(palette::pressed(dark)),
+                    _ if over && active => Some(palette::hover(dark)),
+                    _ if selected => Some(palette::selected(dark)),
+                    _ => None,
+                };
+                if let Some(background) = background {
+                    self.brush.SetColor(&color(background, 1.));
+                    self.target.FillRoundedRectangle(&face, self.brush);
+                }
+                let foreground = if !active {
+                    color(palette::muted(dark), 0.58)
+                } else if id == 9 {
+                    color(palette::on_accent(dark), 1.)
+                } else if selected {
+                    color(palette::accent(dark), 1.)
+                } else {
+                    color(palette::foreground(dark), 1.)
+                };
+                self.brush.SetColor(&foreground);
+                let center = Vector2 {
+                    X: (b.left + b.right) / 2.,
+                    Y: (b.top + b.bottom) / 2.,
+                };
+                if id == 9 {
+                    self.icons.draw(
+                        self.target,
+                        self.brush,
+                        id,
+                        Vector2 {
+                            X: center.X - 18. * scale,
+                            ..center
+                        },
+                        scale,
+                    );
+                    self.target.DrawText(
+                        &['复' as u16, '制' as u16],
+                        self.text,
+                        &D2D_RECT_F {
+                            left: center.X - 14. * scale,
+                            ..b
+                        },
+                        self.brush,
+                        D2D1_DRAW_TEXT_OPTIONS_NONE,
+                        DWRITE_MEASURING_MODE_NATURAL,
+                    );
+                } else {
+                    self.icons.draw(self.target, self.brush, id, center, scale);
+                }
+                if state.focus == id {
+                    self.brush.SetColor(&color(palette::accent(dark), 1.));
+                    self.target.DrawRoundedRectangle(
+                        &D2D1_ROUNDED_RECT {
+                            rect: b,
+                            radiusX: 6. * scale,
+                            radiusY: 6. * scale,
+                        },
+                        self.brush,
+                        1.5 * scale,
+                        None,
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn color(rgb: u32, alpha: f32) -> D2D1_COLOR_F {
+    D2D1_COLOR_F {
+        r: ((rgb >> 16) & 255) as f32 / 255.,
+        g: ((rgb >> 8) & 255) as f32 / 255.,
+        b: (rgb & 255) as f32 / 255.,
+        a: alpha,
     }
 }

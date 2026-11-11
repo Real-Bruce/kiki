@@ -1,8 +1,8 @@
 use super::{
-    capture_toolbar::{self, BUTTON_HEIGHT, Layout, MORE},
+    capture_toolbar::{self, Layout},
     parameter_control,
     text_input::TextInput,
-    toolbar_icons::ToolbarIcons,
+    toolbar_icons::{BarPaint, BarState, ToolbarIcons},
     ui_palette as palette,
 };
 use crate::core::{
@@ -28,8 +28,6 @@ use windows::{
 };
 use windows_numerics::{Matrix3x2, Vector2};
 
-const BUTTON_FACE_HEIGHT: f32 = 34.;
-const BUTTON_RADIUS: f32 = 7.;
 const BAR_RADIUS: f32 = 10.;
 const COLOR_START: f32 = 10.;
 const COLOR_STEP: f32 = 30.;
@@ -423,68 +421,36 @@ impl Canvas {
         pressed: Option<usize>,
         busy: bool,
     ) {
-        let r = self.local(layout.toolbar);
         let s = layout.scale;
         let dark = self.dark;
-        self.panel(r, BAR_RADIUS * s);
-        for center in layout.dividers() {
-            let x = (i64::from(center) - i64::from(self.bounds().left)) as f32;
-            self.fill(
-                D2D_RECT_F {
-                    left: x - 0.45 * s,
-                    top: r.top + 14. * s,
-                    right: x + 0.45 * s,
-                    bottom: r.bottom - 14. * s,
-                },
-                tone(palette::divider(dark), 1.),
-            );
+        let desktop = self.bounds();
+        let hover = layout.button_at(pointer);
+        BarPaint {
+            target: &self.target,
+            brush: &self.brush,
+            icons: &self.icons,
+            text: &self.text,
+            dark,
         }
-        let mut hovered = None;
-        for button in layout.buttons() {
-            let i = button.id;
-            let b = self.local(button.bounds);
-            let inset = (BUTTON_HEIGHT - BUTTON_FACE_HEIGHT) * s / 2.;
-            let face = D2D_RECT_F {
-                top: b.top + inset,
-                bottom: b.bottom - inset,
-                ..b
-            };
-            let active = !busy && (i == MORE || editor.enabled(i));
-            let over = contains(button.bounds, pointer);
-            if over {
-                hovered = Some(*button);
-            }
-            let selected = i == editor.tool.button()
-                || i == MORE && layout.overflow().any(|id| id == editor.tool.button());
-            let down = over && active && pressed == Some(i);
-            let background = match (i == 9, active) {
-                (true, false) => Some(palette::selected(dark)),
-                (true, true) if down => Some(palette::accent_pressed(dark)),
-                (true, true) if over => Some(palette::accent_hover(dark)),
-                (true, true) => Some(palette::accent(dark)),
-                _ if down => Some(palette::pressed(dark)),
-                _ if over && active => Some(palette::hover(dark)),
-                _ if selected => Some(palette::selected(dark)),
-                _ => None,
-            };
-            if let Some(background) = background {
-                self.round(face, BUTTON_RADIUS * s, tone(background, 1.));
-            }
-            let foreground = if !active {
-                tone(palette::muted(dark), 0.58)
-            } else if i == 9 {
-                tone(palette::on_accent(dark), 1.)
-            } else if selected {
-                tone(palette::accent(dark), 1.)
-            } else {
-                tone(palette::foreground(dark), 1.)
-            };
-            self.icon(i, b, foreground, s);
-            if focus == i {
-                self.outline(b, 6. * s, 1.5 * s, tone(palette::accent(dark), 1.));
-            }
-        }
-        if let Some(button) = hovered.filter(|_| super::preferences::hints()) {
+        .draw(
+            layout,
+            PixelPoint {
+                x: desktop.left,
+                y: desktop.top,
+            },
+            BarState {
+                selected: editor.tool.button(),
+                hover,
+                pressed,
+                focus,
+                undo: editor.can_undo(),
+                redo: editor.can_redo(),
+                busy,
+            },
+        );
+        if let Some(button) = layout.buttons().find(|button| hover == Some(button.id))
+            && super::preferences::hints()
+        {
             let b = button.bounds;
             let name = capture_toolbar::name(button.id);
             let width = ((name.chars().count() as f32 * 14. + 16.).max(90.) * s).round() as i32;
@@ -874,53 +840,6 @@ impl Canvas {
             self.target.DrawEllipse(&circle, &self.brush, 1., None);
         }
     }
-    fn icon(&self, index: usize, r: D2D_RECT_F, c: D2D1_COLOR_F, scale: f32) {
-        let center = Vector2 {
-            X: (r.left + r.right) / 2.,
-            Y: (r.top + r.bottom) / 2.,
-        };
-        if index == MORE {
-            for offset in [-6., 0., 6.] {
-                let x = center.X + offset * scale;
-                let radius = 1.5 * scale;
-                self.round(
-                    D2D_RECT_F {
-                        left: x - radius,
-                        top: center.Y - radius,
-                        right: x + radius,
-                        bottom: center.Y + radius,
-                    },
-                    radius,
-                    c,
-                );
-            }
-            return;
-        }
-        // SAFETY: the brush is owned by the active canvas on the render thread.
-        unsafe {
-            self.brush.SetColor(&c);
-        }
-        let icon_center = if index == 9 {
-            Vector2 {
-                X: center.X - 18. * scale,
-                ..center
-            }
-        } else {
-            center
-        };
-        self.icons
-            .draw(&self.target, &self.brush, index, icon_center, scale);
-        if index == 9 {
-            self.label(
-                "复制",
-                D2D_RECT_F {
-                    left: center.X - 14. * scale,
-                    ..r
-                },
-                c,
-            );
-        }
-    }
     fn local(&self, r: PixelRect) -> D2D_RECT_F {
         D2D_RECT_F {
             left: (i64::from(r.left) - i64::from(self.source.bounds().left)) as f32,
@@ -998,7 +917,7 @@ impl Canvas {
         }
     }
 }
-fn format(factory: &IDWriteFactory, scale: f32) -> Result<IDWriteTextFormat> {
+pub(super) fn format(factory: &IDWriteFactory, scale: f32) -> Result<IDWriteTextFormat> {
     // SAFETY: formats are created and retained on this UI thread; static system font names are NUL terminated.
     unsafe {
         let text = factory.CreateTextFormat(

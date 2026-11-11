@@ -44,7 +44,7 @@ impl Tool {
         }
     }
 
-    pub fn button(self) -> usize {
+    pub const fn button(self) -> usize {
         match self {
             Self::Select => 0,
             Self::Rectangle => 1,

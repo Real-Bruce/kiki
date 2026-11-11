@@ -1,6 +1,10 @@
 //! Retained Direct2D surface and palette for the settings window.
 pub use super::ui_palette::*;
-use crate::core::config::OutputFormat;
+use super::{
+    capture_toolbar::Layout,
+    toolbar_icons::{BarPaint, BarState, ToolbarIcons},
+};
+use crate::core::{config::OutputFormat, geometry::PixelRect, selection::PixelPoint};
 use windows::{
     Win32::{
         Foundation::{HWND, RECT},
@@ -13,6 +17,7 @@ use windows::{
     },
     core::{Interface, Result, w},
 };
+use windows_numerics::Vector2;
 
 thread_local! {
     static CONTROL_SURFACE: std::cell::Cell<Option<ControlSurface>> = const { std::cell::Cell::new(None) };
@@ -21,6 +26,7 @@ thread_local! {
 struct ControlSurface {
     target: ID2D1DCRenderTarget,
     brush: ID2D1SolidColorBrush,
+    icons: ToolbarIcons,
 }
 
 impl ControlSurface {
@@ -40,7 +46,12 @@ impl ControlSurface {
             })?;
             target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
             let brush = target.CreateSolidColorBrush(&color(0), None)?;
-            Ok(Self { target, brush })
+            let icons = ToolbarIcons::new(&factory)?;
+            Ok(Self {
+                target,
+                brush,
+                icons,
+            })
         }
     }
 }
@@ -92,6 +103,23 @@ impl ControlShapes<'_> {
             top: (bounds.top - y) as f32,
             right: (bounds.right - x) as f32,
             bottom: (bounds.bottom - y) as f32,
+        }
+    }
+
+    pub fn tool_icon(&self, id: usize, x: i32, y: i32, scale: f32, rgb: u32) {
+        // SAFETY: the active DC target and its icon geometry are on the settings UI thread.
+        unsafe {
+            self.surface.brush.SetColor(&color(rgb));
+            self.surface.icons.draw(
+                &self.surface.target,
+                &self.surface.brush,
+                id,
+                Vector2 {
+                    X: (x - self.origin[0]) as f32,
+                    Y: (y - self.origin[1]) as f32,
+                },
+                scale,
+            );
         }
     }
 
@@ -190,6 +218,8 @@ pub struct Canvas {
     swap: windows::Win32::Graphics::Dxgi::IDXGISwapChain1,
     brush: ID2D1SolidColorBrush,
     factory: IDWriteFactory,
+    toolbar_icons: ToolbarIcons,
+    toolbar_text: IDWriteTextFormat,
     _device: std::rc::Rc<super::pinned_device::Device>,
 }
 impl Canvas {
@@ -201,13 +231,18 @@ impl Canvas {
             context.SetDpi(dpi as f32, dpi as f32);
             let target: ID2D1RenderTarget = context.cast()?;
             let brush = target.CreateSolidColorBrush(&color(0), None)?;
+            let factory = DWriteCreateFactory::<IDWriteFactory>(DWRITE_FACTORY_TYPE_SHARED)?;
+            let toolbar_text = super::selection_render::format(&factory, 1.)?;
+            let toolbar_icons = ToolbarIcons::new(&target.GetFactory()?)?;
             Ok(Self {
                 target,
                 context,
                 swap,
                 _device: device,
                 brush,
-                factory: DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?,
+                factory,
+                toolbar_icons,
+                toolbar_text,
             })
         }
     }
@@ -257,6 +292,20 @@ impl Canvas {
                 &self.brush,
             );
         }
+    }
+    pub fn toolbar_preview(&self, bounds: PixelRect, drawing_tools: [bool; 4], dark: bool) {
+        let layout = Layout::preview(bounds, drawing_tools);
+        let compact_text = (layout.scale < 1.)
+            .then(|| super::selection_render::format(&self.factory, layout.scale).ok())
+            .flatten();
+        BarPaint {
+            target: &self.target,
+            brush: &self.brush,
+            icons: &self.toolbar_icons,
+            text: compact_text.as_ref().unwrap_or(&self.toolbar_text),
+            dark,
+        }
+        .draw(&layout, PixelPoint { x: 0, y: 0 }, BarState::default());
     }
     pub fn input_frame(&self, x: f32, y: f32, w: f32, h: f32, rgb: u32) {
         // SAFETY: the call-scoped geometry and brush belong to the current settings paint.

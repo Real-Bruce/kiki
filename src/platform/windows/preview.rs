@@ -227,15 +227,11 @@ impl State {
             return false;
         }
         match index {
-            0..=4 => {
+            1..=4 => {
                 self.editor.finish_parameter_adjustment();
                 self.wheel = Wheel::default();
                 self.editor.cancel();
-                let mut tool = if index == 0 {
-                    Tool::Select
-                } else {
-                    Tool::DRAWING[index - 1]
-                };
+                let mut tool = Tool::DRAWING[index - 1];
                 if tool == self.editor.tool {
                     tool = Tool::Select;
                 }
@@ -616,7 +612,7 @@ fn refresh_tool_visibility(hwnd: HWND, pointer: *mut State) {
         {
             state.focus = layout
                 .buttons()
-                .next()
+                .find(|button| state.can_focus(&layout, button.id))
                 .map_or(usize::MAX, |button| button.id);
         }
         if active_hidden {
@@ -2232,7 +2228,7 @@ mod tests {
 
             let state = &mut *pointer;
             assert_eq!(state.editor.tool, Tool::Select);
-            assert_eq!(state.focus, 0);
+            assert_eq!(state.focus, 2);
             assert_eq!(state.editor.objects(), original);
             assert!(state.layout().unwrap().parameters.is_none());
             let draft = state.text_input.as_ref().unwrap();
@@ -2245,7 +2241,7 @@ mod tests {
             assert_eq!(state.editor.tool, Tool::Select);
             // End the existing draft before exercising toolbar keyboard navigation.
             (*pointer).text_input = None;
-            for expected in [2, 3, 5, 7, 8, 9, 10, 0] {
+            for expected in [3, 5, 7, 8, 9, 10, 2] {
                 SendMessageW(hwnd, WM_KEYDOWN, Some(WPARAM(9)), None);
                 assert_eq!((*pointer).focus, expected);
             }
