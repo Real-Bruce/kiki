@@ -135,6 +135,10 @@ impl Page {
                     p.parameter_row(index);
                 }
                 p.note("成图实际像素 · 线宽 1–64 px · 字号 8–256 px", Tone::Muted);
+                if cfg.drawing_tools[Tool::DRAWING.len() - 1] {
+                    p.parameter_row(5);
+                    p.note("成图实际像素 · 马赛克颗粒 2–64 px", Tone::Muted);
+                }
                 p.divider();
                 p.heading("图像输出");
                 p.parameter_row(4);
@@ -183,10 +187,6 @@ impl Page {
                 p.items
                     .push(Item::ToolbarPreview(p.rect(0, 0, p.width, preview_height)));
                 p.y += preview_height + 22;
-                if cfg.drawing_tools[Tool::DRAWING.len() - 1] {
-                    p.parameter_row(5);
-                    p.note("成图实际像素 · 马赛克颗粒 2–64 px", Tone::Muted);
-                }
                 p.control(RESET_CAPTURE, 0, 0, 148, 38);
                 p.y += 38;
             }
