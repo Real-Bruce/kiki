@@ -1,6 +1,6 @@
 # kiki 工作约定
 
-本文件约束在此仓库中工作的编码代理。当前已实现版本为 Windows 11 x64 v0.2.2；2026-11-10 已确认后续功能方案，按 docs/FEATURE_PLAN.md 逐项开发，按 docs/ACCEPTANCE_PLAN.md 验收，当前状态统一记录在 docs/PROGRESS.md。
+本文件约束在此仓库中工作的编码代理。按 docs/FEATURE_PLAN.md 逐项开发，按 docs/ACCEPTANCE_PLAN.md 验收，Windows 11 x64 当前版本与进度统一记录在 docs/PROGRESS.md。
 
 ## 开始工作前
 
