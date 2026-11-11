@@ -76,7 +76,7 @@ pub fn popup(owner: HWND, x: i32, y: i32, style: Style, entries: &[(u32, &str, b
             return 0;
         };
         let mut dpi = GetDpiForWindow(owner).max(96);
-        if style == Style::Tray {
+        if style != Style::Pinned {
             let monitor = MonitorFromPoint(POINT { x, y }, MONITOR_DEFAULTTONEAREST);
             let mut vertical = dpi;
             let _ = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi, &mut vertical);

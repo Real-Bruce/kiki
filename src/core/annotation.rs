@@ -15,6 +15,18 @@ pub enum Tool {
     Text,
 }
 impl Tool {
+    pub const DRAWING: [Self; 4] = [Self::Rectangle, Self::Arrow, Self::Pen, Self::Text];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Select => "选择",
+            Self::Rectangle => "矩形",
+            Self::Arrow => "箭头",
+            Self::Pen => "画笔",
+            Self::Text => "文字",
+        }
+    }
+
     pub fn parameter(self) -> Option<CaptureParameter> {
         if self == Self::Text {
             Some(CaptureParameter::TextSize)

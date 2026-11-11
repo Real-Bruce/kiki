@@ -1,5 +1,9 @@
 use super::{
-    parameter_control, text_input::TextInput, toolbar_icons::ToolbarIcons, ui_palette as palette,
+    capture_toolbar::{self, BUTTON_HEIGHT, Layout, MORE},
+    parameter_control,
+    text_input::TextInput,
+    toolbar_icons::ToolbarIcons,
+    ui_palette as palette,
 };
 use crate::core::{
     annotation::{
@@ -9,7 +13,7 @@ use crate::core::{
     display::DisplayInfo,
     geometry::PixelRect,
     image::Image,
-    selection::{PixelPoint, Selection, contains, fit_panel, selection_label, toolbar},
+    selection::{PixelPoint, Selection, contains, fit_panel, selection_label},
 };
 use windows::{
     Win32::{
@@ -24,53 +28,12 @@ use windows::{
 };
 use windows_numerics::{Matrix3x2, Vector2};
 
-const BAR_HEIGHT: f32 = 48.;
-const PARAM_GAP: f32 = 8.;
-const PARAM_HEIGHT: f32 = 42.;
-// 01-capture.png: main panel x=353..1233, y=723..790. Coordinates are
-// offsets from the panel's left edge, normalized to the 48 DIP panel height.
-const REFERENCE_SCALE: f32 = BAR_HEIGHT / 68.;
-const BAR_WIDTH: f32 = 880. * REFERENCE_SCALE;
-const BUTTON_CENTERS: [f32; 11] = [
-    46., 111., 177., 243., 309., 408., 472., 571., 636., 737., 842.,
-];
-const DIVIDER_CENTERS: [f32; 3] = [358., 522., 809.];
-const BUTTON_WIDTH: f32 = 42.;
-const COPY_WIDTH: f32 = 118. * REFERENCE_SCALE;
-const BUTTON_HEIGHT: f32 = 36.;
 const BUTTON_FACE_HEIGHT: f32 = 34.;
 const BUTTON_RADIUS: f32 = 7.;
 const BAR_RADIUS: f32 = 10.;
-const PARAM_WIDTH: f32 = 506.;
 const COLOR_START: f32 = 10.;
 const COLOR_STEP: f32 = 30.;
 
-pub struct Layout {
-    pub bounds: PixelRect,
-    pub toolbar: PixelRect,
-    pub parameters: Option<PixelRect>,
-    pub screen: PixelRect,
-    pub buttons: [PixelRect; 11],
-    pub scale: f32,
-}
-impl Layout {
-    fn parameter_box(&self, left: f32, right: f32, inset_y: f32) -> Option<PixelRect> {
-        let r = self.parameters?;
-        let px = |value: f32| (value * self.scale).round() as i32;
-        Some(PixelRect {
-            left: r.left + px(left),
-            right: r.left + px(right),
-            top: r.top + px(inset_y),
-            bottom: r.bottom - px(inset_y),
-        })
-    }
-    pub fn parameter_slider(&self) -> Option<PixelRect> {
-        self.parameter_box(305., 418., 8.)
-    }
-    pub fn parameter_edit(&self) -> Option<PixelRect> {
-        self.parameter_box(430., 477., 7.)
-    }
-}
 pub struct PaintInput<'a> {
     pub selection: &'a Selection,
     pub editor: &'a Editor,
@@ -79,6 +42,7 @@ pub struct PaintInput<'a> {
     pub busy: bool,
     pub hover: Option<PixelRect>,
     pub screens: &'a [DisplayInfo],
+    pub drawing_tools: [bool; 4],
     pub pointer: PixelPoint,
     pub focus: usize,
     pub pressed: Option<usize>,
@@ -96,6 +60,7 @@ pub struct Canvas {
     brush: ID2D1SolidColorBrush,
     dw: IDWriteFactory,
     text: IDWriteTextFormat,
+    parameter_text: Option<(f32, IDWriteTextFormat)>,
     icons: ToolbarIcons,
     scale: f32,
     pub dark: bool,
@@ -165,6 +130,7 @@ impl Canvas {
                 brush,
                 dw,
                 text,
+                parameter_text: None,
                 icons,
                 scale: 1.,
                 dark: system_dark(),
@@ -172,53 +138,15 @@ impl Canvas {
             })
         }
     }
-    pub fn layout(&self, rect: PixelRect, screens: &[DisplayInfo], tool: Tool) -> Layout {
+    pub fn layout(
+        &self,
+        rect: PixelRect,
+        screens: &[DisplayInfo],
+        tool: Tool,
+        drawing_tools: [bool; 4],
+    ) -> Layout {
         let (screen, preferred) = self.display(rect, screens);
-        let parameters = tool != Tool::Select;
-        let height = BAR_HEIGHT
-            + if parameters {
-                PARAM_GAP + PARAM_HEIGHT
-            } else {
-                0.
-            };
-        let scale = preferred
-            .min((i64::from(screen.right) - i64::from(screen.left)) as f32 / BAR_WIDTH)
-            .min((i64::from(screen.bottom) - i64::from(screen.top)) as f32 / height);
-        let bounds = toolbar(
-            rect,
-            screen,
-            (BAR_WIDTH * scale).round() as i32,
-            (height * scale).round() as i32,
-            (10. * scale).round() as i32,
-        );
-        let x = |offset: f32| bounds.left.saturating_add((offset * scale).round() as i32);
-        let y = |offset: f32| bounds.top.saturating_add((offset * scale).round() as i32);
-        let buttons = std::array::from_fn(|i| {
-            let center = BUTTON_CENTERS[i] * REFERENCE_SCALE;
-            let half = if i == 9 { COPY_WIDTH } else { BUTTON_WIDTH } / 2.;
-            PixelRect {
-                left: x(center - half),
-                top: y((BAR_HEIGHT - BUTTON_HEIGHT) / 2.),
-                right: x(center + half),
-                bottom: y((BAR_HEIGHT + BUTTON_HEIGHT) / 2.),
-            }
-        });
-        Layout {
-            toolbar: PixelRect {
-                bottom: y(BAR_HEIGHT),
-                ..bounds
-            },
-            parameters: parameters.then(|| PixelRect {
-                left: x((BAR_WIDTH - PARAM_WIDTH) / 2.),
-                top: y(BAR_HEIGHT + PARAM_GAP),
-                right: x((BAR_WIDTH + PARAM_WIDTH) / 2.),
-                bottom: bounds.bottom,
-            }),
-            bounds,
-            screen,
-            buttons,
-            scale,
-        }
+        Layout::new(rect, screen, preferred, tool != Tool::Select, drawing_tools)
     }
     fn display(&self, rect: PixelRect, screens: &[DisplayInfo]) -> (PixelRect, f32) {
         let center = PixelPoint {
@@ -250,6 +178,7 @@ impl Canvas {
             busy,
             hover,
             screens,
+            drawing_tools,
             pointer,
             focus,
             pressed,
@@ -262,7 +191,7 @@ impl Canvas {
         let layout = selection
             .rect
             .filter(|_| !selection.active())
-            .map(|r| self.layout(r, screens, editor.tool));
+            .map(|r| self.layout(r, screens, editor.tool, drawing_tools));
         let anchor = selection.rect.or(hover).unwrap_or(PixelRect {
             left: pointer.x,
             top: pointer.y,
@@ -271,6 +200,19 @@ impl Canvas {
         });
         let (screen, preferred) = self.display(anchor, screens);
         let scale = layout.as_ref().map_or(preferred, |l| l.scale);
+        if let Some(layout) = &layout
+            && layout.parameters.is_some()
+            && (layout.parameter_scale - scale).abs() > 0.001
+            && self
+                .parameter_text
+                .as_ref()
+                .is_none_or(|(old, _)| (old - layout.parameter_scale).abs() > 0.001)
+        {
+            self.parameter_text = Some((
+                layout.parameter_scale,
+                format(&self.dw, layout.parameter_scale)?,
+            ));
+        }
         let text_layouts = super::annotation_render::layouts(&self.dw, editor)?;
         let geometry = super::annotation_render::geometry(&self.factory, self.bounds(), editor)?;
         let selected = selection.rect.or(hover);
@@ -485,8 +427,8 @@ impl Canvas {
         let s = layout.scale;
         let dark = self.dark;
         self.panel(r, BAR_RADIUS * s);
-        for center in DIVIDER_CENTERS {
-            let x = r.left + center * REFERENCE_SCALE * s;
+        for center in layout.dividers() {
+            let x = (i64::from(center) - i64::from(self.bounds().left)) as f32;
             self.fill(
                 D2D_RECT_F {
                     left: x - 0.45 * s,
@@ -497,34 +439,23 @@ impl Canvas {
                 tone(palette::divider(dark), 1.),
             );
         }
-        let names = [
-            "选择",
-            "矩形",
-            "箭头",
-            "画笔",
-            "文字",
-            "撤销（Ctrl+Z）",
-            "重做（Ctrl+Y）",
-            "贴图",
-            "保存（Ctrl+S）",
-            "复制",
-            "取消（Esc）",
-        ];
         let mut hovered = None;
-        for (i, button) in layout.buttons.iter().enumerate() {
-            let b = self.local(*button);
+        for button in layout.buttons() {
+            let i = button.id;
+            let b = self.local(button.bounds);
             let inset = (BUTTON_HEIGHT - BUTTON_FACE_HEIGHT) * s / 2.;
             let face = D2D_RECT_F {
                 top: b.top + inset,
                 bottom: b.bottom - inset,
                 ..b
             };
-            let active = !busy && editor.enabled(i);
-            let over = contains(*button, pointer);
+            let active = !busy && (i == MORE || editor.enabled(i));
+            let over = contains(button.bounds, pointer);
             if over {
-                hovered = Some(i);
+                hovered = Some(*button);
             }
-            let selected = i == editor.tool.button();
+            let selected = i == editor.tool.button()
+                || i == MORE && layout.overflow().any(|id| id == editor.tool.button());
             let down = over && active && pressed == Some(i);
             let background = match (i == 9, active) {
                 (true, false) => Some(palette::selected(dark)),
@@ -553,20 +484,22 @@ impl Canvas {
                 self.outline(b, 6. * s, 1.5 * s, tone(palette::accent(dark), 1.));
             }
         }
-        if let Some(i) = hovered.filter(|_| super::preferences::hints()) {
-            let b = layout.buttons[i];
-            let width = ((i64::from(b.right) - i64::from(b.left)) as f32 + 48. * s).round() as i32;
+        if let Some(button) = hovered.filter(|_| super::preferences::hints()) {
+            let b = button.bounds;
+            let name = capture_toolbar::name(button.id);
+            let width = ((name.chars().count() as f32 * 14. + 16.).max(90.) * s).round() as i32;
+            let center = ((i64::from(b.left) + i64::from(b.right)) / 2) as i32;
             let t = self.local(fit_panel(
                 PixelPoint {
-                    x: b.left.saturating_sub((24. * s).round() as i32),
-                    y: layout.bounds.top.saturating_sub((34. * s).round() as i32),
+                    x: center.saturating_sub(width / 2),
+                    y: layout.toolbar.top.saturating_sub((34. * s).round() as i32),
                 },
                 layout.screen,
                 width,
                 (28. * s).round() as i32,
             ));
             self.panel(t, 6. * s);
-            self.label(names[i], t, tone(palette::foreground(dark), 1.));
+            self.label(name, t, tone(palette::foreground(dark), 1.));
         }
     }
 
@@ -634,7 +567,7 @@ impl Canvas {
         if !contains(r, p) {
             return None;
         }
-        let x = (p.x - r.left) as f32 / layout.scale;
+        let x = (p.x - r.left) as f32 / layout.parameter_scale;
         if (COLOR_START..COLOR_START + 8. * COLOR_STEP).contains(&x) {
             Some(((x - COLOR_START) / COLOR_STEP) as usize)
         } else if layout.parameter_slider().is_some_and(|r| contains(r, p)) {
@@ -650,7 +583,7 @@ impl Canvas {
             return;
         };
         let r = self.local(bounds);
-        let s = layout.scale;
+        let s = layout.parameter_scale;
         let dark = self.dark;
         self.panel(r, BAR_RADIUS * s);
         // SAFETY: all drawing objects are owned by Canvas on the UI thread.
@@ -704,7 +637,14 @@ impl Canvas {
         };
         let slider = self.local(slider);
         let edit = self.local(edit);
-        let s = layout.scale;
+        let s = layout.parameter_scale;
+        let text = if (s - layout.scale).abs() > 0.001 {
+            self.parameter_text
+                .as_ref()
+                .map_or(&self.text, |(_, text)| text)
+        } else {
+            &self.text
+        };
         let dark = self.dark;
         let accent = tone(palette::accent(dark), 1.);
         let divider = tone(palette::divider(dark), 1.);
@@ -752,7 +692,7 @@ impl Canvas {
             },
             divider,
         );
-        self.label(
+        self.label_with_format(
             match parameter {
                 CaptureParameter::Stroke(_) => "线宽",
                 CaptureParameter::TextSize => "字号",
@@ -764,8 +704,9 @@ impl Canvas {
                 ..slider
             },
             foreground,
+            text,
         );
-        self.label(
+        self.label_with_format(
             "px",
             D2D_RECT_F {
                 left: edit.right + 2. * s,
@@ -773,6 +714,7 @@ impl Canvas {
                 ..edit
             },
             tone(palette::muted(dark), 1.),
+            text,
         );
         self.round(edit, 6. * s, tone(palette::background(dark), 1.));
         self.outline(
@@ -786,7 +728,7 @@ impl Canvas {
             },
         );
         if !editing {
-            self.label(&value.to_string(), edit, foreground);
+            self.label_with_format(&value.to_string(), edit, foreground, text);
         }
     }
     fn paint_annotations(
@@ -937,6 +879,23 @@ impl Canvas {
             X: (r.left + r.right) / 2.,
             Y: (r.top + r.bottom) / 2.,
         };
+        if index == MORE {
+            for offset in [-6., 0., 6.] {
+                let x = center.X + offset * scale;
+                let radius = 1.5 * scale;
+                self.round(
+                    D2D_RECT_F {
+                        left: x - radius,
+                        top: center.Y - radius,
+                        right: x + radius,
+                        bottom: center.Y + radius,
+                    },
+                    radius,
+                    c,
+                );
+            }
+            return;
+        }
         // SAFETY: the brush is owned by the active canvas on the render thread.
         unsafe {
             self.brush.SetColor(&c);
@@ -1016,12 +975,21 @@ impl Canvas {
         }
     }
     fn label(&self, text: &str, r: D2D_RECT_F, c: D2D1_COLOR_F) {
+        self.label_with_format(text, r, c, &self.text);
+    }
+    fn label_with_format(
+        &self,
+        text: &str,
+        r: D2D_RECT_F,
+        c: D2D1_COLOR_F,
+        format: &IDWriteTextFormat,
+    ) {
         let wide: Vec<_> = text.encode_utf16().collect(); // SAFETY: text slice and resources live through synchronous DrawText.
         unsafe {
             self.brush.SetColor(&c);
             self.target.DrawText(
                 &wide,
-                &self.text,
+                format,
                 &r,
                 &self.brush,
                 D2D1_DRAW_TEXT_OPTIONS_NONE,

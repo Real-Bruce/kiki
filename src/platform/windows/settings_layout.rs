@@ -1,5 +1,6 @@
 //! Settings page geometry shared by native control positioning and canvas painting.
 use super::startup;
+use crate::core::annotation::Tool;
 use crate::core::config::{Config, OutputFormat};
 
 pub const HEADER: i32 = 84;
@@ -8,6 +9,9 @@ pub const PARAMETER_SLIDER: u16 = 420;
 pub const PARAMETER_EDIT: u16 = 425;
 pub const OUTPUT_FORMAT: u16 = 430;
 pub const RESET_CAPTURE: u16 = 431;
+pub const DRAWING_TOOL: u16 = 432;
+pub const DRAWING_TOOL_IDS: std::ops::Range<u16> =
+    DRAWING_TOOL..DRAWING_TOOL + Tool::DRAWING.len() as u16;
 pub const PARAMETER_LABELS: [&str; 5] =
     ["矩形线宽", "箭头线宽", "画笔线宽", "文字字号", "圆角半径"];
 pub const FOOTER: i32 = 56;
@@ -147,7 +151,27 @@ impl Page {
                     p.width - 122,
                     Tone::Muted,
                 );
-                p.y += 70;
+                p.y += 48;
+                p.divider();
+                p.heading("工具显示");
+                let columns = if p.width >= 380 { 2 } else { 1 };
+                let gap = 32;
+                let cell = (p.width - (columns - 1) * gap) / columns;
+                for (i, tool) in Tool::DRAWING.into_iter().enumerate() {
+                    let x = (i as i32 % columns) * (cell + gap);
+                    p.text(tool.label(), x, (cell - 64).max(1), Tone::Normal);
+                    p.control(
+                        DRAWING_TOOL + i as u16,
+                        x + (cell - 52).max(0),
+                        -10,
+                        52,
+                        ROW,
+                    );
+                    if i as i32 % columns == columns - 1 {
+                        p.y += ROW;
+                    }
+                }
+                p.y += 14;
                 p.control(RESET_CAPTURE, 0, 0, 148, 38);
                 p.y += 38;
             }

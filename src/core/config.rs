@@ -181,6 +181,7 @@ pub struct Config {
     pub text_size: u16,
     pub corner_radius: u16,
     pub output_format: OutputFormat,
+    pub drawing_tools: [bool; 4],
     pub last_directory: Option<String>,
     pub extra: BTreeMap<String, String>,
 }
@@ -196,6 +197,7 @@ impl Default for Config {
             text_size: DEFAULT_TEXT_SIZE,
             corner_radius: 0,
             output_format: OutputFormat::Png,
+            drawing_tools: [true; 4],
             last_directory: None,
             extra: BTreeMap::new(),
         }
@@ -210,6 +212,7 @@ impl Config {
         self.text_size = defaults.text_size;
         self.corner_radius = defaults.corner_radius;
         self.output_format = defaults.output_format;
+        self.drawing_tools = defaults.drawing_tools;
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -255,6 +258,9 @@ impl Config {
         );
         use std::fmt::Write as _;
         for (key, value) in STROKE_KEYS.into_iter().zip(self.stroke_widths) {
+            let _ = writeln!(text, "{key}={value}");
+        }
+        for (key, value) in DRAWING_TOOL_KEYS.into_iter().zip(self.drawing_tools) {
             let _ = writeln!(text, "{key}={value}");
         }
         for (key, value) in &self.extra {
@@ -338,6 +344,12 @@ impl Config {
                             config.stroke_widths[index] =
                                 CaptureParameter::Stroke(index).parse(value)? as u8;
                         }
+                    } else if let Some(index) =
+                        DRAWING_TOOL_KEYS.iter().position(|name| *name == key)
+                    {
+                        config.drawing_tools[index] = value
+                            .parse()
+                            .map_err(|_| format!("工具显示设置无效：{key}"))?;
                     } else {
                         config.extra.insert(key.to_owned(), value.to_owned());
                     }
@@ -348,9 +360,34 @@ impl Config {
         Ok((config, legacy))
     }
 }
+
+const DRAWING_TOOL_KEYS: [&str; 4] = [
+    "rectangle_enabled",
+    "arrow_enabled",
+    "pen_enabled",
+    "text_enabled",
+];
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn drawing_switches_default_on_for_old_files_and_roundtrip_independently() {
+        for old in ["version=1\nstroke_width=8", "version=2\nrectangle_width=8"] {
+            assert_eq!(Config::decode(old).unwrap().0.drawing_tools, [true; 4]);
+        }
+        let mut config = Config::decode(
+            "version=2\ntheme=dark\nrectangle_enabled=false\npen_enabled=false\nmosaic_enabled=true",
+        )
+        .unwrap()
+        .0;
+        assert_eq!(config.drawing_tools, [false, true, false, true]);
+        assert_eq!(Config::decode(&config.encode().unwrap()).unwrap().0, config);
+        assert!(Config::decode("version=2\npen_enabled=maybe").is_err());
+        config.reset_capture_defaults();
+        assert_eq!(config.drawing_tools, [true; 4]);
+        assert_eq!(config.theme, Theme::Dark);
+        assert_eq!(config.extra["mosaic_enabled"], "true");
+    }
     #[test]
     fn preferences_roundtrip_preserves_unicode_paths_and_equal_signs() {
         let config = Config {

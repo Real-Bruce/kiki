@@ -7,14 +7,17 @@ use super::{
     settings_render::{self as appearance, Canvas},
     startup,
 };
-use crate::core::config::{CaptureParameter, Config, Hotkey, OutputFormat, Theme};
+use crate::core::{
+    annotation::Tool,
+    config::{CaptureParameter, Config, Hotkey, OutputFormat, Theme},
+};
 #[path = "settings_reset_dialog.rs"]
 mod reset_dialog;
 #[path = "settings_layout.rs"]
 mod settings_layout;
 use settings_layout::{
-    FOOTER, HEADER, Item, OUTPUT_FORMAT, PARAMETER_EDIT, PARAMETER_LABELS, PARAMETER_SLIDER, Page,
-    RESET_CAPTURE, Rect, START_CAPTURE, Tone,
+    DRAWING_TOOL, DRAWING_TOOL_IDS, FOOTER, HEADER, Item, OUTPUT_FORMAT, PARAMETER_EDIT,
+    PARAMETER_LABELS, PARAMETER_SLIDER, Page, RESET_CAPTURE, Rect, START_CAPTURE, Tone,
 };
 use std::{cell::Cell, rc::Rc};
 use windows::{
@@ -459,6 +462,16 @@ fn caption(id: u16, cfg: &Config, start: &std::result::Result<startup::State, St
         420..=424 => PARAMETER_LABELS[usize::from(id - PARAMETER_SLIDER)].into(),
         OUTPUT_FORMAT => format!("输出格式：{}", cfg.output_format.label()),
         RESET_CAPTURE => "恢复默认".into(),
+        id if DRAWING_TOOL_IDS.contains(&id) => {
+            let index = usize::from(id - DRAWING_TOOL);
+            let tool = Tool::DRAWING[index].label();
+            let status = if cfg.drawing_tools[index] {
+                "开启"
+            } else {
+                "关闭"
+            };
+            format!("{tool}：{status}")
+        }
         500 => "关闭贴图".into(),
         600..=602 => {
             let i = (id - 600) as usize;
@@ -502,6 +515,7 @@ fn create_controls(hwnd: HWND) -> Result<()> {
                 800,
             ])
             .chain(410..=417)
+            .chain(DRAWING_TOOL_IDS)
             .chain(PARAMETER_SLIDER..PARAMETER_SLIDER + PARAMETER_LABELS.len() as u16)
             .chain(PARAMETER_EDIT..PARAMETER_EDIT + PARAMETER_LABELS.len() as u16)
             .chain(600..=602);
@@ -858,6 +872,11 @@ fn action(hwnd: HWND, id: u16) {
                 preferences::update(cfg)
             }
             OUTPUT_FORMAT => choose_output_format(hwnd, cfg.output_format),
+            id if (*p).page == 2 && DRAWING_TOOL_IDS.contains(&id) => {
+                let enabled = &mut cfg.drawing_tools[usize::from(id - DRAWING_TOOL)];
+                *enabled = !*enabled;
+                preferences::update(cfg)
+            }
             RESET_CAPTURE if (*p).page == 2 => match reset_dialog::confirm(hwnd, system_dark()) {
                 Ok(true) if life.get() == Some(hwnd) => {
                     // Other preference updates may have arrived while the dialog was open.
@@ -1116,14 +1135,14 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
         let fg = appearance::foreground(dark);
         let labels = appearance::paint_control(dc, r, backdrop, |shapes| {
             let mut labels = Vec::new();
-            if matches!(id, 200 | 400) {
-                let on = if id == 400 {
-                    cfg.show_hints
-                } else {
-                    matches!(
+            if matches!(id, 200 | 400) || DRAWING_TOOL_IDS.contains(&id) {
+                let on = match id {
+                    400 => cfg.show_hints,
+                    200 => matches!(
                         state.startup,
                         Ok(startup::State::Enabled | startup::State::Moved)
-                    )
+                    ),
+                    _ => cfg.drawing_tools[usize::from(id - DRAWING_TOOL)],
                 };
                 if hovered && !disabled {
                     shapes.rounded(r, dip(12), appearance::hover(dark));
@@ -1994,6 +2013,16 @@ mod tests {
             assert!(!hotkey_focused());
             // Short logical work areas must scroll; controls outside the viewport must be hidden.
             SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(102)), None);
+            for id in DRAWING_TOOL_IDS {
+                SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(usize::from(id))), None);
+            }
+            let hidden = preferences::current();
+            assert_eq!(hidden.drawing_tools, [false; 4]);
+            assert_eq!(hidden.stroke_widths, [8, 3, 3]);
+            for id in DRAWING_TOOL_IDS {
+                SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(usize::from(id))), None);
+            }
+            assert_eq!(preferences::current().drawing_tools, [true; 4]);
             SetWindowPos(hwnd, None, 0, 0, 860, 480, SWP_NOZORDER | SWP_NOACTIVATE).unwrap();
             SendMessageW(hwnd, WM_VSCROLL, Some(WPARAM(SB_PAGEDOWN.0 as usize)), None);
             assert!((*pointer(hwnd)).scroll > 0);

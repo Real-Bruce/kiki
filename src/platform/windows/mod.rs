@@ -1,5 +1,6 @@
 mod annotation_render;
 mod capture;
+mod capture_toolbar;
 mod composition;
 #[cfg(feature = "diagnostics")]
 mod diagnostics;
@@ -776,7 +777,7 @@ fn dispatch(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
                         .and_then(|p| p.hwnd())
                 });
                 if let Some(preview) = preview {
-                    let _ = PostMessageW(Some(preview), WM_THEMECHANGED, WPARAM(0), LPARAM(0));
+                    let _ = PostMessageW(Some(preview), msg, WPARAM(0), LPARAM(0));
                 }
                 let mut tip = NOTIFYICONDATAW {
                     cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,

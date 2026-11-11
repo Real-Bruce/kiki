@@ -1,8 +1,9 @@
 //! Native frozen-desktop selection window. Annotation/output controls are staged for P4/P5.
 use super::{
     capture::CaptureResult,
+    capture_toolbar::{self, Layout, MORE, tool_visible},
     parameter_control::{self, Wheel},
-    selection_render::{Canvas, Layout, PaintInput, system_dark},
+    selection_render::{Canvas, PaintInput, system_dark},
     text_input::{TextHit, TextInput, TextStart},
 };
 use crate::core::{
@@ -105,6 +106,7 @@ impl Preview {
                 canvas,
                 selection,
                 editor,
+                drawing_tools: cfg.drawing_tools,
                 corner_radius: cfg.corner_radius,
                 parameter_down: false,
                 parameter_slider: false,
@@ -129,6 +131,7 @@ impl Preview {
                 hover: None,
                 pressed_window: None,
                 down_button: None,
+                pending_more: false,
                 focus: usize::MAX,
                 keyboard_focus: false,
             };
@@ -172,6 +175,7 @@ struct State {
     canvas: Canvas,
     selection: Selection,
     editor: Editor,
+    drawing_tools: [bool; 4],
     corner_radius: u16,
     parameter_down: bool,
     parameter_slider: bool,
@@ -189,6 +193,7 @@ struct State {
     hover: Option<PixelRect>,
     pressed_window: Option<PixelRect>,
     down_button: Option<usize>,
+    pending_more: bool,
     focus: usize,
     keyboard_focus: bool,
 }
@@ -214,7 +219,11 @@ enum CanvasHit {
 
 impl State {
     fn activate(&mut self, index: usize) -> bool {
-        if !self.editor.enabled(index) {
+        if index == MORE {
+            self.pending_more = self.layout().is_some_and(|l| l.overflow().next().is_some());
+            return false;
+        }
+        if !tool_visible(self.drawing_tools, index) || !self.editor.enabled(index) {
             return false;
         }
         match index {
@@ -222,13 +231,11 @@ impl State {
                 self.editor.finish_parameter_adjustment();
                 self.wheel = Wheel::default();
                 self.editor.cancel();
-                let mut tool = [
-                    Tool::Select,
-                    Tool::Rectangle,
-                    Tool::Arrow,
-                    Tool::Pen,
-                    Tool::Text,
-                ][index];
+                let mut tool = if index == 0 {
+                    Tool::Select
+                } else {
+                    Tool::DRAWING[index - 1]
+                };
                 if tool == self.editor.tool {
                     tool = Tool::Select;
                 }
@@ -284,7 +291,39 @@ impl State {
     }
     fn layout(&self) -> Option<Layout> {
         let rect = self.selection.rect.filter(|_| !self.selection.active())?;
-        Some(self.canvas.layout(rect, &self.screens, self.editor.tool))
+        Some(
+            self.canvas
+                .layout(rect, &self.screens, self.editor.tool, self.drawing_tools),
+        )
+    }
+    fn can_focus(&self, layout: &Layout, id: usize) -> bool {
+        if (11..=20).contains(&id) {
+            layout.parameters.is_some() && self.editor.enabled(id)
+        } else {
+            (id == MORE || self.editor.enabled(id)) && layout.buttons().any(|b| b.id == id)
+        }
+    }
+    fn advance_focus(&mut self, backwards: bool) {
+        let Some(layout) = self.layout() else {
+            return;
+        };
+        let stops: Vec<_> = layout
+            .buttons()
+            .map(|b| b.id)
+            .chain(11..=20)
+            .filter(|&id| self.can_focus(&layout, id))
+            .collect();
+        if stops.is_empty() {
+            return;
+        }
+        let current = stops.iter().position(|&id| id == self.focus);
+        let next = match (current, backwards) {
+            (Some(i), false) => (i + 1) % stops.len(),
+            (Some(i), true) => (i + stops.len() - 1) % stops.len(),
+            (None, false) => 0,
+            (None, true) => stops.len() - 1,
+        };
+        self.focus = stops[next];
     }
     fn parameter(&self) -> Option<(CaptureParameter, u16)> {
         let parameter = self.editor.tool.parameter()?;
@@ -308,7 +347,7 @@ impl State {
     fn slider_value(&self) -> Option<u16> {
         let layout = self.layout()?;
         let slider = layout.parameter_slider()?;
-        let inset = 6. * layout.scale;
+        let inset = 6. * layout.parameter_scale;
         Some(parameter_control::slider_value(
             self.editor.tool.parameter()?,
             self.pointer.x as f32,
@@ -330,16 +369,7 @@ impl State {
         self.windows.iter().copied().find(|r| contains(*r, p))
     }
     fn button_at(&self, p: PixelPoint) -> Option<usize> {
-        self.selection
-            .rect
-            .filter(|_| !self.selection.active())
-            .and_then(|r| {
-                self.canvas
-                    .layout(r, &self.screens, self.editor.tool)
-                    .buttons
-                    .iter()
-                    .position(|b| contains(*b, p))
-            })
+        self.layout()?.button_at(p)
     }
     fn scale(&self) -> f32 {
         self.screens
@@ -352,7 +382,7 @@ impl State {
             || self.scale(),
             |rect| {
                 self.canvas
-                    .layout(rect, &self.screens, self.editor.tool)
+                    .layout(rect, &self.screens, self.editor.tool, self.drawing_tools)
                     .scale
             },
         )
@@ -482,7 +512,7 @@ fn open_parameter_edit(hwnd: HWND, pointer: *mut State) -> Result<()> {
             return Ok(());
         };
         let font = CreateFontW(
-            -(14. * layout.scale).round().max(1.) as i32,
+            -(14. * layout.parameter_scale).round().max(1.) as i32,
             0,
             0,
             0,
@@ -512,7 +542,7 @@ fn open_parameter_edit(hwnd: HWND, pointer: *mut State) -> Result<()> {
         let mut metrics = TEXTMETRICW::default();
         let dc = GetDC(Some(child));
         let text_height = if dc.is_invalid() {
-            (18. * layout.scale).round() as i32
+            (18. * layout.parameter_scale).round() as i32
         } else {
             let previous = SelectObject(dc, font.into());
             let _ = GetTextMetricsW(dc, &mut metrics);
@@ -521,7 +551,7 @@ fn open_parameter_edit(hwnd: HWND, pointer: *mut State) -> Result<()> {
             metrics.tmHeight.max(1)
         };
         let y = (bounds.top + bounds.bottom - text_height) / 2;
-        let inset = (6. * layout.scale).round() as i32;
+        let inset = (6. * layout.parameter_scale).round() as i32;
         SetWindowPos(
             child,
             None,
@@ -557,6 +587,90 @@ fn close_parameter_edit(hwnd: HWND, pointer: *mut State, commit: bool, restore_f
         }
         drop(edit);
         let _ = InvalidateRect(Some(hwnd), None, false);
+    }
+}
+
+fn refresh_tool_visibility(hwnd: HWND, pointer: *mut State) {
+    let drawing_tools = super::preferences::current().drawing_tools;
+    // SAFETY: pointer belongs to the live preview. Release the state borrow
+    // before calling Win32 operations that can synchronously dispatch messages.
+    unsafe {
+        let state = &mut *pointer;
+        if state.drawing_tools == drawing_tools {
+            return;
+        }
+        state.drawing_tools = drawing_tools;
+        let active_hidden = !tool_visible(drawing_tools, state.editor.tool.button());
+        let mut release = state.down_button.take().is_some();
+        if active_hidden {
+            release |= state.editor.cancel() || state.parameter_slider;
+            state.editor.finish_parameter_adjustment();
+            state.editor.tool = Tool::Select;
+            state.parameter_slider = false;
+            state.parameter_down = false;
+            state.wheel = Wheel::default();
+        }
+        if state.focus != usize::MAX
+            && let Some(layout) = state.layout()
+            && !state.can_focus(&layout, state.focus)
+        {
+            state.focus = layout
+                .buttons()
+                .next()
+                .map_or(usize::MAX, |button| button.id);
+        }
+        if active_hidden {
+            let _ = KillTimer(Some(hwnd), PARAMETER_TIMER);
+            let restore_focus = (*pointer)
+                .parameter_edit
+                .as_ref()
+                .is_some_and(|edit| GetFocus() == edit.hwnd);
+            close_parameter_edit(hwnd, pointer, false, restore_focus);
+        }
+        if release && GetCapture() == hwnd {
+            let _ = ReleaseCapture();
+        }
+    }
+}
+
+fn show_more_if_pending(hwnd: HWND, pointer: *mut State) {
+    // SAFETY: only copied menu data and the window lifetime cross the modal loop.
+    unsafe {
+        if !std::mem::take(&mut (*pointer).pending_more) {
+            return;
+        }
+        let state = &*pointer;
+        let Some(layout) = state.layout() else { return };
+        let Some(button) = layout.buttons().find(|button| button.id == MORE) else {
+            return;
+        };
+        let lifetime = state.lifetime.clone();
+        let entries: Vec<_> = layout
+            .overflow()
+            .map(|id| {
+                (
+                    (id + 1) as u32,
+                    capture_toolbar::name(id),
+                    state.editor.enabled(id),
+                )
+            })
+            .collect();
+        let result = super::menu::popup(
+            hwnd,
+            button.bounds.left,
+            layout.toolbar.bottom - 1,
+            super::menu::Style::Settings,
+            &entries,
+        );
+        if lifetime.get() == Some(hwnd)
+            && let Some(id) = result.checked_sub(1).map(|id| id as usize)
+            && (*pointer)
+                .layout()
+                .is_some_and(|layout| layout.overflow().any(|item| item == id))
+        {
+            (*pointer).activate(id);
+            let _ = InvalidateRect(Some(hwnd), None, false);
+        }
     }
 }
 
@@ -638,6 +752,11 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         }
         if pointer.is_null() {
             return DefWindowProcW(hwnd, msg, wp, lp);
+        }
+        if matches!(msg, WM_MEASUREITEM | WM_DRAWITEM)
+            && let Some(result) = super::menu::handle(msg, lp)
+        {
+            return result;
         }
         if (*pointer).busy
             && matches!(
@@ -755,6 +874,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                         busy: state.busy,
                         hover: state.hover,
                         screens: &state.screens,
+                        drawing_tools: state.drawing_tools,
                         pointer: state.pointer,
                         focus: if state.keyboard_focus {
                             state.focus
@@ -860,7 +980,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                         }
                     } else if let Some(button) = state.button_at(state.pointer) {
                         state.down_button = Some(button);
-                        if state.editor.enabled(button) {
+                        if button == MORE || state.editor.enabled(button) {
                             state.focus = button;
                         }
                     } else if state
@@ -889,6 +1009,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                             CanvasHit::Object(hit) => {
                                 let double_clicked_text = msg == WM_LBUTTONDBLCLK
                                     && state.editor.tool == Tool::Select
+                                    && tool_visible(state.drawing_tools, Tool::Text.button())
                                     && matches!(hit, ObjectHit::Move(_));
                                 if let Some(index) = double_clicked_text
                                     .then(|| state.editor.text_at(p))
@@ -975,6 +1096,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     let _ = DestroyWindow(hwnd);
                 } else {
                     let _ = InvalidateRect(Some(hwnd), None, false);
+                    show_more_if_pending(hwnd, pointer);
                 }
                 LRESULT(0)
             }
@@ -1031,33 +1153,20 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                         }
                         9 => {
                             state.keyboard_focus = true;
-                            let backwards = GetKeyState(VK_SHIFT.0 as i32) < 0;
-                            let mut next = if state.focus < 22 {
-                                state.focus
-                            } else if backwards {
-                                0
-                            } else {
-                                21
-                            };
-                            for _ in 0..22 {
-                                next = if backwards {
-                                    (next + 21) % 22
-                                } else {
-                                    (next + 1) % 22
-                                };
-                                if state.editor.enabled(next) {
-                                    break;
-                                }
-                            }
-                            state.focus = next;
+                            state.advance_focus(GetKeyState(VK_SHIFT.0 as i32) < 0);
                             false
                         }
                         13 | 32
                             if (wp.0 == 13 || msg == WM_KEYUP)
                                 && state.keyboard_focus
-                                && state.focus < 22 =>
+                                && state.focus != usize::MAX =>
                         {
-                            if state.editor.tool.parameter().is_some() && state.focus == 20 {
+                            if !state
+                                .layout()
+                                .is_some_and(|l| state.can_focus(&l, state.focus))
+                            {
+                                false
+                            } else if state.focus == 20 {
                                 if let Err(error) = open_parameter_edit(hwnd, pointer) {
                                     super::show_error(&error.to_string());
                                 }
@@ -1118,6 +1227,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     let _ = DestroyWindow(hwnd);
                 } else {
                     let _ = InvalidateRect(Some(hwnd), None, false);
+                    show_more_if_pending(hwnd, pointer);
                 }
                 LRESULT(0)
             }
@@ -1156,10 +1266,12 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 }
                 LRESULT(1)
             }
-            WM_SETTINGCHANGE | WM_THEMECHANGED => {
+            WM_SETTINGCHANGE | WM_THEMECHANGED | super::preferences::CHANGED => {
                 let dark = system_dark();
                 (*pointer).canvas.dark = dark;
-
+                if msg == super::preferences::CHANGED {
+                    refresh_tool_visibility(hwnd, pointer);
+                }
                 let _ = InvalidateRect(Some(hwnd), None, false);
                 LRESULT(0)
             }
@@ -2071,6 +2183,90 @@ mod tests {
             assert_eq!((*next_state).corner_radius, defaults.corner_radius);
             drop(next);
             drop(reopened);
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn hiding_active_text_falls_back_and_keeps_draft_objects_and_visible_focus() {
+        use crate::core::config::{Config, Key};
+
+        super::super::tests::graphics_runtime();
+        let _com = composition::Apartment::enter().unwrap();
+        let path =
+            std::env::temp_dir().join(format!("kiki-tool-visibility-{}.ini", std::process::id()));
+        let mut config = Config::default();
+        config.hotkey.key = Key::Function(15);
+        config.stroke_widths = [9, 12, 14];
+        std::fs::write(&path, config.encode().unwrap()).unwrap();
+        // SAFETY: all messages target the test's own hidden native preview on this thread.
+        unsafe {
+            register(GetModuleHandleW(None).unwrap().into()).unwrap();
+            let (preview, pointer) = setup();
+            let hwnd = preview.hwnd().unwrap();
+            let (guard, warning) =
+                super::super::preferences::initialize_at(hwnd, path.clone()).unwrap();
+            assert!(warning.is_none());
+            let state = &mut *pointer;
+            let original = state.editor.objects().to_vec();
+            let text = original
+                .iter()
+                .position(|o| o.matches_tool(Tool::Text))
+                .unwrap();
+            state.activate(Tool::Text.button());
+            state.focus = Tool::Text.button();
+            state.keyboard_focus = true;
+            start_text(hwnd, pointer, Some(text)).unwrap();
+            let draft = (*pointer).text_input.as_ref().unwrap();
+            let content = draft.content().unwrap();
+            assert!(content.contains("中文标注"));
+            let size = draft.size;
+            let angle = draft.angle;
+
+            config.drawing_tools = [false, true, true, false];
+            super::super::preferences::update(config.clone()).unwrap();
+            let mut message = MSG::default();
+            let changed = super::super::preferences::CHANGED;
+            assert!(PeekMessageW(&mut message, Some(hwnd), changed, changed, PM_REMOVE).as_bool());
+            DispatchMessageW(&message);
+
+            let state = &mut *pointer;
+            assert_eq!(state.editor.tool, Tool::Select);
+            assert_eq!(state.focus, 0);
+            assert_eq!(state.editor.objects(), original);
+            assert!(state.layout().unwrap().parameters.is_none());
+            let draft = state.text_input.as_ref().unwrap();
+            assert_eq!(
+                (draft.content().unwrap(), draft.size, draft.angle),
+                (content, size, angle)
+            );
+            assert!(!state.activate(Tool::Text.button()));
+            assert!(!state.activate(Tool::Rectangle.button()));
+            assert_eq!(state.editor.tool, Tool::Select);
+            // End the existing draft before exercising toolbar keyboard navigation.
+            (*pointer).text_input = None;
+            for expected in [2, 3, 5, 7, 8, 9, 10, 0] {
+                SendMessageW(hwnd, WM_KEYDOWN, Some(WPARAM(9)), None);
+                assert_eq!((*pointer).focus, expected);
+            }
+            (*pointer).advance_focus(true);
+            assert_eq!((*pointer).focus, 10);
+            assert_eq!(
+                super::super::preferences::current().stroke_widths,
+                [9, 12, 14]
+            );
+
+            config.drawing_tools = [true; 4];
+            super::super::preferences::update(config.clone()).unwrap();
+            SendMessageW(hwnd, changed, None, None);
+            (*pointer).activate(Tool::Text.button());
+            assert_eq!((*pointer).editor.tool, Tool::Text);
+            assert_eq!((*pointer).editor.objects(), original);
+            drop(guard);
+            assert_eq!(
+                super::super::config_store::Disk::load(path.clone()).config,
+                config
+            );
         }
         std::fs::remove_file(path).unwrap();
     }
