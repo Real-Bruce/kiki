@@ -8,6 +8,12 @@ pub struct PixelRect {
 }
 
 impl PixelRect {
+    pub fn corner_radius(self, configured: u16) -> f32 {
+        self.size().map_or(0., |(width, height)| {
+            f32::from(configured).min(width.min(height) as f32 / 2.)
+        })
+    }
+
     pub fn size(self) -> Option<(u32, u32)> {
         let width = u32::try_from(i64::from(self.right) - i64::from(self.left)).ok()?;
         let height = u32::try_from(i64::from(self.bottom) - i64::from(self.top)).ok()?;

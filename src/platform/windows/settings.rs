@@ -394,6 +394,7 @@ fn setting_parameter(id: u16, first: u16) -> Option<CaptureParameter> {
     match id.checked_sub(first)? {
         index @ 0..=2 => Some(CaptureParameter::Stroke(usize::from(index))),
         3 => Some(CaptureParameter::TextSize),
+        4 => Some(CaptureParameter::CornerRadius),
         _ => None,
     }
 }
@@ -445,7 +446,7 @@ fn caption(id: u16, cfg: &Config, start: &std::result::Result<startup::State, St
                 if cfg.color == COLORS[i] { " ✓" } else { "" }
             )
         }
-        420..=423 => PARAMETER_LABELS[usize::from(id - PARAMETER_SLIDER)].into(),
+        420..=424 => PARAMETER_LABELS[usize::from(id - PARAMETER_SLIDER)].into(),
         500 => "关闭贴图".into(),
         600..=602 => {
             let i = (id - 600) as usize;
@@ -487,8 +488,8 @@ fn create_controls(hwnd: HWND) -> Result<()> {
                 800,
             ])
             .chain(410..=417)
-            .chain(PARAMETER_SLIDER..PARAMETER_SLIDER + 4)
-            .chain(PARAMETER_EDIT..PARAMETER_EDIT + 4)
+            .chain(PARAMETER_SLIDER..PARAMETER_SLIDER + PARAMETER_LABELS.len() as u16)
+            .chain(PARAMETER_EDIT..PARAMETER_EDIT + PARAMETER_LABELS.len() as u16)
             .chain(600..=602);
         for id in ids {
             if setting_parameter(id, PARAMETER_EDIT).is_some() {
@@ -694,6 +695,12 @@ fn paint(hwnd: HWND, p: *mut State) -> Result<()> {
                     c.value(label, r.x as f32, r.y as f32 - offset, r.w as f32, sub)
                 }
                 Item::Divider(y) => c.fill(x, *y as f32 - offset, w, 1., appearance::divider(dark)),
+                Item::CornerPreview(r) => c.corner_preview(
+                    r.x as f32,
+                    r.y as f32 - offset,
+                    preferences::current().corner_radius,
+                    dark,
+                ),
                 Item::Control(id, r)
                     if setting_parameter(*id, PARAMETER_EDIT).is_some()
                         && r.y - state.scroll >= HEADER
@@ -1748,6 +1755,14 @@ mod tests {
             let size_edit = GetDlgItem(Some(hwnd), i32::from(PARAMETER_EDIT + 3)).unwrap();
             parameter_control::set_edit(size_edit, 256);
             SendMessageW(size_edit, WM_KEYDOWN, Some(WPARAM(13)), None);
+            let radius_edit = GetDlgItem(Some(hwnd), i32::from(PARAMETER_EDIT + 4)).unwrap();
+            assert_eq!(preferences::current().corner_radius, 0);
+            parameter_control::set_edit(radius_edit, 256);
+            SendMessageW(radius_edit, WM_KEYDOWN, Some(WPARAM(13)), None);
+            parameter_control::set_edit(radius_edit, 257);
+            SendMessageW(radius_edit, WM_KEYDOWN, Some(WPARAM(13)), None);
+            assert!((*pointer(hwnd)).error.is_some());
+            assert_eq!(preferences::current().corner_radius, 256);
             assert_eq!(
                 (
                     preferences::current().color,

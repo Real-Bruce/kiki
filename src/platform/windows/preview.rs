@@ -105,6 +105,7 @@ impl Preview {
                 canvas,
                 selection,
                 editor,
+                corner_radius: cfg.corner_radius,
                 parameter_down: false,
                 parameter_slider: false,
                 parameter_edit: None,
@@ -171,6 +172,7 @@ struct State {
     canvas: Canvas,
     selection: Selection,
     editor: Editor,
+    corner_radius: u16,
     parameter_down: bool,
     parameter_slider: bool,
     parameter_edit: Option<ParameterEdit>,
@@ -287,6 +289,7 @@ impl State {
     fn parameter(&self) -> Option<(CaptureParameter, u16)> {
         let parameter = self.editor.tool.parameter()?;
         let value = match parameter {
+            CaptureParameter::CornerRadius => return None,
             CaptureParameter::Stroke(_) => self.editor.style().width as u16,
             CaptureParameter::TextSize => {
                 if let Some(input) = &self.text_input {
@@ -386,6 +389,7 @@ fn set_parameter_value(pointer: *mut State, value: u16) {
             return;
         }
         match parameter {
+            CaptureParameter::CornerRadius => return,
             CaptureParameter::Stroke(_) => (*pointer).editor.set_stroke_width(value as u8),
             CaptureParameter::TextSize => {
                 let size = f32::from(value);
@@ -746,6 +750,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     state.canvas.paint(PaintInput {
                         selection: &state.selection,
                         editor: &state.editor,
+                        corner_radius: state.corner_radius,
                         text_input: state.text_input.as_ref(),
                         busy: state.busy,
                         hover: state.hover,
@@ -1564,6 +1569,7 @@ fn begin_output(hwnd: HWND, pointer: *mut State) -> Result<()> {
             state.canvas.source(),
             rect,
             state.editor.snapshot(),
+            state.corner_radius,
             hwnd.0 as usize,
             destination,
         ) {
@@ -1777,7 +1783,7 @@ mod tests {
             assert_eq!(Disk::load(path.clone()).config.stroke_widths, [14, 22, 20]);
 
             let image =
-                composition::render(&(*p).canvas.source(), selection, &(*p).editor).unwrap();
+                composition::render(&(*p).canvas.source(), selection, &(*p).editor, 0).unwrap();
             let stride = image.stride() as usize;
             let measure = |center: usize| {
                 (center - 20..center + 20)
@@ -1890,7 +1896,7 @@ mod tests {
             finish_text(hwnd, p).unwrap();
             let selection = (*p).selection.rect.unwrap();
             let output =
-                composition::render(&(*p).canvas.source(), selection, &(*p).editor).unwrap();
+                composition::render(&(*p).canvas.source(), selection, &(*p).editor, 0).unwrap();
             let png = super::super::png::encode(&output).unwrap();
             assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
             let object = &(*p).editor.objects()[index];
@@ -2061,6 +2067,7 @@ mod tests {
             let (preview, p) = setup();
             let hwnd = preview.0.get().unwrap();
             let objects = (*p).editor.objects().to_vec();
+            (*p).corner_radius = 256;
             let sequence = GetClipboardSequenceNumber();
             output::TEST_DIALOG.with_borrow_mut(|path| *path = Some(None));
             (*p).pending_output = Some(8);
@@ -2142,6 +2149,7 @@ mod tests {
             let (preview, p) = setup();
             let hwnd = preview.0.get().unwrap();
             let bounds = (*p).canvas.bounds();
+            (*p).corner_radius = 256;
             (*p).text_input = Some(
                 TextInput::open(
                     hwnd,
@@ -2209,7 +2217,7 @@ mod tests {
             }
             assert!(weak.upgrade().is_none());
             let (image, editor) = composition::fixture().unwrap();
-            let rendered = composition::render(&image, image.bounds(), &editor).unwrap();
+            let rendered = composition::render(&image, image.bounds(), &editor, 0).unwrap();
             output::save_atomic(&rendered, &path, &AtomicBool::new(false)).unwrap();
             assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
             std::fs::remove_file(path).unwrap();

@@ -105,12 +105,14 @@ pub const MIN_STROKE_WIDTH: u8 = 1;
 pub const MAX_STROKE_WIDTH: u8 = 64;
 pub const DEFAULT_STROKE_WIDTH: u8 = 3;
 pub const DEFAULT_TEXT_SIZE: u16 = 24;
+pub const MAX_CORNER_RADIUS: u16 = 256;
 const STROKE_KEYS: [&str; 3] = ["rectangle_width", "arrow_width", "pen_width"];
 
 #[derive(Clone, Copy)]
 pub enum CaptureParameter {
     Stroke(usize),
     TextSize,
+    CornerRadius,
 }
 
 impl CaptureParameter {
@@ -118,6 +120,7 @@ impl CaptureParameter {
         match self {
             Self::Stroke(_) => (MIN_STROKE_WIDTH as u16, MAX_STROKE_WIDTH as u16),
             Self::TextSize => (8, 256),
+            Self::CornerRadius => (0, MAX_CORNER_RADIUS),
         }
     }
 
@@ -131,6 +134,7 @@ impl CaptureParameter {
             .ok_or(match self {
                 Self::Stroke(_) => "请输入 1–64 之间的整数线宽（px）。",
                 Self::TextSize => "请输入 8–256 之间的整数字号（px）。",
+                Self::CornerRadius => "请输入 0–256 之间的整数圆角半径（px）。",
             })
     }
 
@@ -138,6 +142,7 @@ impl CaptureParameter {
         match self {
             Self::Stroke(index) => u16::from(config.stroke_widths[index]),
             Self::TextSize => config.text_size,
+            Self::CornerRadius => config.corner_radius,
         }
     }
 }
@@ -151,6 +156,7 @@ pub struct Config {
     pub color: [u8; 3],
     pub stroke_widths: [u8; 3],
     pub text_size: u16,
+    pub corner_radius: u16,
     pub last_directory: Option<String>,
     pub extra: BTreeMap<String, String>,
 }
@@ -164,6 +170,7 @@ impl Default for Config {
             color: [255, 59, 64],
             stroke_widths: [DEFAULT_STROKE_WIDTH; 3],
             text_size: DEFAULT_TEXT_SIZE,
+            corner_radius: 0,
             last_directory: None,
             extra: BTreeMap::new(),
         }
@@ -181,6 +188,9 @@ impl Config {
         {
             return Err("工具默认线宽或字号超出支持范围".into());
         }
+        if self.corner_radius > MAX_CORNER_RADIUS {
+            return Err("截图圆角半径超出支持范围".into());
+        }
         if self.last_directory.as_ref().is_some_and(|path| {
             path.encode_utf16().count() > 32767 || path.chars().any(char::is_control)
         }) {
@@ -191,7 +201,7 @@ impl Config {
     pub fn encode(&self) -> Result<String, String> {
         self.validate()?;
         let mut text = format!(
-            "version={CONFIG_VERSION}\ntheme={}\nhotkey={}\nshow_hints={}\nfirst_tip_seen={}\ncolor={:02X}{:02X}{:02X}\ntext_size={}\nlast_directory={}\n",
+            "version={CONFIG_VERSION}\ntheme={}\nhotkey={}\nshow_hints={}\nfirst_tip_seen={}\ncolor={:02X}{:02X}{:02X}\ntext_size={}\ncorner_radius={}\nlast_directory={}\n",
             match self.theme {
                 Theme::System => "system",
                 Theme::Light => "light",
@@ -204,6 +214,7 @@ impl Config {
             self.color[1],
             self.color[2],
             self.text_size,
+            self.corner_radius,
             self.last_directory.as_deref().unwrap_or("")
         );
         use std::fmt::Write as _;
@@ -272,6 +283,9 @@ impl Config {
                         return Err("旧版默认字号超出支持范围".into());
                     }
                 }
+                "corner_radius" => {
+                    config.corner_radius = CaptureParameter::CornerRadius.parse(value)?;
+                }
                 "last_directory" => {
                     config.last_directory = (!value.is_empty()).then(|| value.to_string())
                 }
@@ -326,6 +340,7 @@ mod tests {
         assert_eq!(config.stroke_widths, [8; 3]);
         assert_eq!(config.theme, Theme::Dark);
         assert_eq!(config.text_size, 32);
+        assert_eq!(config.corner_radius, 24);
         assert!(!config.show_hints);
         config.stroke_widths = [1, 23, 64];
         let encoded = config.encode().unwrap();
@@ -376,6 +391,8 @@ mod tests {
             "version=1\nstroke_width=0",
             "version=1\nstroke_width=13",
             "version=2\npen_width=65",
+            "version=2\ncorner_radius=257",
+            "version=2\ncorner_radius=-1",
             "version=1\nhotkey=Shift+A",
             "version=1\nhotkey=Ctrl+Ctrl+A",
             "version=1\nhotkey=Ctrl+F25",

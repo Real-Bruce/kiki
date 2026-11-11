@@ -396,7 +396,7 @@ pub fn isolate(folder: &std::path::Path) -> Result<()> {
                 "composition_fresh" => {
                     std::thread::spawn(|| -> Result<()> {
                         let (image, editor) = super::composition::fixture()?;
-                        super::composition::render(&image, image.bounds(), &editor)?;
+                        super::composition::render(&image, image.bounds(), &editor, 0)?;
                         Ok(())
                     })
                     .join()

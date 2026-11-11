@@ -608,7 +608,12 @@ impl TextInput {
         }
         self.view.mouse_captured.set(false);
     }
-    pub fn draw(&self, interop: &ID2D1GdiInteropRenderTarget, clip: RECT) -> Result<()> {
+    pub fn draw(
+        &self,
+        interop: &ID2D1GdiInteropRenderTarget,
+        clip: RECT,
+        diameter: i32,
+    ) -> Result<()> {
         let mut r = self.view.rect.get();
         let mut bounds = RECTL {
             left: r.left,
@@ -620,8 +625,31 @@ impl TextInput {
         unsafe {
             let dc = interop.GetDC(D2D1_DC_INITIALIZE_MODE_COPY)?;
             let saved = SaveDC(dc);
-            let result = if saved != 0 {
-                IntersectClipRect(dc, clip.left, clip.top, clip.right, clip.bottom);
+            let result = (|| {
+                if saved == 0 {
+                    return Err(Error::from_win32());
+                }
+                if diameter == 0 {
+                    IntersectClipRect(dc, clip.left, clip.top, clip.right, clip.bottom);
+                } else {
+                    // Rich Edit borrows the DC, so apply the same arc as a native clip region.
+                    let region = CreateRoundRectRgn(
+                        clip.left,
+                        clip.top,
+                        clip.right,
+                        clip.bottom,
+                        diameter,
+                        diameter,
+                    );
+                    if region.is_invalid() {
+                        return Err(Error::from_win32());
+                    }
+                    let selected = ExtSelectClipRgn(dc, Some(region), RGN_AND);
+                    let _ = DeleteObject(region.into());
+                    if selected == RGN_ERROR {
+                        return Err(Error::from_win32());
+                    }
+                }
                 let result = self.service.TxDraw(
                     DVASPECT_CONTENT,
                     0,
@@ -644,11 +672,11 @@ impl TextInput {
                     caret.right = caret.left.saturating_add(2);
                     let _ = InvertRect(dc, &caret);
                 }
-                let _ = RestoreDC(dc, saved);
                 result
-            } else {
-                Err(Error::from_win32())
-            };
+            })();
+            if saved != 0 {
+                let _ = RestoreDC(dc, saved);
+            }
             let release = interop.ReleaseDC(None);
             result.and(release)
         }

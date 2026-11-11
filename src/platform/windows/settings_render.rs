@@ -251,6 +251,43 @@ impl Canvas {
             );
         }
     }
+    pub fn corner_preview(&self, x: f32, y: f32, configured: u16, dark: bool) {
+        let cell = 9.;
+        for row in 0..8 {
+            for column in 0..12 {
+                self.fill(
+                    x + column as f32 * cell,
+                    y + row as f32 * cell,
+                    cell,
+                    cell,
+                    if (row + column) % 2 == 0 {
+                        divider(dark)
+                    } else {
+                        sidebar(dark)
+                    },
+                );
+            }
+        }
+        // Represent a 768 × 512 px image at 108 × 72 DIP so the whole radius range is visible.
+        let radius = f32::from(configured) * 72. / 512.;
+        // SAFETY: the settings window owns the brush and target during this paint.
+        unsafe {
+            self.brush.SetColor(&color(accent(dark)));
+            self.target.FillRoundedRectangle(
+                &D2D1_ROUNDED_RECT {
+                    rect: D2D_RECT_F {
+                        left: x,
+                        top: y,
+                        right: x + 108.,
+                        bottom: y + 72.,
+                    },
+                    radiusX: radius,
+                    radiusY: radius,
+                },
+                &self.brush,
+            );
+        }
+    }
     pub fn heading(&self, text: &str, x: f32, y: f32, width: f32, size: f32, rgb: u32) {
         self.write(
             text,

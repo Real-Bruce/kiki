@@ -74,6 +74,7 @@ impl Layout {
 pub struct PaintInput<'a> {
     pub selection: &'a Selection,
     pub editor: &'a Editor,
+    pub corner_radius: u16,
     pub text_input: Option<&'a TextInput>,
     pub busy: bool,
     pub hover: Option<PixelRect>,
@@ -244,6 +245,7 @@ impl Canvas {
         let PaintInput {
             selection,
             editor,
+            corner_radius,
             text_input,
             busy,
             hover,
@@ -271,6 +273,12 @@ impl Canvas {
         let scale = layout.as_ref().map_or(preferred, |l| l.scale);
         let text_layouts = super::annotation_render::layouts(&self.dw, editor)?;
         let geometry = super::annotation_render::geometry(&self.factory, self.bounds(), editor)?;
+        let selected = selection.rect.or(hover);
+        let radius = selected.map_or(0., |rect| rect.corner_radius(corner_radius));
+        let rounded = selected
+            .filter(|_| radius > 0.)
+            .map(|rect| self.rounded_selection(rect, radius))
+            .transpose()?;
         // SAFETY: all drawing resources belong to this UI thread; BeginDraw is always paired with EndDraw.
         unsafe {
             if (scale - self.scale).abs() > 0.001 {
@@ -289,39 +297,44 @@ impl Canvas {
             let (width, height) = self.source.bounds().size().unwrap_or((1, 1));
             let w = width as f32;
             let h = height as f32;
-            let selected = selection.rect.or(hover);
             if let Some(rect) = selected {
                 let r = self.local(rect);
-                for mask in [
-                    D2D_RECT_F {
-                        left: 0.,
-                        top: 0.,
-                        right: w,
-                        bottom: r.top,
-                    },
-                    D2D_RECT_F {
-                        left: 0.,
-                        top: r.bottom,
-                        right: w,
-                        bottom: h,
-                    },
-                    D2D_RECT_F {
-                        left: 0.,
-                        top: r.top,
-                        right: r.left,
-                        bottom: r.bottom,
-                    },
-                    D2D_RECT_F {
-                        left: r.right,
-                        top: r.top,
-                        right: w,
-                        bottom: r.bottom,
-                    },
-                ] {
-                    self.fill(mask, tone(palette::foreground(false), 0.50));
+                let shade = tone(palette::foreground(false), 0.50);
+                if let Some((_, exterior)) = &rounded {
+                    self.brush.SetColor(&shade);
+                    self.target.FillGeometry(exterior, &self.brush, None);
+                } else {
+                    for mask in [
+                        D2D_RECT_F {
+                            left: 0.,
+                            top: 0.,
+                            right: w,
+                            bottom: r.top,
+                        },
+                        D2D_RECT_F {
+                            left: 0.,
+                            top: r.bottom,
+                            right: w,
+                            bottom: h,
+                        },
+                        D2D_RECT_F {
+                            left: 0.,
+                            top: r.top,
+                            right: r.left,
+                            bottom: r.bottom,
+                        },
+                        D2D_RECT_F {
+                            left: r.right,
+                            top: r.top,
+                            right: w,
+                            bottom: r.bottom,
+                        },
+                    ] {
+                        self.fill(mask, shade);
+                    }
                 }
-                self.outline(r, 0., 2.5, tone(palette::on_accent(self.dark), 1.));
-                self.outline(r, 0., 1.5, tone(palette::accent(self.dark), 1.));
+                self.outline(r, radius, 2.5, tone(palette::on_accent(self.dark), 1.));
+                self.outline(r, radius, 1.5, tone(palette::accent(self.dark), 1.));
                 if selection.rect.is_some() {
                     for point in Selection::handles(rect) {
                         let x = (i64::from(point.x) - i64::from(self.source.bounds().left)) as f32;
@@ -365,7 +378,13 @@ impl Canvas {
                     tone(palette::foreground(false), 0.50),
                 );
             }
-            self.paint_annotations(editor, selection.rect, editing, (&text_layouts, &geometry));
+            self.paint_annotations(
+                editor,
+                selection.rect,
+                rounded.as_ref().map(|(mask, _)| mask),
+                editing,
+                (&text_layouts, &geometry),
+            );
             let text_draw = if let (Some(input), Some(area)) = (text_input, selection.rect) {
                 let area = self.local(area);
                 let result = input.draw(
@@ -376,6 +395,7 @@ impl Canvas {
                         right: area.right as i32,
                         bottom: area.bottom as i32,
                     },
+                    (2. * radius) as i32,
                 );
                 self.paint_text_frame(input.content_bounds(), 0.);
                 result
@@ -424,6 +444,32 @@ impl Canvas {
             self.swap
                 .Present(0, windows::Win32::Graphics::Dxgi::DXGI_PRESENT(0))
                 .ok()
+        }
+    }
+    fn rounded_selection(
+        &self,
+        rect: PixelRect,
+        radius: f32,
+    ) -> Result<(ID2D1Geometry, ID2D1GeometryGroup)> {
+        // SAFETY: geometries use the canvas's UI-thread factory. The group retains both inputs.
+        unsafe {
+            let interior: ID2D1Geometry = self
+                .factory
+                .CreateRoundedRectangleGeometry(&D2D1_ROUNDED_RECT {
+                    rect: self.local(rect),
+                    radiusX: radius,
+                    radiusY: radius,
+                })?
+                .into();
+            let desktop: ID2D1Geometry = self
+                .factory
+                .CreateRectangleGeometry(&self.local(self.bounds()))?
+                .into();
+            let exterior = self.factory.CreateGeometryGroup(
+                D2D1_FILL_MODE_ALTERNATE,
+                &[Some(desktop), Some(interior.clone())],
+            )?;
+            Ok((interior, exterior))
         }
     }
     fn paint_toolbar(
@@ -710,6 +756,7 @@ impl Canvas {
             match parameter {
                 CaptureParameter::Stroke(_) => "线宽",
                 CaptureParameter::TextSize => "字号",
+                CaptureParameter::CornerRadius => "圆角",
             },
             D2D_RECT_F {
                 left: slider.left - 47. * s,
@@ -746,13 +793,14 @@ impl Canvas {
         &self,
         editor: &Editor,
         clip: Option<PixelRect>,
+        rounded: Option<&ID2D1Geometry>,
         editing: Option<usize>,
         prepared: (
             &[Option<IDWriteTextLayout>],
             &super::annotation_render::Geometry,
         ),
     ) {
-        let Some(clip) = clip else {
+        let Some(clip) = clip.filter(|_| !editor.objects().is_empty() || editor.active()) else {
             return;
         };
         let point = |p: PixelPoint| Vector2 {
@@ -761,8 +809,22 @@ impl Canvas {
         };
         // SAFETY: retained UI-thread resources; clip is balanced before returning.
         unsafe {
-            self.target
-                .PushAxisAlignedClip(&self.local(clip), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            let bounds = self.local(clip);
+            if let Some(mask) = rounded {
+                let params = D2D1_LAYER_PARAMETERS1 {
+                    contentBounds: bounds,
+                    geometricMask: std::mem::ManuallyDrop::new(Some(mask.clone())),
+                    maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                    maskTransform: Matrix3x2::identity(),
+                    opacity: 1.,
+                    ..Default::default()
+                };
+                self.context.PushLayer(&params, None::<&ID2D1Layer>);
+                drop(std::mem::ManuallyDrop::into_inner(params.geometricMask));
+            } else {
+                self.target
+                    .PushAxisAlignedClip(&bounds, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            }
             let selected = editor
                 .selected
                 .filter(|i| !editor.active() && editing != Some(*i));
@@ -816,7 +878,11 @@ impl Canvas {
                     }
                 }
             }
-            self.target.PopAxisAlignedClip();
+            if rounded.is_some() {
+                self.target.PopLayer();
+            } else {
+                self.target.PopAxisAlignedClip();
+            }
             if let Some(object) = editor
                 .selected
                 .filter(|i| editing != Some(*i))

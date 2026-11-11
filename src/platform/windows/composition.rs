@@ -38,7 +38,12 @@ impl Drop for Apartment {
 fn fail(message: &str) -> Error {
     Error::new(E_FAIL, message)
 }
-pub fn render(source: &Image, selection: PixelRect, editor: &Editor) -> Result<Image> {
+pub fn render(
+    source: &Image,
+    selection: PixelRect,
+    editor: &Editor,
+    corner_radius: u16,
+) -> Result<Image> {
     let _apartment = Apartment::enter()?;
     let mut output = source.region(selection).map_err(|e| fail(&e))?;
     let (width, height) = selection.size().ok_or_else(|| fail("无效输出范围"))?;
@@ -160,6 +165,7 @@ pub fn render(source: &Image, selection: PixelRect, editor: &Editor) -> Result<I
             }
         }
     }
+    output.round_corners(corner_radius);
     Ok(output)
 }
 #[cfg(any(feature = "diagnostics", test))]
@@ -240,7 +246,7 @@ pub fn probe(path: &std::path::Path) -> Result<()> {
     std::fs::create_dir_all(path).map_err(|e| fail(&e.to_string()))?;
     let (source, editor) = fixture()?;
     super::png::save(
-        &render(&source, source.bounds(), &editor)?,
+        &render(&source, source.bounds(), &editor, 0)?,
         &path.join("fixture-annotated.png"),
     )?;
     let capture = std::thread::Builder::new()
@@ -258,7 +264,7 @@ pub fn probe(path: &std::path::Path) -> Result<()> {
     };
     let (_, desktop_editor) = fixture_at(crop.left, crop.top)?;
     super::png::save(
-        &render(&capture.image, crop, &desktop_editor)?,
+        &render(&capture.image, crop, &desktop_editor, 0)?,
         &path.join("desktop-annotated.png"),
     )?;
     Ok(())
@@ -270,11 +276,13 @@ mod tests {
     fn clean_render_crop_invariance_base_ownership_and_transparent_gap() {
         let (source, mut editor) = fixture().unwrap();
         let original = source.pixels().to_vec();
-        let all = render(&source, source.bounds(), &editor).unwrap();
+        let all = render(&source, source.bounds(), &editor, 0).unwrap();
         editor.selected = None;
         assert_eq!(
             all.pixels(),
-            render(&source, source.bounds(), &editor).unwrap().pixels()
+            render(&source, source.bounds(), &editor, 0)
+                .unwrap()
+                .pixels()
         );
         let crop = PixelRect {
             left: -60,
@@ -282,14 +290,14 @@ mod tests {
             right: 340,
             bottom: 190,
         };
-        let small = render(&source, crop, &editor).unwrap();
+        let small = render(&source, crop, &editor, 0).unwrap();
         assert_eq!(small.pixels(), all.region(crop).unwrap().pixels());
         assert_eq!(source.pixels(), original);
         assert_eq!(&all.pixels()[0..4], &original[0..4]);
         let gap = 320 * all.stride() as usize + 450 * 4;
         assert_eq!(&all.pixels()[gap..gap + 4], &[0; 4]);
         assert!(all.pixels().chunks_exact(4).any(|p| p[3] > 0 && p[3] < 255));
-        let empty = render(&source, source.bounds(), &Editor::default()).unwrap();
+        let empty = render(&source, source.bounds(), &Editor::default(), 0).unwrap();
         assert_eq!(empty.pixels(), source.pixels());
     }
 }

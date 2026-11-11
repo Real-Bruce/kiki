@@ -5,8 +5,9 @@ use crate::core::config::Config;
 pub const HEADER: i32 = 84;
 pub const START_CAPTURE: u16 = 202;
 pub const PARAMETER_SLIDER: u16 = 420;
-pub const PARAMETER_EDIT: u16 = 424;
-pub const PARAMETER_LABELS: [&str; 4] = ["矩形线宽", "箭头线宽", "画笔线宽", "文字字号"];
+pub const PARAMETER_EDIT: u16 = 425;
+pub const PARAMETER_LABELS: [&str; 5] =
+    ["矩形线宽", "箭头线宽", "画笔线宽", "文字字号", "圆角半径"];
 pub const FOOTER: i32 = 56;
 const GROUP_GAP: i32 = 26;
 const ROW: i32 = 42;
@@ -24,6 +25,7 @@ pub enum Item {
     Text(String, Rect, Tone),
     Value(String, Rect),
     Divider(i32),
+    CornerPreview(Rect),
     Control(u16, Rect),
 }
 
@@ -116,21 +118,23 @@ impl Page {
                 let compact = p.width < 510;
                 p.text("颜色", 0, p.width, Tone::Normal);
                 p.choices(410, 8, 34, compact, 26);
-                for (index, label) in PARAMETER_LABELS.into_iter().enumerate() {
-                    let start = (p.width - 276).max(110);
-                    p.text(label, 0, start - 10, Tone::Normal);
-                    p.control(
-                        PARAMETER_SLIDER + index as u16,
-                        start,
-                        -3,
-                        p.width - start - 83,
-                        28,
-                    );
-                    p.control(PARAMETER_EDIT + index as u16, p.width - 74, -3, 49, 28);
-                    p.text("px", p.width - 18, 18, Tone::Muted);
-                    p.y += ROW;
+                for index in 0..4 {
+                    p.parameter_row(index);
                 }
                 p.note("成图实际像素 · 线宽 1–64 px · 字号 8–256 px", Tone::Muted);
+                p.divider();
+                p.heading("图像输出");
+                p.parameter_row(4);
+                p.items.push(Item::CornerPreview(p.rect(0, 0, 108, 72)));
+                p.text("PNG 四角透明", 122, p.width - 122, Tone::Normal);
+                p.y += 24;
+                p.text(
+                    "0–256 px · 实际半径最多为选区短边的一半",
+                    122,
+                    p.width - 122,
+                    Tone::Muted,
+                );
+                p.y += 48;
             }
             3 => {
                 p.heading("窗口操作");
@@ -208,6 +212,26 @@ impl Page {
             value.into(),
             self.rect(split, 0, self.width - split, ROW),
         ));
+        self.y += ROW;
+    }
+
+    fn parameter_row(&mut self, index: u16) {
+        let start = (self.width - 276).max(110);
+        self.text(
+            PARAMETER_LABELS[usize::from(index)],
+            0,
+            start - 10,
+            Tone::Normal,
+        );
+        self.control(
+            PARAMETER_SLIDER + index,
+            start,
+            -3,
+            self.width - start - 83,
+            28,
+        );
+        self.control(PARAMETER_EDIT + index, self.width - 74, -3, 49, 28);
+        self.text("px", self.width - 18, 18, Tone::Muted);
         self.y += ROW;
     }
 

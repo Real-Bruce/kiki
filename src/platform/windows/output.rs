@@ -58,17 +58,23 @@ pub fn start(
     source: Arc<Image>,
     rect: PixelRect,
     editor: Editor,
+    corner_radius: u16,
     owner: usize,
     destination: Destination,
 ) -> Result<Job> {
-    launch(source, Some((rect, editor)), owner, destination)
+    launch(
+        source,
+        Some((rect, editor, corner_radius)),
+        owner,
+        destination,
+    )
 }
 pub fn start_image(source: Arc<Image>, owner: usize, destination: Destination) -> Result<Job> {
     launch(source, None, owner, destination)
 }
 fn launch(
     source: Arc<Image>,
-    scene: Option<(PixelRect, Editor)>,
+    scene: Option<(PixelRect, Editor, u16)>,
     owner: usize,
     destination: Destination,
 ) -> Result<Job> {
@@ -88,12 +94,13 @@ fn launch(
             let _permit = permit;
             let result = std::panic::catch_unwind(|| {
                 check(&worker_cancel)?;
-                let image = match scene {
-                    Some((rect, editor)) => {
-                        Arc::new(super::composition::render(&source, rect, &editor)?)
-                    }
-                    None => source,
-                };
+                let image =
+                    match scene {
+                        Some((rect, editor, corner_radius)) => Arc::new(
+                            super::composition::render(&source, rect, &editor, corner_radius)?,
+                        ),
+                        None => source,
+                    };
                 check(&worker_cancel)?;
                 match destination {
                     Destination::Clipboard => {

@@ -663,7 +663,7 @@ fn action(hwnd: HWND, pointer: *mut State, command: u32) {
 pub fn demo() -> Result<()> {
     let (source, editor) = super::composition::fixture()?;
     let selection = source.bounds();
-    let image = Arc::new(super::composition::render(&source, selection, &editor)?);
+    let image = Arc::new(super::composition::render(&source, selection, &editor, 0)?);
     open(image.clone(), PixelPoint { x: 120, y: 120 })?;
     open(image, PixelPoint { x: 850, y: 300 })
 }

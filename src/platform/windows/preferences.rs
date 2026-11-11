@@ -157,6 +157,7 @@ pub fn set_parameter(parameter: CaptureParameter, value: u16) -> std::result::Re
     match parameter {
         CaptureParameter::Stroke(index) => config.stroke_widths[index] = value as u8,
         CaptureParameter::TextSize => config.text_size = value,
+        CaptureParameter::CornerRadius => config.corner_radius = value,
     }
     update_config(config, false, PARAMETER_CHANGED)
 }

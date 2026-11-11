@@ -61,11 +61,113 @@ impl Image {
             self.pixels[dst..dst + width].copy_from_slice(&source.pixels[src..src + width]);
         }
     }
+
+    /// Mask a finished straight-alpha image in place. Only the four corner tiles
+    /// can change. Preserve RGB on partially covered pixels to avoid dark fringes.
+    pub fn round_corners(&mut self, configured: u16) {
+        let radius = self.bounds.corner_radius(configured);
+        if radius == 0. {
+            return;
+        }
+        let stride = self.stride as usize;
+        let width = stride / 4;
+        let height = self.pixels.len() / stride;
+        let extent = radius.ceil() as usize;
+        let radius_squared = radius * radius;
+        for y in 0..extent {
+            for x in 0..extent {
+                let dx = radius - x as f32;
+                let dy = radius - y as f32;
+                if dx * dx + dy * dy <= radius_squared {
+                    continue;
+                }
+                let near_x = (dx - 1.).max(0.);
+                let near_y = (dy - 1.).max(0.);
+                let coverage = if near_x * near_x + near_y * near_y >= radius_squared {
+                    0
+                } else {
+                    // Supersample just the pixels crossed by the arc.
+                    let mut inside = 0;
+                    let span_x = (width - 2 * x) as f32;
+                    let span_y = (height - 2 * y) as f32;
+                    for sy in 0..8 {
+                        let sy = (sy as f32 + 0.5) / 8.;
+                        let b = (dy - sy.min(span_y - sy)).max(0.);
+                        for sx in 0..8 {
+                            let sx = (sx as f32 + 0.5) / 8.;
+                            let a = (dx - sx.min(span_x - sx)).max(0.);
+                            inside += u16::from(a * a + b * b <= radius_squared);
+                        }
+                    }
+                    inside
+                };
+                // The mirrored row or column can coincide on an odd short side.
+                for row in [y, height - y - 1]
+                    .into_iter()
+                    .take((height - 2 * y).min(2))
+                {
+                    for column in [x, width - x - 1].into_iter().take((width - 2 * x).min(2)) {
+                        let offset = row * stride + column * 4;
+                        let pixel = &mut self.pixels[offset..offset + 4];
+                        pixel[3] = ((u16::from(pixel[3]) * coverage + 32) / 64) as u8;
+                        if pixel[3] == 0 {
+                            pixel.fill(0);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn rounded_mask_preserves_straight_color_and_clamps_on_tiny_images() {
+        let mut image = Image::new(PixelRect {
+            left: -12,
+            top: -3,
+            right: 1,
+            bottom: 6,
+        })
+        .unwrap();
+        for pixel in image.pixels_mut().chunks_exact_mut(4) {
+            pixel.copy_from_slice(&[200, 50, 25, 128]);
+        }
+        let original = image.pixels().to_vec();
+        image.round_corners(0);
+        assert_eq!(image.pixels(), original);
+        let gap = 4 * image.stride() as usize + 8;
+        image.pixels_mut()[gap..gap + 4].fill(0);
+        assert_eq!(image.bounds().corner_radius(256), 4.5);
+        image.round_corners(256);
+        let pixel = |x: usize, y: usize| {
+            let offset = y * image.stride() as usize + 4 * x;
+            &image.pixels()[offset..offset + 4]
+        };
+        assert_eq!(pixel(0, 0), [0; 4]);
+        assert_eq!(pixel(12, 8), [0; 4]);
+        let edge = pixel(2, 0);
+        assert!((1..128).contains(&edge[3]));
+        assert_eq!(&edge[..3], &[200, 50, 25]);
+        assert_eq!(edge, pixel(10, 8));
+        assert_eq!(pixel(6, 4), [200, 50, 25, 128]);
+        assert_eq!(pixel(2, 4), [0; 4]);
+
+        let mut tiny = Image::new(PixelRect {
+            left: 0,
+            top: 0,
+            right: 1,
+            bottom: 1,
+        })
+        .unwrap();
+        tiny.pixels_mut().copy_from_slice(&[60, 100, 200, 255]);
+        tiny.round_corners(256);
+        assert_eq!(tiny.bounds().corner_radius(256), 0.5);
+        assert_eq!(&tiny.pixels()[..3], &[60, 100, 200]);
+        assert!((190..=220).contains(&tiny.pixels()[3]));
+    }
     #[test]
     fn composition_preserves_transparent_gap_and_negative_origin() {
         let mut desktop = Image::new(PixelRect {
