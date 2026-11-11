@@ -409,6 +409,7 @@ fn setting_parameter(id: u16, first: u16) -> Option<CaptureParameter> {
         index @ 0..=2 => Some(CaptureParameter::Stroke(usize::from(index))),
         3 => Some(CaptureParameter::TextSize),
         4 => Some(CaptureParameter::CornerRadius),
+        5 => Some(CaptureParameter::MosaicSize),
         _ => None,
     }
 }
@@ -460,7 +461,9 @@ fn caption(id: u16, cfg: &Config, start: &std::result::Result<startup::State, St
                 if cfg.color == COLORS[i] { " ✓" } else { "" }
             )
         }
-        420..=424 => PARAMETER_LABELS[usize::from(id - PARAMETER_SLIDER)].into(),
+        id if setting_parameter(id, PARAMETER_SLIDER).is_some() => {
+            PARAMETER_LABELS[usize::from(id - PARAMETER_SLIDER)].into()
+        }
         OUTPUT_FORMAT => format!("输出格式：{}", cfg.output_format.label()),
         RESET_CAPTURE => "恢复默认".into(),
         id if DRAWING_TOOL_IDS.contains(&id) => {
@@ -1172,7 +1175,7 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                     };
                     let icon_color = if on { accent } else { appearance::muted(dark) };
                     shapes.tool_icon(
-                        tool.button(),
+                        super::capture_toolbar::tool_button(tool),
                         r.left + dip(17),
                         (r.top + r.bottom) / 2,
                         dpi_scale,
@@ -2058,16 +2061,19 @@ mod tests {
             assert!(!hotkey_focused());
             // Short logical work areas must scroll; controls outside the viewport must be hidden.
             SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(102)), None);
-            for id in DRAWING_TOOL_IDS {
+            for id in DRAWING_TOOL_IDS.take(4) {
                 SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(usize::from(id))), None);
             }
             let hidden = preferences::current();
-            assert_eq!(hidden.drawing_tools, [false; 4]);
+            assert_eq!(hidden.drawing_tools, [false; 5]);
             assert_eq!(hidden.stroke_widths, [8, 3, 3]);
-            for id in DRAWING_TOOL_IDS {
+            for id in DRAWING_TOOL_IDS.take(4) {
                 SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(usize::from(id))), None);
             }
-            assert_eq!(preferences::current().drawing_tools, [true; 4]);
+            assert_eq!(
+                preferences::current().drawing_tools,
+                crate::core::config::DEFAULT_DRAWING_TOOLS
+            );
             SetWindowPos(hwnd, None, 0, 0, 860, 480, SWP_NOZORDER | SWP_NOACTIVATE).unwrap();
             SendMessageW(hwnd, WM_VSCROLL, Some(WPARAM(SB_PAGEDOWN.0 as usize)), None);
             assert!((*pointer(hwnd)).scroll > 0);

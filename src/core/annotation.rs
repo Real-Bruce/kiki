@@ -1,8 +1,11 @@
 //! Editable annotations in global physical pixels; no native handles or image copies.
 use super::{
-    config::{CaptureParameter, DEFAULT_TEXT_SIZE, MAX_STROKE_WIDTH, MIN_STROKE_WIDTH},
+    config::{
+        CaptureParameter, DEFAULT_MOSAIC_SIZE, DEFAULT_TEXT_SIZE, MAX_STROKE_WIDTH,
+        MIN_STROKE_WIDTH,
+    },
     geometry::PixelRect,
-    selection::{PixelPoint, Selection},
+    selection::{PixelPoint, Selection, contains},
 };
 use std::collections::VecDeque;
 
@@ -13,9 +16,16 @@ pub enum Tool {
     Arrow,
     Pen,
     Text,
+    Mosaic,
 }
 impl Tool {
-    pub const DRAWING: [Self; 4] = [Self::Rectangle, Self::Arrow, Self::Pen, Self::Text];
+    pub const DRAWING: [Self; 5] = [
+        Self::Rectangle,
+        Self::Arrow,
+        Self::Pen,
+        Self::Text,
+        Self::Mosaic,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -24,15 +34,20 @@ impl Tool {
             Self::Arrow => "箭头",
             Self::Pen => "画笔",
             Self::Text => "文字",
+            Self::Mosaic => "马赛克",
         }
     }
 
     pub fn parameter(self) -> Option<CaptureParameter> {
-        if self == Self::Text {
-            Some(CaptureParameter::TextSize)
-        } else {
-            self.stroke_index().map(CaptureParameter::Stroke)
+        match self {
+            Self::Text => Some(CaptureParameter::TextSize),
+            Self::Mosaic => Some(CaptureParameter::MosaicSize),
+            _ => self.stroke_index().map(CaptureParameter::Stroke),
         }
+    }
+
+    pub fn has_color(self) -> bool {
+        self == Self::Text || self.stroke_index().is_some()
     }
 
     pub fn stroke_index(self) -> Option<usize> {
@@ -40,17 +55,7 @@ impl Tool {
             Self::Rectangle => Some(0),
             Self::Arrow => Some(1),
             Self::Pen => Some(2),
-            Self::Select | Self::Text => None,
-        }
-    }
-
-    pub const fn button(self) -> usize {
-        match self {
-            Self::Select => 0,
-            Self::Rectangle => 1,
-            Self::Arrow => 2,
-            Self::Pen => 3,
-            Self::Text => 4,
+            Self::Select | Self::Text | Self::Mosaic => None,
         }
     }
 }
@@ -70,6 +75,10 @@ impl Default for Style {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Shape {
     Rectangle(PixelRect),
+    Mosaic {
+        bounds: PixelRect,
+        size: u16,
+    },
     Arrow(PixelPoint, PixelPoint),
     Pen(Vec<PixelPoint>),
     Text {
@@ -94,11 +103,12 @@ impl Object {
                 | (Shape::Arrow(..), Tool::Arrow)
                 | (Shape::Pen(_), Tool::Pen)
                 | (Shape::Text { .. }, Tool::Text)
+                | (Shape::Mosaic { .. }, Tool::Mosaic)
         )
     }
     pub fn bounds(&self) -> PixelRect {
         match &self.shape {
-            Shape::Text { bounds, .. } => *bounds,
+            Shape::Text { bounds, .. } | Shape::Mosaic { bounds, .. } => *bounds,
             Shape::Rectangle(r) => *r,
             Shape::Arrow(a, b) => {
                 let mut bounds = rect(*a, *b);
@@ -126,7 +136,9 @@ impl Object {
     }
     pub fn handles(&self) -> Vec<PixelPoint> {
         match &self.shape {
-            Shape::Rectangle(r) => Selection::handles(*r).to_vec(),
+            Shape::Rectangle(r) | Shape::Mosaic { bounds: r, .. } => {
+                Selection::handles(*r).to_vec()
+            }
             Shape::Arrow(a, b) => vec![*a, *b],
             Shape::Pen(_) | Shape::Text { .. } => Vec::new(),
         }
@@ -140,6 +152,7 @@ impl Object {
     fn hit(&self, p: PixelPoint, tolerance: f64) -> bool {
         let t = tolerance + f64::from(self.style.width) / 2.;
         match &self.shape {
+            Shape::Mosaic { bounds, .. } => contains(*bounds, p),
             Shape::Text { bounds, angle, .. } => {
                 let (x, y) = rotate_point(*bounds, -*angle, f64::from(p.x), f64::from(p.y));
                 x >= f64::from(bounds.left)
@@ -276,6 +289,10 @@ struct Change {
     after: Option<Object>,
 }
 enum ParameterBefore {
+    MosaicSize {
+        index: usize,
+        size: u16,
+    },
     StrokeWidth {
         index: usize,
         width: f32,
@@ -312,6 +329,7 @@ pub struct Editor {
     objects: Vec<Object>,
     pub selected: Option<usize>,
     pub text_size: u16,
+    pub mosaic_size: u16,
     drag: Option<Drag>,
     parameter_before: Option<ParameterBefore>,
     undo: VecDeque<Change>,
@@ -326,6 +344,7 @@ impl Default for Editor {
             objects: Vec::new(),
             selected: None,
             text_size: DEFAULT_TEXT_SIZE,
+            mosaic_size: DEFAULT_MOSAIC_SIZE,
             drag: None,
             parameter_before: None,
             undo: VecDeque::new(),
@@ -336,9 +355,9 @@ impl Default for Editor {
 }
 impl Editor {
     pub fn text_at(&self, p: PixelPoint) -> Option<usize> {
-        self.objects
-            .iter()
-            .rposition(|o| o.hit(p, 0.))
+        self.front_to_back()
+            .find(|(_, object)| object.hit(p, 0.))
+            .map(|(index, _)| index)
             .filter(|i| matches!(self.objects[*i].shape, Shape::Text { .. }))
     }
     pub fn commit_text(
@@ -423,11 +442,26 @@ impl Editor {
             tool: self.tool,
             styles: self.styles,
             text_size: self.text_size,
+            mosaic_size: self.mosaic_size,
             ..Default::default()
         }
     }
     pub fn objects(&self) -> &[Object] {
         &self.objects
+    }
+    pub fn mosaics(&self) -> impl Iterator<Item = (PixelRect, u16)> + '_ {
+        self.objects.iter().filter_map(|object| match object.shape {
+            Shape::Mosaic { bounds, size } => Some((bounds, size)),
+            _ => None,
+        })
+    }
+    fn front_to_back(&self) -> impl Iterator<Item = (usize, &Object)> {
+        let objects = self.objects.iter().enumerate().rev();
+        let is_mosaic = |entry: &(usize, &Object)| matches!(entry.1.shape, Shape::Mosaic { .. });
+        objects
+            .clone()
+            .filter(move |entry| !is_mosaic(entry))
+            .chain(objects.filter(is_mosaic))
     }
     pub fn active(&self) -> bool {
         self.drag.is_some()
@@ -438,13 +472,6 @@ impl Editor {
     pub fn can_redo(&self) -> bool {
         !self.redo.is_empty() && !self.active() && self.parameter_before.is_none()
     }
-    pub fn enabled(&self, index: usize) -> bool {
-        ((11..=18).contains(&index) && self.tool != Tool::Select)
-            || ((19..=20).contains(&index) && self.tool.parameter().is_some())
-            || matches!(index, 0..=4 | 7..=10)
-            || (index == 5 && self.can_undo())
-            || (index == 6 && self.can_redo())
-    }
     pub fn style(&self) -> Style {
         if let Some(index) = self.selected_stroke() {
             return self.objects[index].style;
@@ -452,7 +479,29 @@ impl Editor {
         self.default_style()
     }
     fn default_style(&self) -> Style {
-        self.styles[self.tool.button().saturating_sub(1).min(3)]
+        self.styles[self.tool.stroke_index().unwrap_or(3)]
+    }
+    pub fn current_mosaic_size(&self) -> u16 {
+        match self.selected.and_then(|index| self.objects.get(index)) {
+            Some(Object {
+                shape: Shape::Mosaic { size, .. },
+                ..
+            }) => *size,
+            _ => self.mosaic_size,
+        }
+    }
+    pub fn set_mosaic_size(&mut self, value: u16) {
+        self.mosaic_size = value;
+        let Some(index) = self.selected else { return };
+        if let Shape::Mosaic { size, .. } = &mut self.objects[index].shape
+            && *size != value
+        {
+            if self.drag.is_none() {
+                self.parameter_before
+                    .get_or_insert(ParameterBefore::MosaicSize { index, size: *size });
+            }
+            *size = value;
+        }
     }
     fn selected_stroke(&self) -> Option<usize> {
         self.tool.stroke_index()?;
@@ -515,12 +564,18 @@ impl Editor {
         };
         let index = match adjustment {
             ParameterBefore::StrokeWidth { index, .. }
-            | ParameterBefore::TextSize { index, .. } => index,
+            | ParameterBefore::TextSize { index, .. }
+            | ParameterBefore::MosaicSize { index, .. } => index,
         };
         let after = self.objects[index].clone();
         let mut before = after.clone();
         match adjustment {
             ParameterBefore::StrokeWidth { width, .. } => before.style.width = width,
+            ParameterBefore::MosaicSize { size, .. } => {
+                if let Shape::Mosaic { size: old_size, .. } = &mut before.shape {
+                    *old_size = size;
+                }
+            }
             ParameterBefore::TextSize { bounds, size, .. } => {
                 if let Shape::Text {
                     bounds: old_bounds,
@@ -592,52 +647,48 @@ impl Editor {
         if !inside_selection {
             return None;
         }
-        self.objects
-            .iter()
-            .enumerate()
-            .rev()
-            .find_map(|(index, object)| {
-                if !object.matches_tool(self.tool) {
+        self.front_to_back().find_map(|(index, object)| {
+            if !object.matches_tool(self.tool) {
+                return None;
+            }
+            if self.tool == Tool::Text {
+                let Shape::Text { bounds, angle, .. } = object.shape else {
                     return None;
+                };
+                let (x, y) = rotate_point(bounds, -angle, f64::from(p.x), f64::from(p.y));
+                let inset = (x - f64::from(bounds.left))
+                    .min(f64::from(bounds.right) - x)
+                    .min(y - f64::from(bounds.top))
+                    .min(f64::from(bounds.bottom) - y);
+                if inset > 0.5 {
+                    return Some(ObjectHit::Text(index));
                 }
-                if self.tool == Tool::Text {
-                    let Shape::Text { bounds, angle, .. } = object.shape else {
-                        return None;
-                    };
-                    let (x, y) = rotate_point(bounds, -angle, f64::from(p.x), f64::from(p.y));
-                    let inset = (x - f64::from(bounds.left))
-                        .min(f64::from(bounds.right) - x)
-                        .min(y - f64::from(bounds.top))
-                        .min(f64::from(bounds.bottom) - y);
-                    if inset > 0.5 {
-                        return Some(ObjectHit::Text(index));
-                    }
-                    let frame = if selected == Some(index) {
-                        text_frame_hit_bounds(bounds, scale)
-                    } else {
-                        bounds
-                    };
-                    if x >= f64::from(frame.left)
-                        && x <= f64::from(frame.right)
-                        && y >= f64::from(frame.top)
-                        && y <= f64::from(frame.bottom)
-                    {
-                        return Some(ObjectHit::Move(index));
-                    }
-                } else if object.hit(p, tolerance) {
-                    if self.tool == Tool::Arrow {
-                        if let Shape::Arrow(a, b) = object.shape {
-                            let from = distance(p, a, a);
-                            let to = distance(p, b, b);
-                            if from.min(to) <= tolerance {
-                                return Some(ObjectHit::Handle(index, usize::from(to < from)));
-                            }
-                        }
-                    }
+                let frame = if selected == Some(index) {
+                    text_frame_hit_bounds(bounds, scale)
+                } else {
+                    bounds
+                };
+                if x >= f64::from(frame.left)
+                    && x <= f64::from(frame.right)
+                    && y >= f64::from(frame.top)
+                    && y <= f64::from(frame.bottom)
+                {
                     return Some(ObjectHit::Move(index));
                 }
-                None
-            })
+            } else if object.hit(p, tolerance) {
+                if self.tool == Tool::Arrow {
+                    if let Shape::Arrow(a, b) = object.shape {
+                        let from = distance(p, a, a);
+                        let to = distance(p, b, b);
+                        if from.min(to) <= tolerance {
+                            return Some(ObjectHit::Handle(index, usize::from(to < from)));
+                        }
+                    }
+                }
+                return Some(ObjectHit::Move(index));
+            }
+            None
+        })
     }
     #[cfg(any(test, feature = "diagnostics"))]
     pub fn begin(
@@ -688,6 +739,10 @@ impl Editor {
             Tool::Rectangle => Shape::Rectangle(rect(p, p)),
             Tool::Arrow => Shape::Arrow(p, p),
             Tool::Pen => Shape::Pen(vec![p]),
+            Tool::Mosaic => Shape::Mosaic {
+                bounds: rect(p, p),
+                size: self.mosaic_size,
+            },
             Tool::Select | Tool::Text => return Ok(false),
         };
         let style = self.default_style();
@@ -710,7 +765,7 @@ impl Editor {
         match &drag.kind {
             DragKind::Create => match &mut object.shape {
                 Shape::Text { .. } => {}
-                Shape::Rectangle(r) => *r = rect(drag.start, p),
+                Shape::Rectangle(r) | Shape::Mosaic { bounds: r, .. } => *r = rect(drag.start, p),
                 Shape::Arrow(_, b) => *b = p,
                 Shape::Pen(points) => {
                     if points.len() >= 16384 && points.last() != Some(&p) {
@@ -738,8 +793,8 @@ impl Editor {
                         x: (i64::from(v.x) + dx) as i32,
                         y: (i64::from(v.y) + dy) as i32,
                     };
-                    object.shape = match &before.shape {
-                        Shape::Rectangle(r) => Shape::Rectangle(rect(
+                    let shift_rect = |r: PixelRect| {
+                        rect(
                             shift(PixelPoint {
                                 x: r.left,
                                 y: r.top,
@@ -748,34 +803,34 @@ impl Editor {
                                 x: r.right,
                                 y: r.bottom,
                             }),
-                        )),
-                        Shape::Text {
-                            bounds,
-                            content,
-                            size,
-                            wrap_width,
-                            angle,
-                        } => Shape::Text {
-                            bounds: rect(
-                                shift(PixelPoint {
-                                    x: bounds.left,
-                                    y: bounds.top,
-                                }),
-                                shift(PixelPoint {
-                                    x: bounds.right,
-                                    y: bounds.bottom,
-                                }),
-                            ),
-                            content: content.clone(),
-                            size: *size,
-                            wrap_width: *wrap_width,
-                            angle: *angle,
-                        },
-                        Shape::Arrow(a, b) => Shape::Arrow(shift(*a), shift(*b)),
-                        Shape::Pen(points) => {
-                            Shape::Pen(points.iter().map(|v| shift(*v)).collect())
-                        }
+                        )
                     };
+                    match (&mut object.shape, &before.shape) {
+                        (Shape::Rectangle(r), Shape::Rectangle(original))
+                        | (
+                            Shape::Mosaic { bounds: r, .. },
+                            Shape::Mosaic {
+                                bounds: original, ..
+                            },
+                        )
+                        | (
+                            Shape::Text { bounds: r, .. },
+                            Shape::Text {
+                                bounds: original, ..
+                            },
+                        ) => {
+                            *r = shift_rect(*original);
+                        }
+                        (Shape::Arrow(a, b), Shape::Arrow(from, to)) => {
+                            (*a, *b) = (shift(*from), shift(*to));
+                        }
+                        (Shape::Pen(points), Shape::Pen(original)) => {
+                            for (point, &previous) in points.iter_mut().zip(original) {
+                                *point = shift(previous);
+                            }
+                        }
+                        _ => {}
+                    }
                 }
             }
             DragKind::Rotate => {
@@ -810,7 +865,10 @@ impl Editor {
                     let x = |value| offset(value, drag.start.x, p.x);
                     let y = |value| offset(value, drag.start.y, p.y);
                     match &before.shape {
-                        Shape::Rectangle(original) => {
+                        Shape::Rectangle(original)
+                        | Shape::Mosaic {
+                            bounds: original, ..
+                        } => {
                             let mut r = *original;
                             if [0, 6, 7].contains(index) {
                                 r.left = x(r.left);
@@ -824,7 +882,7 @@ impl Editor {
                             if [4, 5, 6].contains(index) {
                                 r.bottom = y(r.bottom);
                             }
-                            object.shape = Shape::Rectangle(rect(
+                            let next = rect(
                                 PixelPoint {
                                     x: r.left,
                                     y: r.top,
@@ -833,7 +891,12 @@ impl Editor {
                                     x: r.right,
                                     y: r.bottom,
                                 },
-                            ));
+                            );
+                            if let Shape::Rectangle(bounds) | Shape::Mosaic { bounds, .. } =
+                                &mut object.shape
+                            {
+                                *bounds = next;
+                            }
                         }
                         Shape::Arrow(a, b) => {
                             let shift = |end: PixelPoint| PixelPoint {
@@ -859,7 +922,7 @@ impl Editor {
         };
         let object = &self.objects[drag.index];
         let valid = match &object.shape {
-            Shape::Text { bounds, .. } => bounds.size().is_some(),
+            Shape::Text { bounds, .. } | Shape::Mosaic { bounds, .. } => bounds.size().is_some(),
             Shape::Rectangle(r) => r.size().is_some(),
             Shape::Arrow(a, b) => a != b,
             Shape::Pen(points) => !points.is_empty(),
@@ -954,6 +1017,51 @@ mod tests {
     use super::*;
     fn p(x: i32, y: i32) -> PixelPoint {
         PixelPoint { x, y }
+    }
+
+    #[test]
+    fn mosaic_interior_and_all_eight_handles_edit_independently_of_granularity() {
+        let mut editor = Editor {
+            tool: Tool::Mosaic,
+            ..Default::default()
+        };
+        let bounds = rect(p(-90, -50), p(-10, 30));
+        assert!(editor.begin_at(p(bounds.left, bounds.top), None).unwrap());
+        editor.finish(p(bounds.right, bounds.bottom));
+        let initial = editor.objects()[0].clone();
+        for (index, handle) in initial.handles().into_iter().enumerate() {
+            let hit = editor.hit_at(handle, 5, 1.25, true);
+            assert_eq!(hit, Some(ObjectHit::Handle(0, index)));
+            assert!(editor.begin_at(handle, hit).unwrap());
+            editor.finish(p(handle.x + 11, handle.y + 11));
+            assert_ne!(editor.objects()[0].bounds(), bounds);
+            editor.undo();
+            assert_eq!(editor.objects()[0], initial);
+        }
+        let center = p(-50, -10);
+        let hit = editor.hit_at(center, 5, 1.25, true);
+        assert_eq!(hit, Some(ObjectHit::Move(0)));
+        assert!(editor.begin_at(center, hit).unwrap());
+        editor.set_mosaic_size(22);
+        editor.finish(p(-40, 10));
+        let moved = rect(p(-80, -30), p(0, 50));
+        assert_eq!(editor.mosaics().next(), Some((moved, 22)));
+        editor.set_mosaic_size(23);
+        editor.finish_parameter_adjustment();
+        assert_eq!(editor.mosaics().next(), Some((moved, 23)));
+        editor.undo();
+        assert_eq!(editor.mosaics().next(), Some((moved, 22)));
+        editor.undo();
+        assert_eq!(editor.mosaics().next(), Some((bounds, DEFAULT_MOSAIC_SIZE)));
+        assert_eq!(editor.mosaic_size, 23);
+        editor.redo();
+        editor.redo();
+        editor.delete();
+        assert_eq!(editor.mosaics().next(), None);
+        editor.undo();
+        assert_eq!(editor.mosaics().next(), Some((moved, 23)));
+        editor.redo();
+        assert_eq!(editor.mosaics().next(), None);
     }
     fn text(content: &str) -> Object {
         Object {

@@ -1,7 +1,7 @@
 //! Native frozen-desktop selection window. Annotation/output controls are staged for P4/P5.
 use super::{
     capture::CaptureResult,
-    capture_toolbar::{self, Layout, MORE, tool_visible},
+    capture_toolbar::{self, Layout, MORE, drawing_tool, tool_button, tool_visible},
     parameter_control::{self, Wheel},
     selection_render::{Canvas, PaintInput, system_dark},
     text_input::{TextHit, TextInput, TextStart},
@@ -101,6 +101,7 @@ impl Preview {
                 style.width = f32::from(width);
             }
             editor.text_size = cfg.text_size;
+            editor.mosaic_size = cfg.mosaic_size;
             let state = State {
                 lifetime,
                 canvas,
@@ -175,7 +176,7 @@ struct State {
     canvas: Canvas,
     selection: Selection,
     editor: Editor,
-    drawing_tools: [bool; 4],
+    drawing_tools: [bool; 5],
     corner_radius: u16,
     parameter_down: bool,
     parameter_slider: bool,
@@ -223,40 +224,42 @@ impl State {
             self.pending_more = self.layout().is_some_and(|l| l.overflow().next().is_some());
             return false;
         }
-        if !tool_visible(self.drawing_tools, index) || !self.editor.enabled(index) {
+        if !tool_visible(self.drawing_tools, index)
+            || !capture_toolbar::enabled(&self.editor, index)
+        {
+            return false;
+        }
+        if let Some(mut tool) = drawing_tool(index) {
+            self.editor.finish_parameter_adjustment();
+            self.wheel = Wheel::default();
+            self.editor.cancel();
+            if tool == self.editor.tool {
+                tool = Tool::Select;
+            }
+            if tool != Tool::Select {
+                let matching = self
+                    .editor
+                    .selected
+                    .and_then(|i| self.editor.objects().get(i))
+                    .is_some_and(|o| o.matches_tool(tool));
+                if !matching {
+                    self.editor.selected = None;
+                }
+            }
+            self.editor.tool = tool;
+            if tool == Tool::Text
+                && let Some(object) = self
+                    .editor
+                    .selected
+                    .and_then(|i| self.editor.objects().get(i))
+            {
+                let mut style = object.style;
+                style.width /= self.scale();
+                self.editor.styles[3] = style;
+            }
             return false;
         }
         match index {
-            1..=4 => {
-                self.editor.finish_parameter_adjustment();
-                self.wheel = Wheel::default();
-                self.editor.cancel();
-                let mut tool = Tool::DRAWING[index - 1];
-                if tool == self.editor.tool {
-                    tool = Tool::Select;
-                }
-                if tool != Tool::Select {
-                    let matching = self
-                        .editor
-                        .selected
-                        .and_then(|i| self.editor.objects().get(i))
-                        .is_some_and(|o| o.matches_tool(tool));
-                    if !matching {
-                        self.editor.selected = None;
-                    }
-                }
-                self.editor.tool = tool;
-                if tool == Tool::Text
-                    && let Some(object) = self
-                        .editor
-                        .selected
-                        .and_then(|i| self.editor.objects().get(i))
-                {
-                    let mut style = object.style;
-                    style.width /= self.scale();
-                    self.editor.styles[3] = style;
-                }
-            }
             11..=18 => {
                 if let Err(message) = self.apply_color(index - 11) {
                     self.editor.warn(message);
@@ -294,9 +297,9 @@ impl State {
     }
     fn can_focus(&self, layout: &Layout, id: usize) -> bool {
         if (11..=20).contains(&id) {
-            layout.parameters.is_some() && self.editor.enabled(id)
+            layout.parameters.is_some() && capture_toolbar::enabled(&self.editor, id)
         } else {
-            (id == MORE || self.editor.enabled(id)) && layout.buttons().any(|b| b.id == id)
+            capture_toolbar::enabled(&self.editor, id) && layout.buttons().any(|b| b.id == id)
         }
     }
     fn advance_focus(&mut self, backwards: bool) {
@@ -326,6 +329,7 @@ impl State {
         let value = match parameter {
             CaptureParameter::CornerRadius => return None,
             CaptureParameter::Stroke(_) => self.editor.style().width as u16,
+            CaptureParameter::MosaicSize => self.editor.current_mosaic_size(),
             CaptureParameter::TextSize => {
                 if let Some(input) = &self.text_input {
                     input.requested_size() as u16
@@ -417,6 +421,7 @@ fn set_parameter_value(pointer: *mut State, value: u16) {
         match parameter {
             CaptureParameter::CornerRadius => return,
             CaptureParameter::Stroke(_) => (*pointer).editor.set_stroke_width(value as u8),
+            CaptureParameter::MosaicSize => (*pointer).editor.set_mosaic_size(value),
             CaptureParameter::TextSize => {
                 let size = f32::from(value);
                 let result = if let Some(mut input) = (*pointer).text_input.take() {
@@ -587,16 +592,18 @@ fn close_parameter_edit(hwnd: HWND, pointer: *mut State, commit: bool, restore_f
 }
 
 fn refresh_tool_visibility(hwnd: HWND, pointer: *mut State) {
-    let drawing_tools = super::preferences::current().drawing_tools;
+    let config = super::preferences::current();
+    let drawing_tools = config.drawing_tools;
     // SAFETY: pointer belongs to the live preview. Release the state borrow
     // before calling Win32 operations that can synchronously dispatch messages.
     unsafe {
         let state = &mut *pointer;
+        state.editor.mosaic_size = config.mosaic_size;
         if state.drawing_tools == drawing_tools {
             return;
         }
         state.drawing_tools = drawing_tools;
-        let active_hidden = !tool_visible(drawing_tools, state.editor.tool.button());
+        let active_hidden = !tool_visible(drawing_tools, tool_button(state.editor.tool));
         let mut release = state.down_button.take().is_some();
         if active_hidden {
             release |= state.editor.cancel() || state.parameter_slider;
@@ -647,7 +654,7 @@ fn show_more_if_pending(hwnd: HWND, pointer: *mut State) {
                 (
                     (id + 1) as u32,
                     capture_toolbar::name(id),
-                    state.editor.enabled(id),
+                    capture_toolbar::enabled(&state.editor, id),
                 )
             })
             .collect();
@@ -976,7 +983,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                         }
                     } else if let Some(button) = state.button_at(state.pointer) {
                         state.down_button = Some(button);
-                        if button == MORE || state.editor.enabled(button) {
+                        if capture_toolbar::enabled(&state.editor, button) {
                             state.focus = button;
                         }
                     } else if state
@@ -1005,7 +1012,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                             CanvasHit::Object(hit) => {
                                 let double_clicked_text = msg == WM_LBUTTONDBLCLK
                                     && state.editor.tool == Tool::Select
-                                    && tool_visible(state.drawing_tools, Tool::Text.button())
+                                    && tool_visible(state.drawing_tools, tool_button(Tool::Text))
                                     && matches!(hit, ObjectHit::Move(_));
                                 if let Some(index) = double_clicked_text
                                     .then(|| state.editor.text_at(p))
@@ -1248,7 +1255,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                         CanvasHit::Object(ObjectHit::Handle(index, handle))
                             if matches!(
                                 state.editor.objects()[index].shape,
-                                Shape::Rectangle(_)
+                                Shape::Rectangle(_) | Shape::Mosaic { .. }
                             ) =>
                         {
                             resize_cursor(handle)
@@ -1261,6 +1268,11 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     SetCursor(Some(cursor));
                 }
                 LRESULT(1)
+            }
+            super::preferences::PARAMETER_CHANGED => {
+                (*pointer).editor.mosaic_size = super::preferences::current().mosaic_size;
+                let _ = InvalidateRect(Some(hwnd), None, false);
+                LRESULT(0)
             }
             WM_SETTINGCHANGE | WM_THEMECHANGED | super::preferences::CHANGED => {
                 let dark = system_dark();
@@ -1890,7 +1902,7 @@ mod tests {
                 (Tool::Arrow, 160, 19, 22.),
                 (Tool::Pen, 260, 15, 18.),
             ] {
-                (*p).activate(tool.button());
+                (*p).activate(tool_button(tool));
                 (*p).editor.begin_at(point(40, y), None).unwrap();
                 (*p).editor.update(point(150, y));
                 wheel(60);
@@ -1963,7 +1975,7 @@ mod tests {
             let hwnd = preview.hwnd().unwrap();
             let (guard, warning) = preferences::initialize_at(hwnd, path.clone()).unwrap();
             assert!(warning.is_none());
-            (*p).activate(Tool::Text.button());
+            (*p).activate(tool_button(Tool::Text));
             let index = (*p)
                 .editor
                 .objects()
@@ -2106,7 +2118,7 @@ mod tests {
                 .iter()
                 .position(|o| o.matches_tool(Tool::Text))
                 .unwrap();
-            (*p).activate(Tool::Text.button());
+            (*p).activate(tool_button(Tool::Text));
             start_text(hwnd, p, Some(index)).unwrap();
             let draft = (*p).text_input.as_ref().unwrap();
             let original = (draft.content().unwrap(), draft.size, draft.angle);
@@ -2209,8 +2221,8 @@ mod tests {
                 .iter()
                 .position(|o| o.matches_tool(Tool::Text))
                 .unwrap();
-            state.activate(Tool::Text.button());
-            state.focus = Tool::Text.button();
+            state.activate(tool_button(Tool::Text));
+            state.focus = tool_button(Tool::Text);
             state.keyboard_focus = true;
             start_text(hwnd, pointer, Some(text)).unwrap();
             let draft = (*pointer).text_input.as_ref().unwrap();
@@ -2219,7 +2231,7 @@ mod tests {
             let size = draft.size;
             let angle = draft.angle;
 
-            config.drawing_tools = [false, true, true, false];
+            config.drawing_tools = [false, true, true, false, false];
             super::super::preferences::update(config.clone()).unwrap();
             let mut message = MSG::default();
             let changed = super::super::preferences::CHANGED;
@@ -2236,8 +2248,8 @@ mod tests {
                 (draft.content().unwrap(), draft.size, draft.angle),
                 (content, size, angle)
             );
-            assert!(!state.activate(Tool::Text.button()));
-            assert!(!state.activate(Tool::Rectangle.button()));
+            assert!(!state.activate(tool_button(Tool::Text)));
+            assert!(!state.activate(tool_button(Tool::Rectangle)));
             assert_eq!(state.editor.tool, Tool::Select);
             // End the existing draft before exercising toolbar keyboard navigation.
             (*pointer).text_input = None;
@@ -2252,10 +2264,10 @@ mod tests {
                 [9, 12, 14]
             );
 
-            config.drawing_tools = [true; 4];
+            config.drawing_tools = crate::core::config::DEFAULT_DRAWING_TOOLS;
             super::super::preferences::update(config.clone()).unwrap();
             SendMessageW(hwnd, changed, None, None);
-            (*pointer).activate(Tool::Text.button());
+            (*pointer).activate(tool_button(Tool::Text));
             assert_eq!((*pointer).editor.tool, Tool::Text);
             assert_eq!((*pointer).editor.objects(), original);
             drop(guard);
@@ -2308,7 +2320,7 @@ mod tests {
                 state.canvas_at(corner, true, 1.),
                 CanvasHit::ResizeSelection(7)
             ));
-            state.activate(Tool::Rectangle.button());
+            state.activate(tool_button(Tool::Rectangle));
             assert_eq!(state.editor.tool, Tool::Select);
             assert!(matches!(
                 state.canvas_at(inner, false, 1.),

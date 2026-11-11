@@ -762,6 +762,14 @@ fn dispatch(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
             }
             preferences::PARAMETER_CHANGED => {
                 settings::refresh_parameters();
+                let preview = APP.with_borrow(|app| {
+                    app.as_ref()
+                        .and_then(|s| s.preview.as_ref())
+                        .and_then(|p| p.hwnd())
+                });
+                if let Some(preview) = preview {
+                    let _ = PostMessageW(Some(preview), msg, WPARAM(0), LPARAM(0));
+                }
                 LRESULT(0)
             }
             preferences::CHANGED | WM_THEMECHANGED | WM_SETTINGCHANGE => {

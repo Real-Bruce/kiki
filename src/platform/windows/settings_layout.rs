@@ -6,14 +6,20 @@ use crate::core::config::{Config, OutputFormat};
 pub const HEADER: i32 = 84;
 pub const START_CAPTURE: u16 = 202;
 pub const PARAMETER_SLIDER: u16 = 420;
-pub const PARAMETER_EDIT: u16 = 425;
+pub const PARAMETER_EDIT: u16 = 440;
 pub const OUTPUT_FORMAT: u16 = 430;
 pub const RESET_CAPTURE: u16 = 431;
 pub const DRAWING_TOOL: u16 = 432;
 pub const DRAWING_TOOL_IDS: std::ops::Range<u16> =
     DRAWING_TOOL..DRAWING_TOOL + Tool::DRAWING.len() as u16;
-pub const PARAMETER_LABELS: [&str; 5] =
-    ["矩形线宽", "箭头线宽", "画笔线宽", "文字字号", "圆角半径"];
+pub const PARAMETER_LABELS: [&str; 6] = [
+    "矩形线宽",
+    "箭头线宽",
+    "画笔线宽",
+    "文字字号",
+    "圆角半径",
+    "马赛克颗粒大小",
+];
 pub const FOOTER: i32 = 56;
 const GROUP_GAP: i32 = 26;
 const ROW: i32 = 42;
@@ -167,7 +173,7 @@ impl Page {
                 for i in 0..Tool::DRAWING.len() {
                     let x = (i as i32 % columns) * (cell + gap);
                     p.control(DRAWING_TOOL + i as u16, x, -6, cell, 38);
-                    if i as i32 % columns == columns - 1 {
+                    if i as i32 % columns == columns - 1 || i + 1 == Tool::DRAWING.len() {
                         p.y += ROW;
                     }
                 }
@@ -177,6 +183,10 @@ impl Page {
                 p.items
                     .push(Item::ToolbarPreview(p.rect(0, 0, p.width, preview_height)));
                 p.y += preview_height + 22;
+                if cfg.drawing_tools[Tool::DRAWING.len() - 1] {
+                    p.parameter_row(5);
+                    p.note("成图实际像素 · 马赛克颗粒 2–64 px", Tone::Muted);
+                }
                 p.control(RESET_CAPTURE, 0, 0, 148, 38);
                 p.y += 38;
             }

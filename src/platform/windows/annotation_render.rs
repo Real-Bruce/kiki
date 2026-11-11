@@ -226,6 +226,7 @@ pub fn draw(
                     }
                 }
                 Shape::Rectangle(r) => target.DrawRectangle(&local(*r), brush, width, None),
+                Shape::Mosaic { .. } => {}
                 Shape::Arrow(start, end) => {
                     if let Some(head) = &geometry.paths[index] {
                         let [left, right] = arrow_head(*start, *end, width).map(point);

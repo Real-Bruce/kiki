@@ -1,4 +1,4 @@
-use super::geometry::PixelRect;
+use super::{config::CaptureParameter, geometry::PixelRect};
 
 pub fn blend_over_white(channel: u8, alpha: u8) -> u8 {
     let alpha = u16::from(alpha);
@@ -67,6 +67,85 @@ impl Image {
         }
     }
 
+    /// Replace color within a mosaic rectangle with the average of each tile
+    /// in the frozen source. Clip writes independently of the tile grid so
+    /// changing the selection cannot change the color of a visible tile.
+    pub fn pixelate(&mut self, source: &Self, bounds: PixelRect, size: u16) {
+        let Some(area) = bounds.intersection(source.bounds) else {
+            return;
+        };
+        let Some(visible) = area.intersection(self.bounds) else {
+            return;
+        };
+        let (min, max) = CaptureParameter::MosaicSize.bounds();
+        let size = i64::from(size.clamp(min, max));
+        let axis = |anchor: i32, start: i32, end: i32| {
+            let first = i64::from(start) - (i64::from(start) - i64::from(anchor)) % size;
+            (first..i64::from(end)).step_by(size as usize)
+        };
+        for y in axis(bounds.top, visible.top, visible.bottom) {
+            for x in axis(bounds.left, visible.left, visible.right) {
+                let tile = PixelRect {
+                    left: x.max(i64::from(area.left)) as i32,
+                    top: y.max(i64::from(area.top)) as i32,
+                    right: (x + size).min(i64::from(area.right)) as i32,
+                    bottom: (y + size).min(i64::from(area.bottom)) as i32,
+                };
+                let mut sum = [0u32; 3];
+                let mut weight = 0u32;
+                for row in tile.top..tile.bottom {
+                    for pixel in source.row(tile, row).chunks_exact(4) {
+                        let alpha = u32::from(pixel[3]);
+                        weight += alpha;
+                        for channel in 0..3 {
+                            sum[channel] += u32::from(pixel[channel]) * alpha;
+                        }
+                    }
+                }
+                if weight == 0 {
+                    continue;
+                }
+                let color = sum.map(|channel| ((channel + weight / 2) / weight) as u8);
+                let Some(write) = tile.intersection(visible) else {
+                    continue;
+                };
+                for row in write.top..write.bottom {
+                    let range = self.row_range(write, row);
+                    for (dst, src) in self.pixels[range]
+                        .chunks_exact_mut(4)
+                        .zip(source.row(write, row).chunks_exact(4))
+                    {
+                        if src[3] != 0 {
+                            dst[..3].copy_from_slice(&color);
+                            dst[3] = src[3];
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn row_range(&self, area: PixelRect, row: i32) -> std::ops::Range<usize> {
+        let offset = (i64::from(row) - i64::from(self.bounds.top)) as usize * self.stride as usize;
+        let left = (i64::from(area.left) - i64::from(self.bounds.left)) as usize * 4;
+        let right = (i64::from(area.right) - i64::from(self.bounds.left)) as usize * 4;
+        offset + left..offset + right
+    }
+
+    fn row(&self, area: PixelRect, row: i32) -> &[u8] {
+        &self.pixels[self.row_range(area, row)]
+    }
+
+    /// Convert in place for upload to a premultiplied Direct2D bitmap.
+    pub fn premultiply(&mut self) {
+        for pixel in self.pixels.chunks_exact_mut(4) {
+            for channel in 0..3 {
+                pixel[channel] =
+                    ((u16::from(pixel[channel]) * u16::from(pixel[3]) + 127) / 255) as u8;
+            }
+        }
+    }
+
     /// Mask a finished straight-alpha image in place. Only the four corner tiles
     /// can change. Preserve RGB on partially covered pixels to avoid dark fringes.
     pub fn round_corners(&mut self, configured: u16) {
@@ -128,6 +207,60 @@ impl Image {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn mosaic_grid_is_stable_when_cropped_and_overlaps_read_only_the_frozen_source() {
+        let bounds = PixelRect {
+            left: -5,
+            top: -3,
+            right: 3,
+            bottom: 2,
+        };
+        let mut source = Image::new(bounds).unwrap();
+        for (i, pixel) in source.pixels_mut().chunks_exact_mut(4).enumerate() {
+            if i % 8 != 4 {
+                pixel.copy_from_slice(&[(4 * i) as u8, 0, 0, 255]);
+            }
+        }
+        let original = source.pixels().to_vec();
+        let back = PixelRect {
+            left: -6,
+            top: -4,
+            right: 3,
+            bottom: 1,
+        };
+        let front = PixelRect {
+            left: -2,
+            top: -3,
+            right: 3,
+            bottom: 2,
+        };
+        let crop = PixelRect {
+            left: -4,
+            top: -2,
+            right: 2,
+            bottom: 1,
+        };
+        let mut full = source.region(bounds).unwrap();
+        full.pixelate(&source, back, 3);
+        // This first tile is cropped by the source to two rows and two columns.
+        assert_eq!(&full.pixels()[..8], &[18, 0, 0, 255, 18, 0, 0, 255]);
+        full.pixelate(&source, front, 2);
+        let mut cropped = source.region(crop).unwrap();
+        cropped.pixelate(&source, back, 3);
+        cropped.pixelate(&source, front, 2);
+        assert_eq!(cropped.pixels(), full.region(crop).unwrap().pixels());
+        let mut front_only = source.region(front).unwrap();
+        front_only.pixelate(&source, front, 2);
+        assert_eq!(full.region(front).unwrap().pixels(), front_only.pixels());
+        assert!(
+            full.pixels()
+                .chunks_exact(4)
+                .skip(4)
+                .step_by(8)
+                .all(|p| p == [0; 4])
+        );
+        assert_eq!(source.pixels(), original);
+    }
     #[test]
     fn rounded_mask_preserves_straight_color_and_clamps_on_tiny_images() {
         let mut image = Image::new(PixelRect {

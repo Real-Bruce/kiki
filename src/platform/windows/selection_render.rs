@@ -40,7 +40,7 @@ pub struct PaintInput<'a> {
     pub busy: bool,
     pub hover: Option<PixelRect>,
     pub screens: &'a [DisplayInfo],
-    pub drawing_tools: [bool; 4],
+    pub drawing_tools: [bool; 5],
     pub pointer: PixelPoint,
     pub focus: usize,
     pub pressed: Option<usize>,
@@ -55,6 +55,8 @@ pub struct Canvas {
     context: ID2D1DeviceContext,
     swap: windows::Win32::Graphics::Dxgi::IDXGISwapChain1,
     bitmap: ID2D1Bitmap,
+    mosaics: Vec<(PixelRect, u16)>,
+    mosaic_bitmap: Option<(PixelRect, ID2D1Bitmap)>,
     brush: ID2D1SolidColorBrush,
     dw: IDWriteFactory,
     text: IDWriteTextFormat,
@@ -125,6 +127,8 @@ impl Canvas {
                 swap,
                 _device: device,
                 bitmap,
+                mosaics: Vec::new(),
+                mosaic_bitmap: None,
                 brush,
                 dw,
                 text,
@@ -141,10 +145,58 @@ impl Canvas {
         rect: PixelRect,
         screens: &[DisplayInfo],
         tool: Tool,
-        drawing_tools: [bool; 4],
+        drawing_tools: [bool; 5],
     ) -> Layout {
         let (screen, preferred) = self.display(rect, screens);
-        Layout::new(rect, screen, preferred, tool != Tool::Select, drawing_tools)
+        Layout::new(rect, screen, preferred, tool, drawing_tools)
+    }
+
+    fn prepare_mosaics(&mut self, editor: &Editor) -> Result<()> {
+        if editor.mosaics().eq(self.mosaics.iter().copied()) {
+            return Ok(());
+        }
+        self.mosaic_bitmap = None;
+        self.mosaics.clear();
+        let coverage = editor
+            .mosaics()
+            .filter_map(|(bounds, _)| bounds.intersection(self.bounds()))
+            .reduce(|a, b| PixelRect {
+                left: a.left.min(b.left),
+                top: a.top.min(b.top),
+                right: a.right.max(b.right),
+                bottom: a.bottom.max(b.bottom),
+            });
+        if let Some(bounds) = coverage {
+            let fail =
+                |message| windows::core::Error::new(windows::Win32::Foundation::E_FAIL, message);
+            let (width, height) = bounds.size().ok_or_else(|| fail("无效马赛克范围"))?;
+            let mut overlay = Image::new(bounds).map_err(|message| {
+                windows::core::Error::new(windows::Win32::Foundation::E_FAIL, message)
+            })?;
+            for (area, size) in editor.mosaics() {
+                overlay.pixelate(&self.source, area, size);
+            }
+            overlay.premultiply();
+            // SAFETY: CreateBitmap copies the checked, tightly packed pixels before returning.
+            let bitmap = unsafe {
+                self.target.CreateBitmap(
+                    D2D_SIZE_U { width, height },
+                    Some(overlay.pixels().as_ptr().cast()),
+                    overlay.stride(),
+                    &D2D1_BITMAP_PROPERTIES {
+                        pixelFormat: D2D1_PIXEL_FORMAT {
+                            format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                            alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+                        },
+                        dpiX: 96.,
+                        dpiY: 96.,
+                    },
+                )?
+            };
+            self.mosaic_bitmap = Some((bounds, bitmap));
+        }
+        self.mosaics.extend(editor.mosaics());
+        Ok(())
     }
     fn display(&self, rect: PixelRect, screens: &[DisplayInfo]) -> (PixelRect, f32) {
         let center = PixelPoint {
@@ -213,6 +265,7 @@ impl Canvas {
         }
         let text_layouts = super::annotation_render::layouts(&self.dw, editor)?;
         let geometry = super::annotation_render::geometry(&self.factory, self.bounds(), editor)?;
+        self.prepare_mosaics(editor)?;
         let selected = selection.rect.or(hover);
         let radius = selected.map_or(0., |rect| rect.corner_radius(corner_radius));
         let rounded = selected
@@ -439,7 +492,7 @@ impl Canvas {
                 y: desktop.top,
             },
             BarState {
-                selected: editor.tool.button(),
+                selected: capture_toolbar::tool_button(editor.tool),
                 hover,
                 pressed,
                 focus,
@@ -534,7 +587,7 @@ impl Canvas {
             return None;
         }
         let x = (p.x - r.left) as f32 / layout.parameter_scale;
-        if (COLOR_START..COLOR_START + 8. * COLOR_STEP).contains(&x) {
+        if !layout.mosaic_parameters && (COLOR_START..COLOR_START + 8. * COLOR_STEP).contains(&x) {
             Some(((x - COLOR_START) / COLOR_STEP) as usize)
         } else if layout.parameter_slider().is_some_and(|r| contains(r, p)) {
             Some(8)
@@ -552,6 +605,9 @@ impl Canvas {
         let s = layout.parameter_scale;
         let dark = self.dark;
         self.panel(r, BAR_RADIUS * s);
+        if !editor.tool.has_color() {
+            return;
+        }
         // SAFETY: all drawing objects are owned by Canvas on the UI thread.
         unsafe {
             for (i, rgb) in ANNOTATION_COLORS.iter().enumerate() {
@@ -649,23 +705,26 @@ impl Canvas {
         if focus == 19 {
             self.outline(slider, 5. * s, 1.5 * s, accent);
         }
-        self.fill(
-            D2D_RECT_F {
-                left: slider.left - 53. * s,
-                right: slider.left - 52. * s,
-                top: slider.top + 1. * s,
-                bottom: slider.bottom - 1. * s,
-            },
-            divider,
-        );
+        if !layout.mosaic_parameters {
+            self.fill(
+                D2D_RECT_F {
+                    left: slider.left - 53. * s,
+                    right: slider.left - 52. * s,
+                    top: slider.top + 1. * s,
+                    bottom: slider.bottom - 1. * s,
+                },
+                divider,
+            );
+        }
         self.label_with_format(
             match parameter {
                 CaptureParameter::Stroke(_) => "线宽",
                 CaptureParameter::TextSize => "字号",
                 CaptureParameter::CornerRadius => "圆角",
+                CaptureParameter::MosaicSize => "颗粒大小",
             },
             D2D_RECT_F {
-                left: slider.left - 47. * s,
+                left: slider.left - if layout.mosaic_parameters { 80. } else { 47. } * s,
                 right: slider.left - 8. * s,
                 ..slider
             },
@@ -733,6 +792,15 @@ impl Canvas {
                 self.target
                     .PushAxisAlignedClip(&bounds, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
             }
+            if let Some((area, bitmap)) = &self.mosaic_bitmap {
+                self.target.DrawBitmap(
+                    bitmap,
+                    Some(&self.local(*area)),
+                    1.,
+                    D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+                    None,
+                );
+            }
             let selected = editor
                 .selected
                 .filter(|i| !editor.active() && editing != Some(*i));
@@ -759,6 +827,11 @@ impl Canvas {
                 editing,
             );
             if let Some(object) = selected.and_then(|i| editor.objects().get(i)) {
+                if let Shape::Mosaic { bounds, .. } = object.shape {
+                    self.brush.SetColor(&tone(palette::accent(self.dark), 1.));
+                    self.target
+                        .DrawRectangle(&self.local(bounds), &self.brush, 1., None);
+                }
                 for p in object.handles() {
                     let p = point(p);
                     let r = D2D_RECT_F {

@@ -293,7 +293,7 @@ impl Canvas {
             );
         }
     }
-    pub fn toolbar_preview(&self, bounds: PixelRect, drawing_tools: [bool; 4], dark: bool) {
+    pub fn toolbar_preview(&self, bounds: PixelRect, drawing_tools: [bool; 5], dark: bool) {
         let layout = Layout::preview(bounds, drawing_tools);
         let compact_text = (layout.scale < 1.)
             .then(|| super::selection_render::format(&self.factory, layout.scale).ok())

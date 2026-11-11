@@ -164,6 +164,7 @@ pub fn set_parameter(parameter: CaptureParameter, value: u16) -> std::result::Re
         CaptureParameter::Stroke(index) => config.stroke_widths[index] = value as u8,
         CaptureParameter::TextSize => config.text_size = value,
         CaptureParameter::CornerRadius => config.corner_radius = value,
+        CaptureParameter::MosaicSize => config.mosaic_size = value,
     }
     update_config(config, false, PARAMETER_CHANGED)
 }

@@ -46,6 +46,9 @@ pub fn render(
 ) -> Result<Image> {
     let _apartment = Apartment::enter()?;
     let mut output = source.region(selection).map_err(|e| fail(&e))?;
+    for (bounds, size) in editor.mosaics() {
+        output.pixelate(source, bounds, size);
+    }
     let (width, height) = selection.size().ok_or_else(|| fail("无效输出范围"))?;
     let lock_width = i32::try_from(width).map_err(|_| fail("输出范围过宽"))?;
     let lock_height = i32::try_from(height).map_err(|_| fail("输出范围过高"))?;
@@ -74,12 +77,7 @@ pub fn render(
             },
         )?;
         // D2D expects premultiplied pixels, while Image and PNG expose straight BGRA.
-        for pixel in output.pixels_mut().chunks_exact_mut(4) {
-            for channel in 0..3 {
-                pixel[channel] =
-                    ((u16::from(pixel[channel]) * u16::from(pixel[3]) + 127) / 255) as u8;
-            }
-        }
+        output.premultiply();
         let bitmap = target.CreateBitmap(
             D2D_SIZE_U { width, height },
             Some(output.pixels().as_ptr().cast()),
@@ -274,6 +272,45 @@ pub fn probe(path: &std::path::Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::{annotation::Tool, selection::PixelPoint};
+
+    #[test]
+    fn mosaic_created_last_still_renders_under_ink_and_inside_rounded_output() {
+        let bounds = PixelRect {
+            left: -30,
+            top: -20,
+            right: 30,
+            bottom: 20,
+        };
+        let mut source = Image::new(bounds).unwrap();
+        for (index, pixel) in source.pixels_mut().chunks_exact_mut(4).enumerate() {
+            let tone = if index % 2 == 0 { 20 } else { 220 };
+            pixel.copy_from_slice(&[tone, tone, tone, 255]);
+        }
+        let mut editor = Editor::default();
+        editor.tool = Tool::Rectangle;
+        editor.begin_at(PixelPoint { x: -15, y: -7 }, None).unwrap();
+        editor.finish(PixelPoint { x: 15, y: 7 });
+        editor.tool = Tool::Mosaic;
+        editor
+            .begin_at(PixelPoint { x: -30, y: -20 }, None)
+            .unwrap();
+        editor.finish(PixelPoint { x: 30, y: 20 });
+        let rendered = render(&source, bounds, &editor, 10).unwrap();
+        let pixel = |x: usize, y: usize| {
+            let index = y * rendered.stride() as usize + x * 4;
+            &rendered.pixels()[index..index + 4]
+        };
+        assert_eq!(pixel(0, 0), [0; 4]);
+        assert_eq!(pixel(30, 20), [120, 120, 120, 255]);
+        assert_eq!(pixel(30, 13), [64, 59, 255, 255]);
+        assert_eq!(
+            rendered.pixels(),
+            render(&source, bounds, &editor.snapshot(), 10)
+                .unwrap()
+                .pixels()
+        );
+    }
     #[test]
     fn clean_render_crop_invariance_base_ownership_and_transparent_gap() {
         let (source, mut editor) = fixture().unwrap();

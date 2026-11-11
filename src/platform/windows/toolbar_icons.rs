@@ -1,6 +1,6 @@
 //! Outline shapes measured against the capture design, in toolbar DIPs.
 use super::{
-    capture_toolbar::{BUTTON_HEIGHT, Layout, MORE},
+    capture_toolbar::{BUTTON_HEIGHT, Layout, MORE, MOSAIC},
     ui_palette as palette,
 };
 use crate::core::{geometry::PixelRect, selection::PixelPoint};
@@ -248,6 +248,26 @@ impl ToolbarIcons {
                         },
                         brush,
                     );
+                }
+                return;
+            }
+            if index == MOSAIC {
+                for row in 0..3 {
+                    for column in 0..3 {
+                        let left = center.X + (column as f32 * 5.6 - 7.9) * scale;
+                        let top = center.Y + (row as f32 * 5.6 - 7.9) * scale;
+                        let tile = D2D_RECT_F {
+                            left,
+                            top,
+                            right: left + 4.6 * scale,
+                            bottom: top + 4.6 * scale,
+                        };
+                        if (row + column) % 2 == 0 {
+                            target.FillRectangle(&tile, brush);
+                        } else {
+                            target.DrawRectangle(&tile, brush, 0.8 * scale, None);
+                        }
+                    }
                 }
                 return;
             }
