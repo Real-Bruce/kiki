@@ -741,6 +741,18 @@ fn dispatch(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
             config_store::SAVED => {
                 preferences::poll();
                 settings::refresh();
+                let preview = APP.with_borrow(|app| {
+                    app.as_ref()
+                        .and_then(|s| s.preview.as_ref())
+                        .and_then(|p| p.hwnd())
+                });
+                if let Some(preview) = preview {
+                    let _ = PostMessageW(Some(preview), config_store::SAVED, WPARAM(0), LPARAM(0));
+                }
+                LRESULT(0)
+            }
+            preferences::STROKE_CHANGED => {
+                settings::refresh_strokes();
                 LRESULT(0)
             }
             preferences::CHANGED | WM_THEMECHANGED | WM_SETTINGCHANGE => {
@@ -850,3 +862,4 @@ mod hotkey;
 
 mod preferences;
 mod startup;
+mod stroke_control;

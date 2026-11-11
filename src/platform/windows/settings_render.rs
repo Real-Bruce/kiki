@@ -230,6 +230,27 @@ impl Canvas {
             );
         }
     }
+    pub fn input_frame(&self, x: f32, y: f32, w: f32, h: f32, rgb: u32) {
+        // SAFETY: the call-scoped geometry and brush belong to the current settings paint.
+        unsafe {
+            self.brush.SetColor(&color(rgb));
+            self.target.DrawRoundedRectangle(
+                &D2D1_ROUNDED_RECT {
+                    rect: D2D_RECT_F {
+                        left: x,
+                        top: y,
+                        right: x + w,
+                        bottom: y + h,
+                    },
+                    radiusX: 5.,
+                    radiusY: 5.,
+                },
+                &self.brush,
+                1.,
+                None,
+            );
+        }
+    }
     pub fn heading(&self, text: &str, x: f32, y: f32, width: f32, size: f32, rgb: u32) {
         self.write(
             text,

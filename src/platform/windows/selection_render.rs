@@ -1,4 +1,6 @@
-use super::{text_input::TextInput, toolbar_icons::ToolbarIcons, ui_palette as palette};
+use super::{
+    stroke_control, text_input::TextInput, toolbar_icons::ToolbarIcons, ui_palette as palette,
+};
 use crate::core::{
     annotation::{
         Editor, Shape, Tool, rotate_point, text_center, text_frame, text_rotation_handle,
@@ -38,7 +40,7 @@ const BUTTON_HEIGHT: f32 = 36.;
 const BUTTON_FACE_HEIGHT: f32 = 34.;
 const BUTTON_RADIUS: f32 = 7.;
 const BAR_RADIUS: f32 = 10.;
-const PARAM_WIDTH: f32 = 418.;
+const PARAM_WIDTH: f32 = 506.;
 const COLOR_START: f32 = 10.;
 const COLOR_STEP: f32 = 30.;
 const VALUE_START: f32 = 258.;
@@ -52,6 +54,24 @@ pub struct Layout {
     pub buttons: [PixelRect; 11],
     pub scale: f32,
 }
+impl Layout {
+    fn parameter_box(&self, left: f32, right: f32, inset_y: f32) -> Option<PixelRect> {
+        let r = self.parameters?;
+        let px = |value: f32| (value * self.scale).round() as i32;
+        Some(PixelRect {
+            left: r.left + px(left),
+            right: r.left + px(right),
+            top: r.top + px(inset_y),
+            bottom: r.bottom - px(inset_y),
+        })
+    }
+    pub fn stroke_slider(&self) -> Option<PixelRect> {
+        self.parameter_box(305., 418., 8.)
+    }
+    pub fn stroke_edit(&self) -> Option<PixelRect> {
+        self.parameter_box(430., 477., 7.)
+    }
+}
 pub struct PaintInput<'a> {
     pub selection: &'a Selection,
     pub editor: &'a Editor,
@@ -62,6 +82,8 @@ pub struct PaintInput<'a> {
     pub pointer: PixelPoint,
     pub focus: usize,
     pub pressed: Option<usize>,
+    pub editing_stroke: bool,
+    pub parameter_error: Option<&'static str>,
 }
 pub struct Canvas {
     target: ID2D1RenderTarget,
@@ -149,8 +171,14 @@ impl Canvas {
             })
         }
     }
-    pub fn layout(&self, rect: PixelRect, screens: &[DisplayInfo], parameters: bool) -> Layout {
+    pub fn layout(&self, rect: PixelRect, screens: &[DisplayInfo], tool: Tool) -> Layout {
         let (screen, preferred) = self.display(rect, screens);
+        let parameters = tool != Tool::Select;
+        let parameter_width = if tool == Tool::Text {
+            418.
+        } else {
+            PARAM_WIDTH
+        };
         let height = BAR_HEIGHT
             + if parameters {
                 PARAM_GAP + PARAM_HEIGHT
@@ -185,9 +213,9 @@ impl Canvas {
                 ..bounds
             },
             parameters: parameters.then(|| PixelRect {
-                left: x((BAR_WIDTH - PARAM_WIDTH) / 2.),
+                left: x((BAR_WIDTH - parameter_width) / 2.),
                 top: y(BAR_HEIGHT + PARAM_GAP),
-                right: x((BAR_WIDTH + PARAM_WIDTH) / 2.),
+                right: x((BAR_WIDTH + parameter_width) / 2.),
                 bottom: bounds.bottom,
             }),
             bounds,
@@ -228,13 +256,15 @@ impl Canvas {
             pointer,
             focus,
             pressed,
+            editing_stroke,
+            parameter_error,
         } = input;
         let editing = text_input.and_then(|input| input.index);
         let text_active = text_input.is_some();
         let layout = selection
             .rect
             .filter(|_| !selection.active())
-            .map(|r| self.layout(r, screens, editor.tool != Tool::Select));
+            .map(|r| self.layout(r, screens, editor.tool));
         let anchor = selection.rect.or(hover).unwrap_or(PixelRect {
             left: pointer.x,
             top: pointer.y,
@@ -358,9 +388,9 @@ impl Canvas {
             };
             if let Some(layout) = layout {
                 self.paint_toolbar(&layout, editor, pointer, focus, pressed, busy);
-                self.paint_parameters(&layout, editor, focus);
+                self.paint_parameters(&layout, editor, focus, editing_stroke);
             }
-            if busy || super::preferences::hints() {
+            if busy || parameter_error.is_some() || super::preferences::hints() {
                 let selected = selection.rect.is_some();
                 let hint_width = if text_active || selected { 480. } else { 350. };
                 let display = self.local(screen);
@@ -377,6 +407,8 @@ impl Canvas {
                 self.label(
                     if busy {
                         "正在输出，请稍候…"
+                    } else if let Some(message) = parameter_error {
+                        message
                     } else if text_active {
                         "Enter 换行　Ctrl+Enter 完成　Esc 取消文字"
                     } else if selected {
@@ -541,7 +573,7 @@ impl Canvas {
             style,
         })
     }
-    pub fn parameter_at(&self, layout: &Layout, p: PixelPoint) -> Option<usize> {
+    pub fn parameter_at(&self, layout: &Layout, p: PixelPoint, tool: Tool) -> Option<usize> {
         let r = layout.parameters?;
         if !contains(r, p) {
             return None;
@@ -549,6 +581,14 @@ impl Canvas {
         let x = (p.x - r.left) as f32 / layout.scale;
         if (COLOR_START..COLOR_START + 8. * COLOR_STEP).contains(&x) {
             Some(((x - COLOR_START) / COLOR_STEP) as usize)
+        } else if tool.stroke_index().is_some() {
+            if layout.stroke_slider().is_some_and(|r| contains(r, p)) {
+                Some(8)
+            } else if layout.stroke_edit().is_some_and(|r| contains(r, p)) {
+                Some(9)
+            } else {
+                None
+            }
         } else if (VALUE_START..VALUE_START + 3. * VALUE_STEP).contains(&x) {
             let offset = x - VALUE_START;
             (offset % VALUE_STEP < 46.).then_some(8 + (offset / VALUE_STEP) as usize)
@@ -556,7 +596,13 @@ impl Canvas {
             None
         }
     }
-    fn paint_parameters(&self, layout: &Layout, editor: &Editor, focus: usize) {
+    fn paint_parameters(
+        &self,
+        layout: &Layout,
+        editor: &Editor,
+        focus: usize,
+        editing_stroke: bool,
+    ) {
         let Some(bounds) = layout.parameters else {
             return;
         };
@@ -601,26 +647,18 @@ impl Canvas {
                     None,
                 );
             }
-            for (i, width) in (if editor.tool == Tool::Text {
-                [18., 24., 36.]
-            } else {
-                [1., 3., 6.]
-            })
-            .iter()
-            .enumerate()
-            {
+            if editor.tool.stroke_index().is_some() {
+                self.paint_stroke_width(layout, editor.style().width as u8, focus, editing_stroke);
+                return;
+            }
+            for (i, size) in [18., 24., 36.].into_iter().enumerate() {
                 let b = D2D_RECT_F {
                     left: r.left + (VALUE_START + i as f32 * VALUE_STEP) * s,
                     top: r.top + 6. * s,
                     right: r.left + (VALUE_START + 46. + i as f32 * VALUE_STEP) * s,
                     bottom: r.bottom - 6. * s,
                 };
-                let selected = *width
-                    == if editor.tool == Tool::Text {
-                        editor.text_size
-                    } else {
-                        editor.style().width
-                    };
+                let selected = size == editor.text_size;
                 if selected {
                     self.round(b, 6. * s, tone(palette::selected(dark), 1.));
                 }
@@ -635,25 +673,95 @@ impl Canvas {
                     },
                     1.,
                 );
-                self.brush.SetColor(&foreground);
-                if editor.tool == Tool::Text {
-                    self.label(&format!("{}", *width as i32), b, foreground);
-                    continue;
-                }
-                self.target.DrawLine(
-                    Vector2 {
-                        X: b.left + 10. * s,
-                        Y: (b.top + b.bottom) / 2.,
-                    },
-                    Vector2 {
-                        X: b.right - 10. * s,
-                        Y: (b.top + b.bottom) / 2.,
-                    },
-                    &self.brush,
-                    width * s,
-                    None,
-                );
+                self.label(&format!("{}", size as i32), b, foreground);
             }
+        }
+    }
+    fn paint_stroke_width(&self, layout: &Layout, width: u8, focus: usize, editing: bool) {
+        let Some((slider, edit)) = layout.stroke_slider().zip(layout.stroke_edit()) else {
+            return;
+        };
+        let slider = self.local(slider);
+        let edit = self.local(edit);
+        let s = layout.scale;
+        let dark = self.dark;
+        let accent = tone(palette::accent(dark), 1.);
+        let divider = tone(palette::divider(dark), 1.);
+        let foreground = tone(palette::foreground(dark), 1.);
+        let y = (slider.top + slider.bottom) / 2.;
+        let left = slider.left + 6. * s;
+        let right = slider.right - 6. * s;
+        let thumb = left + stroke_control::fraction(width) * (right - left);
+        let track = D2D_RECT_F {
+            left,
+            top: y - 1.5 * s,
+            right,
+            bottom: y + 1.5 * s,
+        };
+        self.round(track, 1.5 * s, divider);
+        if thumb > left {
+            self.round(
+                D2D_RECT_F {
+                    right: thumb,
+                    ..track
+                },
+                1.5 * s,
+                accent,
+            );
+        }
+        self.round(
+            D2D_RECT_F {
+                left: thumb - 5.5 * s,
+                top: y - 5.5 * s,
+                right: thumb + 5.5 * s,
+                bottom: y + 5.5 * s,
+            },
+            5.5 * s,
+            accent,
+        );
+        if focus == 19 {
+            self.outline(slider, 5. * s, 1.5 * s, accent);
+        }
+        self.fill(
+            D2D_RECT_F {
+                left: slider.left - 53. * s,
+                right: slider.left - 52. * s,
+                top: slider.top + 1. * s,
+                bottom: slider.bottom - 1. * s,
+            },
+            divider,
+        );
+        self.label(
+            "线宽",
+            D2D_RECT_F {
+                left: slider.left - 47. * s,
+                right: slider.left - 8. * s,
+                ..slider
+            },
+            foreground,
+        );
+        self.label(
+            "px",
+            D2D_RECT_F {
+                left: edit.right + 2. * s,
+                right: edit.right + 26. * s,
+                ..edit
+            },
+            tone(palette::muted(dark), 1.),
+        );
+        self.round(edit, 6. * s, tone(palette::background(dark), 1.));
+        self.outline(
+            edit,
+            6. * s,
+            s,
+            if editing || focus == 20 {
+                accent
+            } else {
+                divider
+            },
+        );
+        if !editing {
+            self.label(&width.to_string(), edit, foreground);
         }
     }
     fn paint_annotations(

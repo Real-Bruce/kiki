@@ -1,5 +1,5 @@
 //! Bounded asynchronous preference writes with atomic replacement and corruption preservation.
-use crate::core::config::Config;
+use crate::core::config::{CONFIG_VERSION, Config};
 use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Write},
@@ -28,6 +28,7 @@ pub const SAVED: u32 = WM_APP + 60;
 static SERIAL: AtomicU64 = AtomicU64::new(0);
 pub struct Loaded {
     pub config: Config,
+    pub migrate: bool,
     pub warning: Option<String>,
     pub disk: Disk,
 }
@@ -73,6 +74,7 @@ impl Disk {
                     disk.protect = true;
                     return Loaded {
                         config: Config::default(),
+                        migrate: false,
                         warning: Some(format!("配置无法读取，使用默认值并暂停覆盖：{error}")),
                         disk,
                     };
@@ -81,6 +83,7 @@ impl Disk {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Loaded {
                     config: Config::default(),
+                    migrate: false,
                     warning: None,
                     disk,
                 };
@@ -89,15 +92,17 @@ impl Disk {
                 disk.protect = true;
                 return Loaded {
                     config: Config::default(),
+                    migrate: false,
                     warning: Some(format!("配置无法读取，使用默认值并暂停覆盖：{error}")),
                     disk,
                 };
             }
         }
         let text = std::str::from_utf8(&data).ok();
-        if let Some(config) = text.and_then(|text| Config::decode(text).ok()) {
+        if let Some((config, migrate)) = text.and_then(|text| Config::decode(text).ok()) {
             return Loaded {
                 config,
+                migrate,
                 warning: None,
                 disk,
             };
@@ -105,11 +110,12 @@ impl Disk {
         let future = text
             .and_then(|text| text.lines().find_map(|line| line.strip_prefix("version=")))
             .and_then(|version| version.parse::<u32>().ok())
-            .is_some_and(|version| version > 1);
+            .is_some_and(|version| version > CONFIG_VERSION);
         disk.protect = future;
         disk.recover = !future;
         Loaded {
             config: Config::default(),
+            migrate: false,
             warning: Some(if future {
                 "配置来自更高版本，使用默认值运行并保留原文件，不覆盖保存。".into()
             } else {
@@ -340,12 +346,12 @@ mod tests {
             b"bad bytes\xff"
         );
         assert_eq!(Disk::load(path.clone()).config, Config::default());
-        fs::write(&path, "version=2\ntheme=future\n").unwrap();
+        fs::write(&path, "version=3\ntheme=future\n").unwrap();
         let mut future = Disk::load(path.clone());
         assert!(future.disk.save(&config).is_err());
         assert_eq!(
             fs::read_to_string(&path).unwrap(),
-            "version=2\ntheme=future\n"
+            "version=3\ntheme=future\n"
         );
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 2);
         clean(&dir);

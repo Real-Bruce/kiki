@@ -1,5 +1,6 @@
 //! Editable annotations in global physical pixels; no native handles or image copies.
 use super::{
+    config::{MAX_STROKE_WIDTH, MIN_STROKE_WIDTH},
     geometry::PixelRect,
     selection::{PixelPoint, Selection},
 };
@@ -14,6 +15,15 @@ pub enum Tool {
     Text,
 }
 impl Tool {
+    pub fn stroke_index(self) -> Option<usize> {
+        match self {
+            Self::Rectangle => Some(0),
+            Self::Arrow => Some(1),
+            Self::Pen => Some(2),
+            Self::Select | Self::Text => None,
+        }
+    }
+
     pub fn button(self) -> usize {
         match self {
             Self::Select => 0,
@@ -272,6 +282,7 @@ pub struct Editor {
     pub selected: Option<usize>,
     pub text_size: f32,
     drag: Option<Drag>,
+    stroke_before: Option<(usize, f32)>,
     undo: VecDeque<Change>,
     redo: Vec<Change>,
     warning: Option<&'static str>,
@@ -285,6 +296,7 @@ impl Default for Editor {
             selected: None,
             text_size: 24.,
             drag: None,
+            stroke_before: None,
             undo: VecDeque::new(),
             redo: Vec::new(),
             warning: None,
@@ -303,6 +315,7 @@ impl Editor {
         index: Option<usize>,
         object: Object,
     ) -> Result<(), &'static str> {
+        self.finish_stroke_adjustment();
         let Shape::Text {
             bounds,
             ref content,
@@ -389,31 +402,75 @@ impl Editor {
         self.drag.is_some()
     }
     pub fn can_undo(&self) -> bool {
-        !self.undo.is_empty() && !self.active()
+        (!self.undo.is_empty() || self.stroke_before.is_some()) && !self.active()
     }
     pub fn can_redo(&self) -> bool {
-        !self.redo.is_empty() && !self.active()
+        !self.redo.is_empty() && !self.active() && self.stroke_before.is_none()
     }
     pub fn enabled(&self, index: usize) -> bool {
-        (matches!(index, 11..=21) && self.tool != Tool::Select)
+        ((11..=18).contains(&index) && self.tool != Tool::Select)
+            || ((19..=21).contains(&index) && self.tool == Tool::Text)
+            || ((19..=20).contains(&index) && self.tool.stroke_index().is_some())
             || matches!(index, 0..=4 | 7..=10)
             || (index == 5 && self.can_undo())
             || (index == 6 && self.can_redo())
     }
     pub fn style(&self) -> Style {
+        if let Some(index) = self.selected_stroke() {
+            return self.objects[index].style;
+        }
+        self.default_style()
+    }
+    fn default_style(&self) -> Style {
         self.styles[self.tool.button().saturating_sub(1).min(3)]
     }
-    pub fn set_style(&mut self, style: Style, scale: f32) {
-        if self.active() || !style.width.is_finite() || !(1. ..=32.).contains(&style.width) {
+    fn selected_stroke(&self) -> Option<usize> {
+        self.tool.stroke_index()?;
+        let index = self.selected?;
+        self.objects[index].matches_tool(self.tool).then_some(index)
+    }
+    pub fn set_stroke_width(&mut self, width: u8) {
+        let Some(tool) = self.tool.stroke_index() else {
+            return;
+        };
+        if !(MIN_STROKE_WIDTH..=MAX_STROKE_WIDTH).contains(&width) {
             return;
         }
-        self.styles[self.tool.button().saturating_sub(1).min(3)] = style;
-        if let Some(index) = self.selected {
+        let width = f32::from(width);
+        self.styles[tool].width = width;
+        if let Some(index) = self.selected_stroke() {
+            let previous = self.objects[index].style.width;
+            if previous != width {
+                if !self.active() {
+                    self.stroke_before.get_or_insert((index, previous));
+                }
+                self.objects[index].style.width = width;
+            }
+        }
+    }
+    pub fn finish_stroke_adjustment(&mut self) {
+        if let Some((index, width)) = self.stroke_before.take() {
+            let after = self.objects[index].clone();
+            if after.style.width != width {
+                let mut before = after.clone();
+                before.style.width = width;
+                self.record(Change {
+                    index,
+                    before: Some(before),
+                    after: Some(after),
+                });
+            }
+        }
+    }
+    pub fn set_stroke_color(&mut self, color: [u8; 3]) {
+        self.finish_stroke_adjustment();
+        let Some(tool) = self.tool.stroke_index() else {
+            return;
+        };
+        self.styles[tool].color = color;
+        if let Some(index) = self.selected_stroke() {
             let before = self.objects[index].clone();
-            self.objects[index].style = Style {
-                width: style.width * scale.clamp(0.5, 4.),
-                ..style
-            };
+            self.objects[index].style.color = color;
             let after = self.objects[index].clone();
             self.record(Change {
                 index,
@@ -513,14 +570,14 @@ impl Editor {
         scale: f32,
     ) -> Result<bool, &'static str> {
         let hit = self.hit_at(p, tolerance, scale, true);
-        self.begin_at(p, scale, hit)
+        self.begin_at(p, hit)
     }
     pub fn begin_at(
         &mut self,
         p: PixelPoint,
-        scale: f32,
         hit: Option<ObjectHit>,
     ) -> Result<bool, &'static str> {
+        self.finish_stroke_adjustment();
         self.cancel();
         self.warning = None;
         if let Some(hit) = hit {
@@ -556,8 +613,7 @@ impl Editor {
             Tool::Pen => Shape::Pen(vec![p]),
             Tool::Select | Tool::Text => return Ok(false),
         };
-        let mut style = self.style();
-        style.width *= scale.clamp(0.5, 4.);
+        let style = self.default_style();
         let index = self.objects.len();
         self.objects.push(Object { shape, style });
         self.selected = Some(index);
@@ -787,6 +843,7 @@ impl Editor {
             .map(|_| index);
     }
     pub fn undo(&mut self) {
+        self.finish_stroke_adjustment();
         self.cancel();
         if let Some(c) = self.undo.pop_back() {
             self.apply(c.index, &c.after, &c.before);
@@ -794,6 +851,7 @@ impl Editor {
         }
     }
     pub fn redo(&mut self) {
+        self.finish_stroke_adjustment();
         self.cancel();
         if let Some(c) = self.redo.pop() {
             self.apply(c.index, &c.before, &c.after);
@@ -801,6 +859,7 @@ impl Editor {
         }
     }
     pub fn delete(&mut self) {
+        self.finish_stroke_adjustment();
         self.cancel();
         if let Some(index) = self.selected.take() {
             let before = self.objects.remove(index);
@@ -1004,25 +1063,49 @@ mod tests {
         };
         e.begin(p(0, 0), 6, 1.5).unwrap();
         e.finish(p(100, 100));
-        assert_eq!(e.objects()[0].style.width, 4.5);
-        e.set_style(
-            Style {
-                color: [0, 122, 255],
-                width: 6.,
-            },
-            1.5,
-        );
-        assert_eq!(e.objects()[0].style.width, 9.);
+        assert_eq!(e.objects()[0].style.width, 3.);
+        e.set_stroke_width(6);
+        e.set_stroke_width(64);
+        assert_eq!(e.objects()[0].style.width, 64.);
+        e.finish_stroke_adjustment();
+        e.set_stroke_color([0, 122, 255]);
+        assert_eq!(e.objects()[0].style.width, 64.);
         e.undo();
-        assert_eq!(
-            e.objects()[0].style,
-            Style {
-                width: 4.5,
-                ..Style::default()
-            }
-        );
+        e.undo();
+        assert_eq!(e.objects()[0].style, Style::default());
+        assert_eq!(e.style().width, 3.);
+        assert_eq!(e.styles[1].width, 64.);
+        e.redo();
         e.redo();
         assert_eq!(e.objects()[0].style.color, [0, 122, 255]);
+        e.begin(p(200, 100), 6, 2.).unwrap();
+        e.finish(p(300, 200));
+        assert_eq!(e.objects()[1].style.width, 64.);
+    }
+    #[test]
+    fn width_changes_during_creation_and_cancel_keep_tool_defaults_independent() {
+        let mut e = Editor {
+            tool: Tool::Pen,
+            ..Default::default()
+        };
+        e.begin(p(0, 0), 6, 2.).unwrap();
+        e.update(p(35, 0));
+        e.set_stroke_width(5);
+        e.set_stroke_width(17);
+        e.finish(p(75, 0));
+        assert_eq!(e.objects()[0].style.width, 17.);
+        assert_eq!(e.undo.len(), 1);
+        e.undo();
+        assert!(e.objects().is_empty());
+        assert_eq!(e.style().width, 17.);
+        e.redo();
+        e.begin(p(35, 0), 6, 2.).unwrap();
+        e.set_stroke_width(31);
+        assert!(e.cancel());
+        assert_eq!(e.objects()[0].style.width, 17.);
+        assert_eq!(e.styles[2].width, 31.);
+        e.tool = Tool::Rectangle;
+        assert_eq!(e.style().width, 3.);
     }
     #[test]
     fn long_stroke_limit_is_explicit_and_extreme_move_does_not_overflow() {

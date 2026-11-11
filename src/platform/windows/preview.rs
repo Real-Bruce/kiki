@@ -1,7 +1,8 @@
 //! Native frozen-desktop selection window. Annotation/output controls are staged for P4/P5.
 use super::{
     capture::CaptureResult,
-    selection_render::{Canvas, PaintInput, system_dark},
+    selection_render::{Canvas, Layout, PaintInput, system_dark},
+    stroke_control::{self, Wheel},
     text_input::{TextHit, TextInput, TextStart},
 };
 use crate::core::{
@@ -20,6 +21,9 @@ use windows::{
     },
     core::{Error, Result, w},
 };
+
+const STROKE_TIMER: usize = 6;
+const STROKE_EDIT: u16 = 900;
 
 pub struct Preview(Rc<Cell<Option<HWND>>>);
 impl Preview {
@@ -90,7 +94,9 @@ impl Preview {
             let mut editor = Editor::default();
             for style in &mut editor.styles {
                 style.color = cfg.color;
-                style.width = f32::from(cfg.stroke_width);
+            }
+            for (style, width) in editor.styles.iter_mut().zip(cfg.stroke_widths) {
+                style.width = f32::from(width);
             }
             editor.text_size = f32::from(cfg.text_size);
             let state = State {
@@ -99,6 +105,11 @@ impl Preview {
                 selection,
                 editor,
                 parameter_down: false,
+                stroke_slider: false,
+                stroke_edit: None,
+                wheel: Wheel::default(),
+                parameter_error: None,
+                width_modified: false,
                 text_input: None,
                 output: None,
                 busy: false,
@@ -160,6 +171,11 @@ struct State {
     selection: Selection,
     editor: Editor,
     parameter_down: bool,
+    stroke_slider: bool,
+    stroke_edit: Option<StrokeEdit>,
+    wheel: Wheel,
+    parameter_error: Option<&'static str>,
+    width_modified: bool,
     text_input: Option<TextInput>,
     output: Option<super::output::Job>,
     busy: bool,
@@ -172,6 +188,19 @@ struct State {
     down_button: Option<usize>,
     focus: usize,
     keyboard_focus: bool,
+}
+struct StrokeEdit {
+    hwnd: HWND,
+    font: HFONT,
+}
+impl Drop for StrokeEdit {
+    fn drop(&mut self) {
+        // SAFETY: the edit is destroyed before deleting its UI-thread font.
+        unsafe {
+            let _ = DestroyWindow(self.hwnd);
+            let _ = DeleteObject(self.font.into());
+        }
+    }
 }
 enum CanvasHit {
     ResizeSelection(usize),
@@ -187,6 +216,8 @@ impl State {
         }
         match index {
             0..=4 => {
+                self.editor.finish_stroke_adjustment();
+                self.wheel = Wheel::default();
                 self.editor.cancel();
                 let mut tool = [
                     Tool::Select,
@@ -203,27 +234,26 @@ impl State {
                         .editor
                         .selected
                         .and_then(|i| self.editor.objects().get(i))
-                        .filter(|o| o.matches_tool(tool))
-                        .map(|o| o.style);
-                    if let Some(mut style) = matching {
-                        style.width /= self.scale();
-                        self.editor.styles[index - 1] = style;
-                    } else {
+                        .is_some_and(|o| o.matches_tool(tool));
+                    if !matching {
                         self.editor.selected = None;
                     }
                 }
                 self.editor.tool = tool;
-                if tool == Tool::Text {
-                    if let Some(Shape::Text { size, .. }) = self
+                if tool == Tool::Text
+                    && let Some(object) = self
                         .editor
                         .selected
                         .and_then(|i| self.editor.objects().get(i))
-                        .map(|o| &o.shape)
-                    {
-                        self.editor.text_size = *size / self.scale();
-                    }
+                    && let Shape::Text { size, .. } = object.shape
+                {
+                    let mut style = object.style;
+                    style.width /= self.scale();
+                    self.editor.styles[3] = style;
+                    self.editor.text_size = size / self.scale();
                 }
             }
+            19 if self.editor.tool.stroke_index().is_some() => {}
             11..=21 => {
                 if let Err(message) = self.apply_parameter(index - 11) {
                     self.editor.warn(message);
@@ -243,30 +273,59 @@ impl State {
         let mut style = self.editor.style();
         if parameter < 8 {
             style.color = super::selection_render::ANNOTATION_COLORS[parameter];
-        } else if parameter < 11 {
-            if self.editor.tool == Tool::Text {
-                self.editor.text_size = [18., 24., 36.][parameter - 8];
-            } else {
-                style.width = [1., 3., 6.][parameter - 8];
-            }
+        } else if parameter < 11 && self.editor.tool == Tool::Text {
+            self.editor.text_size = [18., 24., 36.][parameter - 8];
         } else {
             return Ok(());
         }
         if self.editor.tool == Tool::Text {
             restyle_text(self, style, parameter >= 8)
         } else {
-            self.editor.set_style(style, self.scale());
+            self.editor.set_stroke_color(style.color);
             Ok(())
         }
     }
     fn parameter_at(&self, p: PixelPoint) -> Option<usize> {
-        let rect = self.selection.rect?;
-        self.canvas.parameter_at(
-            &self
-                .canvas
-                .layout(rect, &self.screens, self.editor.tool != Tool::Select),
-            p,
-        )
+        self.canvas
+            .parameter_at(&self.layout()?, p, self.editor.tool)
+    }
+    fn layout(&self) -> Option<Layout> {
+        let rect = self.selection.rect.filter(|_| !self.selection.active())?;
+        Some(self.canvas.layout(rect, &self.screens, self.editor.tool))
+    }
+    fn set_stroke_width(&mut self, width: u8) {
+        if let Some(index) = self.editor.tool.stroke_index() {
+            self.editor.set_stroke_width(width);
+            self.parameter_error = None;
+            match super::preferences::set_stroke_width(index, width) {
+                Ok(()) => self.width_modified = true,
+                Err(_) => self.parameter_error = Some("无法更新默认线宽，当前标注已保留。"),
+            }
+        }
+    }
+    fn drag_stroke_slider(&mut self) {
+        if let Some((layout, slider)) = self
+            .layout()
+            .and_then(|l| l.stroke_slider().map(|r| (l, r)))
+        {
+            let inset = 6. * layout.scale;
+            let width = stroke_control::slider_value(
+                self.pointer.x as f32,
+                slider.left as f32 + inset,
+                slider.right as f32 - inset,
+            );
+            self.set_stroke_width(width);
+        }
+    }
+    fn stroke_message(&self) -> Option<&'static str> {
+        self.parameter_error.or_else(|| {
+            (self.width_modified
+                && matches!(
+                    super::preferences::status(),
+                    super::preferences::SaveStatus::Failed(_)
+                ))
+            .then_some("默认线宽保存失败，标注已保留。可在设置中重试。")
+        })
     }
     fn window_at(&self, p: PixelPoint) -> Option<PixelRect> {
         self.windows.iter().copied().find(|r| contains(*r, p))
@@ -277,7 +336,7 @@ impl State {
             .filter(|_| !self.selection.active())
             .and_then(|r| {
                 self.canvas
-                    .layout(r, &self.screens, self.editor.tool != Tool::Select)
+                    .layout(r, &self.screens, self.editor.tool)
                     .buttons
                     .iter()
                     .position(|b| contains(*b, p))
@@ -294,7 +353,7 @@ impl State {
             || self.scale(),
             |rect| {
                 self.canvas
-                    .layout(rect, &self.screens, self.editor.tool != Tool::Select)
+                    .layout(rect, &self.screens, self.editor.tool)
                     .scale
             },
         )
@@ -316,6 +375,101 @@ impl State {
         } else {
             CanvasHit::Blank
         }
+    }
+}
+
+fn open_stroke_edit(hwnd: HWND, pointer: *mut State) -> Result<()> {
+    // SAFETY: the preview and its numeric child are owned by this UI thread.
+    // No Rust state references are held across focus changes or child messages.
+    unsafe {
+        let state = &*pointer;
+        if state.stroke_edit.is_some() {
+            return Ok(());
+        }
+        let Some(layout) = state.layout() else {
+            return Ok(());
+        };
+        let Some(bounds) = layout.stroke_edit() else {
+            return Ok(());
+        };
+        let desktop = state.canvas.bounds();
+        let width = state.editor.style().width as u8;
+        let font = CreateFontW(
+            -(14. * layout.scale).round().max(1.) as i32,
+            0,
+            0,
+            0,
+            FW_NORMAL.0 as i32,
+            0,
+            0,
+            0,
+            DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS,
+            CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY,
+            0,
+            w!("Microsoft YaHei UI"),
+        );
+        if font.is_invalid() {
+            return Err(Error::from_win32());
+        }
+        let child = match stroke_control::create_edit(hwnd, STROKE_EDIT, font) {
+            Ok(child) => child,
+            Err(error) => {
+                let _ = DeleteObject(font.into());
+                return Err(error);
+            }
+        };
+        let edit = StrokeEdit { hwnd: child, font };
+        stroke_control::set_edit(child, width);
+        let mut metrics = TEXTMETRICW::default();
+        let dc = GetDC(Some(child));
+        let text_height = if dc.is_invalid() {
+            (18. * layout.scale).round() as i32
+        } else {
+            let previous = SelectObject(dc, font.into());
+            let _ = GetTextMetricsW(dc, &mut metrics);
+            SelectObject(dc, previous);
+            ReleaseDC(Some(child), dc);
+            metrics.tmHeight.max(1)
+        };
+        let y = (bounds.top + bounds.bottom - text_height) / 2;
+        let inset = (6. * layout.scale).round() as i32;
+        SetWindowPos(
+            child,
+            None,
+            bounds.left - desktop.left + inset,
+            y - desktop.top,
+            (bounds.right - bounds.left - 2 * inset).max(1),
+            text_height,
+            SWP_SHOWWINDOW | SWP_NOZORDER | SWP_NOACTIVATE,
+        )?;
+        (*pointer).stroke_edit = Some(edit);
+        let _ = SetFocus(Some(child));
+        Ok(())
+    }
+}
+
+fn close_stroke_edit(hwnd: HWND, pointer: *mut State, commit: bool, restore_focus: bool) {
+    // SAFETY: removing the owned child from state first makes EN_KILLFOCUS re-entry harmless.
+    unsafe {
+        let Some(edit) = (*pointer).stroke_edit.take() else {
+            return;
+        };
+        if commit {
+            match stroke_control::read_edit(edit.hwnd) {
+                Ok(width) => {
+                    (*pointer).set_stroke_width(width);
+                    (*pointer).editor.finish_stroke_adjustment();
+                }
+                Err(message) => (*pointer).parameter_error = Some(message),
+            }
+        }
+        if restore_focus {
+            let _ = SetFocus(Some(hwnd));
+        }
+        drop(edit);
+        let _ = InvalidateRect(Some(hwnd), None, false);
     }
 }
 
@@ -415,6 +569,11 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             return result;
         }
         match msg {
+            WM_TIMER if wp.0 == STROKE_TIMER => {
+                let _ = KillTimer(Some(hwnd), STROKE_TIMER);
+                (*pointer).editor.finish_stroke_adjustment();
+                LRESULT(0)
+            }
             WM_TIMER if wp.0 == 5 => {
                 let result =
                     (*pointer)
@@ -465,6 +624,36 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             }
 
             WM_ERASEBKGND => LRESULT(1),
+            stroke_control::EDIT_KEY => {
+                close_stroke_edit(hwnd, pointer, wp.0 != 27, true);
+                if wp.0 == 9 {
+                    SendMessageW(hwnd, WM_KEYDOWN, Some(wp), None);
+                }
+                LRESULT(0)
+            }
+            WM_COMMAND
+                if (wp.0 & 65535) == usize::from(STROKE_EDIT)
+                    && (wp.0 >> 16) as u32 == EN_KILLFOCUS =>
+            {
+                close_stroke_edit(hwnd, pointer, true, false);
+                LRESULT(0)
+            }
+            WM_CTLCOLOREDIT => {
+                let dark = (*pointer).canvas.dark;
+                let dc = HDC(wp.0 as *mut _);
+                let rgb = |value: u32| {
+                    COLORREF(((value >> 16) & 255) | (value & 0xff00) | ((value & 255) << 16))
+                };
+                let bg = rgb(super::ui_palette::background(dark));
+                SetTextColor(dc, rgb(super::ui_palette::foreground(dark)));
+                SetBkColor(dc, bg);
+                SetDCBrushColor(dc, bg);
+                LRESULT(GetStockObject(DC_BRUSH).0 as isize)
+            }
+            super::config_store::SAVED => {
+                let _ = InvalidateRect(Some(hwnd), None, false);
+                LRESULT(0)
+            }
             WM_PAINT => {
                 let mut ps = PAINTSTRUCT::default();
                 let _ = BeginPaint(hwnd, &mut ps);
@@ -484,6 +673,8 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                             usize::MAX
                         },
                         pressed: state.down_button,
+                        editing_stroke: state.stroke_edit.is_some(),
+                        parameter_error: state.stroke_message(),
                     })
                 };
                 let _ = EndPaint(hwnd, &ps);
@@ -499,9 +690,36 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     state.pointer = mouse_position(lp, state.canvas.bounds());
                     state.selection.update(state.pointer);
                     state.editor.update(state.pointer);
+                    if state.stroke_slider {
+                        state.drag_stroke_slider();
+                    }
                     state.hover = state.window_at(state.pointer);
                 }
                 let _ = InvalidateRect(Some(hwnd), None, false);
+                LRESULT(0)
+            }
+            WM_MOUSEWHEEL => {
+                let state = &mut *pointer;
+                if state.editor.tool.stroke_index().is_none()
+                    || state.busy
+                    || state.selection.rect.is_none()
+                    || state.selection.active()
+                    || state.stroke_slider
+                    || state.stroke_edit.is_some()
+                    || state.down_button.is_some()
+                {
+                    return LRESULT(0);
+                }
+                let steps = state.wheel.steps(wp);
+                if steps != 0 {
+                    let width = stroke_control::step(state.editor.style().width as u8, steps);
+                    state.set_stroke_width(width);
+                    if !state.editor.active() && SetTimer(Some(hwnd), STROKE_TIMER, 300, None) == 0
+                    {
+                        state.editor.finish_stroke_adjustment();
+                    }
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                }
                 LRESULT(0)
             }
             WM_LBUTTONDOWN | WM_LBUTTONDBLCLK => {
@@ -513,7 +731,11 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     super::show_error(&error.to_string());
                     return LRESULT(0);
                 }
+                let _ = KillTimer(Some(hwnd), STROKE_TIMER);
+                (*pointer).editor.finish_stroke_adjustment();
+                close_stroke_edit(hwnd, pointer, true, true);
                 let mut request_text = None;
+                let mut request_stroke = false;
                 let mut error = None;
                 {
                     let state = &mut *pointer;
@@ -524,7 +746,14 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     if let Some(parameter) = state.parameter_at(state.pointer) {
                         state.parameter_down = true;
                         state.focus = 11 + parameter;
-                        if let Err(message) = state.apply_parameter(parameter) {
+                        if parameter >= 8 && state.editor.tool.stroke_index().is_some() {
+                            if parameter == 8 {
+                                state.stroke_slider = true;
+                                state.drag_stroke_slider();
+                            } else {
+                                request_stroke = true;
+                            }
+                        } else if let Err(message) = state.apply_parameter(parameter) {
                             error = Some(message);
                         }
                     } else if let Some(button) = state.button_at(state.pointer) {
@@ -532,6 +761,12 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                         if state.editor.enabled(button) {
                             state.focus = button;
                         }
+                    } else if state
+                        .layout()
+                        .and_then(|l| l.parameters)
+                        .is_some_and(|r| contains(r, state.pointer))
+                    {
+                        state.parameter_down = true;
                     } else {
                         state.focus = usize::MAX;
                         let scale = state.hit_scale();
@@ -558,9 +793,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                                     .flatten()
                                 {
                                     request_text = Some(Some(index));
-                                } else if let Err(message) =
-                                    state.editor.begin_at(p, state.scale(), Some(hit))
-                                {
+                                } else if let Err(message) = state.editor.begin_at(p, Some(hit)) {
                                     error = Some(message);
                                 }
                             }
@@ -573,15 +806,21 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                                 } else if state.selection.rect.is_some_and(|r| contains(r, p)) {
                                     if state.editor.tool == Tool::Text {
                                         request_text = Some(None);
-                                    } else if let Err(message) =
-                                        state.editor.begin_at(p, state.scale(), None)
-                                    {
+                                    } else if let Err(message) = state.editor.begin_at(p, None) {
                                         error = Some(message);
                                     }
                                 }
                             }
                         }
                     }
+                }
+                if request_stroke {
+                    (*pointer).parameter_down = false;
+                    if let Err(error) = open_stroke_edit(hwnd, pointer) {
+                        super::show_error(&error.to_string());
+                    }
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                    return LRESULT(0);
                 }
                 if let Some(index) = request_text {
                     if let Err(e) = start_text(hwnd, pointer, index) {
@@ -611,7 +850,11 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                             false
                         }
                     } else {
-                        if state.editor.active() {
+                        if state.stroke_slider {
+                            state.drag_stroke_slider();
+                            state.editor.finish_stroke_adjustment();
+                            state.stroke_slider = false;
+                        } else if state.editor.active() {
                             state.editor.finish(state.pointer);
                         } else if !state.parameter_down {
                             state.selection.finish(state.pointer, state.pressed_window);
@@ -642,6 +885,11 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     let state = &mut *pointer;
                     state.selection.cancel_drag();
                     state.editor.cancel();
+                    if state.stroke_slider {
+                        state.editor.finish_stroke_adjustment();
+                        state.stroke_slider = false;
+                    }
+                    state.parameter_down = false;
                     state.down_button = None;
                 }
                 let _ = InvalidateRect(Some(hwnd), None, false);
@@ -659,7 +907,11 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     match wp.0 as u32 {
                         27 => {
                             release = true;
-                            if state.down_button.take().is_some() {
+                            if state.stroke_slider {
+                                state.editor.finish_stroke_adjustment();
+                                state.stroke_slider = false;
+                                false
+                            } else if state.down_button.take().is_some() {
                                 false
                             } else {
                                 !state.editor.cancel() && !state.selection.cancel_drag()
@@ -707,7 +959,29 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                                 && state.keyboard_focus
                                 && state.focus < 22 =>
                         {
-                            state.activate(state.focus)
+                            if state.editor.tool.stroke_index().is_some() && state.focus == 20 {
+                                if let Err(error) = open_stroke_edit(hwnd, pointer) {
+                                    super::show_error(&error.to_string());
+                                }
+                                false
+                            } else {
+                                state.activate(state.focus)
+                            }
+                        }
+                        37..=40
+                            if state.keyboard_focus
+                                && state.focus == 19
+                                && state.editor.tool.stroke_index().is_some() =>
+                        {
+                            let step = if matches!(wp.0, 38 | 39) { 1 } else { -1 };
+                            state.set_stroke_width(stroke_control::step(
+                                state.editor.style().width as u8,
+                                step,
+                            ));
+                            if SetTimer(Some(hwnd), STROKE_TIMER, 300, None) == 0 {
+                                state.editor.finish_stroke_adjustment();
+                            }
+                            false
                         }
                         13 => {
                             state.pending_output = Some(9);
@@ -761,7 +1035,11 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     return LRESULT(1);
                 }
                 let p = position().unwrap_or(state.pointer);
-                let cursor = if state.button_at(p).is_some() || state.parameter_at(p).is_some() {
+                let cursor = if state.editor.tool.stroke_index().is_some()
+                    && state.parameter_at(p) == Some(9)
+                {
+                    IDC_IBEAM
+                } else if state.button_at(p).is_some() || state.parameter_at(p).is_some() {
                     IDC_ARROW
                 } else {
                     let space = state.text_input.is_none() && GetKeyState(VK_SPACE.0 as i32) < 0;
@@ -936,7 +1214,7 @@ fn start_text_rotation(hwnd: HWND, pointer: *mut State, p: PixelPoint) -> Result
             if let Some(index) = state.editor.selected {
                 state
                     .editor
-                    .begin_at(p, state.hit_scale(), Some(ObjectHit::Rotate(index)))
+                    .begin_at(p, Some(ObjectHit::Rotate(index)))
                     .map_err(|message| Error::new(E_FAIL, message))?
             } else {
                 false
@@ -1312,6 +1590,124 @@ mod tests {
             (*p).selection.rect = Some(bounds);
             (*p).editor = editor;
             (preview, p)
+        }
+    }
+    #[test]
+    fn stroke_controls_route_native_input_and_render_exact_pixels() {
+        use super::super::{
+            config_store::Disk,
+            preferences::{self, SaveStatus},
+        };
+        use std::os::windows::fs::OpenOptionsExt;
+
+        fn wait_status() -> SaveStatus {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            loop {
+                preferences::poll();
+                let status = preferences::status();
+                if !matches!(status, SaveStatus::Saving) {
+                    return status;
+                }
+                assert!(Instant::now() < deadline, "stroke settings save timed out");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
+        super::super::tests::graphics_runtime();
+        let _com = composition::Apartment::enter().unwrap();
+        let path =
+            std::env::temp_dir().join(format!("kiki-stroke-test-{}.ini", std::process::id()));
+        std::fs::write(&path, "version=1\nstroke_width=8\nfirst_tip_seen=true\n").unwrap();
+        // SAFETY: all HWNDs and messages are local to this test thread; only its own config
+        // file is locked, and no borrow of Preview state crosses a window call.
+        unsafe {
+            register(GetModuleHandleW(None).unwrap().into()).unwrap();
+            let (preview, p) = setup();
+            let hwnd = preview.hwnd().unwrap();
+            let (guard, warning) = preferences::initialize_at(hwnd, path.clone()).unwrap();
+            assert!(warning.is_none());
+            assert!(matches!(wait_status(), SaveStatus::Saved));
+            assert_eq!(Disk::load(path.clone()).config.stroke_widths, [8; 3]);
+            let original = std::fs::read(&path).unwrap();
+            let lock = std::fs::OpenOptions::new()
+                .read(true)
+                .share_mode(0)
+                .open(&path)
+                .unwrap();
+
+            let selection = (*p).selection.rect.unwrap();
+            let point = |x, y| PixelPoint {
+                x: selection.left + x,
+                y: selection.top + y,
+            };
+            let wheel = |amount: i16| {
+                SendMessageW(
+                    hwnd,
+                    WM_MOUSEWHEEL,
+                    Some(WPARAM(usize::from(amount as u16) << 16)),
+                    None,
+                );
+            };
+            (*p).editor = Editor::default();
+            for (tool, y, steps, width) in [
+                (Tool::Rectangle, 50, 11, 14.),
+                (Tool::Arrow, 160, 19, 22.),
+                (Tool::Pen, 260, 15, 18.),
+            ] {
+                (*p).activate(tool.button());
+                (*p).editor.begin_at(point(40, y), None).unwrap();
+                (*p).editor.update(point(150, y));
+                wheel(60);
+                assert_eq!((*p).editor.style().width, 3.);
+                wheel(60);
+                wheel(120 * (steps - 1));
+                (*p).editor
+                    .finish(point(390, if tool == Tool::Rectangle { y + 60 } else { y }));
+                assert_eq!((*p).editor.style().width, width);
+            }
+            assert_eq!(preferences::current().stroke_widths, [14, 22, 18]);
+            assert!(matches!(wait_status(), SaveStatus::Failed(_)));
+            assert!((*p).stroke_message().unwrap().contains("保存失败"));
+            drop(lock);
+            assert_eq!(std::fs::read(&path).unwrap(), original);
+
+            for _ in 0..100 {
+                wheel(120);
+                wheel(-120);
+            }
+            wheel(120);
+            wheel(120);
+            SendMessageW(hwnd, WM_TIMER, Some(WPARAM(STROKE_TIMER)), None);
+            assert_eq!((*p).editor.style().width, 20.);
+            (*p).editor.undo();
+            assert_eq!((*p).editor.style().width, 18.);
+            assert_eq!(preferences::current().stroke_widths, [14, 22, 20]);
+            (*p).editor.redo();
+            assert_eq!((*p).editor.style().width, 20.);
+            (*p).editor.undo();
+            open_stroke_edit(hwnd, p).unwrap();
+            let edit = (*p).stroke_edit.as_ref().unwrap().hwnd;
+            SetWindowTextW(edit, w!("65")).unwrap();
+            SendMessageW(edit, WM_KEYDOWN, Some(WPARAM(13)), None);
+            assert!((*p).stroke_edit.is_none());
+            assert!((*p).stroke_message().unwrap().contains("1–64"));
+            assert_eq!((*p).editor.style().width, 18.);
+            assert!(matches!(wait_status(), SaveStatus::Saved));
+            assert_eq!(Disk::load(path.clone()).config.stroke_widths, [14, 22, 20]);
+
+            let image =
+                composition::render(&(*p).canvas.source(), selection, &(*p).editor).unwrap();
+            let stride = image.stride() as usize;
+            let measure = |center: usize| {
+                (center - 20..center + 20)
+                    .filter(|y| {
+                        let offset = y * stride + 130 * 4;
+                        image.pixels()[offset..offset + 4] == [64, 59, 255, 255]
+                    })
+                    .count()
+            };
+            assert_eq!([measure(50), measure(160), measure(260)], [14, 22, 18]);
+            drop(guard);
+            std::fs::remove_file(path).unwrap();
         }
     }
     #[test]

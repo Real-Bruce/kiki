@@ -11,6 +11,7 @@ use windows::{
     core::{Error, Result},
 };
 pub const CHANGED: u32 = WM_APP + 61;
+pub const STROKE_CHANGED: u32 = WM_APP + 65;
 pub const OPEN_SETTINGS: u32 = WM_APP + 70;
 pub const CAPTURE: u32 = WM_APP + 71;
 pub const FULLSCREEN: u32 = WM_APP + 72;
@@ -51,12 +52,15 @@ pub(super) fn initialize_at(owner: HWND, path: PathBuf) -> Result<(Guard, Option
     let loaded = Disk::load(path.clone());
     let mut config = loaded.config;
     let warning = loaded.warning;
+    let writer = Writer::new(loaded.disk, Some(owner)).map_err(|e| Error::new(E_FAIL, e))?;
+    if loaded.migrate {
+        writer.request(0, config.clone());
+    }
     if std::env::args_os().any(|arg| arg == "--theme=dark") {
         config.theme = Theme::Dark;
     } else if std::env::args_os().any(|arg| arg == "--theme=light") {
         config.theme = Theme::Light;
     }
-    let writer = Writer::new(loaded.disk, Some(owner)).map_err(|e| Error::new(E_FAIL, e))?;
     let mut registration = Registration::new(owner);
     let _ = registration.replace(config.hotkey);
     SESSION.with_borrow_mut(|slot| {
@@ -64,7 +68,11 @@ pub(super) fn initialize_at(owner: HWND, path: PathBuf) -> Result<(Guard, Option
             config,
             path,
             revision: 0,
-            status: SaveStatus::Ready,
+            status: if loaded.migrate {
+                SaveStatus::Saving
+            } else {
+                SaveStatus::Ready
+            },
             writer,
             registration,
             owner,
@@ -137,16 +145,22 @@ pub fn matches(id: usize) -> bool {
     SESSION.with_borrow(|slot| slot.as_ref().is_some_and(|s| s.registration.matches(id)))
 }
 pub fn update(config: Config) -> std::result::Result<(), String> {
-    update_with_shortcut_retry(config, false)
+    update_config(config, false, CHANGED)
+}
+
+pub fn set_stroke_width(index: usize, width: u8) -> std::result::Result<(), String> {
+    let mut config = current();
+    config.stroke_widths[index] = width;
+    update_config(config, false, STROKE_CHANGED)
 }
 
 pub fn set_shortcut(shortcut: crate::core::config::Hotkey) -> std::result::Result<(), String> {
     let mut config = current();
     config.hotkey = shortcut;
-    update_with_shortcut_retry(config, true)
+    update_config(config, true, CHANGED)
 }
 
-fn update_with_shortcut_retry(config: Config, retry: bool) -> std::result::Result<(), String> {
+fn update_config(config: Config, retry: bool, message: u32) -> std::result::Result<(), String> {
     config.validate()?;
     let owner = SESSION.with_borrow_mut(|slot| -> std::result::Result<Option<HWND>, String> {
         let session = slot.as_mut().ok_or("设置管理器尚未启动")?;
@@ -185,7 +199,7 @@ fn update_with_shortcut_retry(config: Config, retry: bool) -> std::result::Resul
         Ok(Some(session.owner))
     })?;
     if let Some(owner) = owner {
-        notify(owner);
+        notify(owner, message);
     }
     Ok(())
 }
@@ -212,7 +226,7 @@ pub fn retry() {
         Some(session.owner)
     });
     if let Some(owner) = owner {
-        notify(owner);
+        notify(owner, CHANGED);
     }
 }
 pub fn poll() {
@@ -246,9 +260,9 @@ pub fn remember_directory(path: &std::path::Path) {
         let _ = update(config);
     }
 }
-fn notify(owner: HWND) {
+fn notify(owner: HWND, message: u32) {
     // SAFETY: value-only notification to the UI host, whose lifetime encloses this session.
     unsafe {
-        let _ = PostMessageW(Some(owner), CHANGED, WPARAM(0), LPARAM(0));
+        let _ = PostMessageW(Some(owner), message, WPARAM(0), LPARAM(0));
     }
 }

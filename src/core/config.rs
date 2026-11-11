@@ -1,5 +1,5 @@
 //! Versioned, bounded preferences without platform resources or a serialization runtime.
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Theme {
     #[default]
@@ -100,6 +100,21 @@ impl Hotkey {
         Ok(hotkey)
     }
 }
+pub const CONFIG_VERSION: u32 = 2;
+pub const MIN_STROKE_WIDTH: u8 = 1;
+pub const MAX_STROKE_WIDTH: u8 = 64;
+pub const DEFAULT_STROKE_WIDTH: u8 = 3;
+const STROKE_KEYS: [&str; 3] = ["rectangle_width", "arrow_width", "pen_width"];
+
+pub fn parse_stroke_width(value: &str) -> Result<u8, &'static str> {
+    value
+        .parse::<u8>()
+        .ok()
+        .filter(|width| (MIN_STROKE_WIDTH..=MAX_STROKE_WIDTH).contains(width))
+        .filter(|_| value.bytes().all(|byte| byte.is_ascii_digit()))
+        .ok_or("请输入 1–64 之间的整数线宽（px）。")
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
     pub theme: Theme,
@@ -107,9 +122,10 @@ pub struct Config {
     pub show_hints: bool,
     pub first_tip_seen: bool,
     pub color: [u8; 3],
-    pub stroke_width: u8,
+    pub stroke_widths: [u8; 3],
     pub text_size: u8,
     pub last_directory: Option<String>,
+    pub extra: BTreeMap<String, String>,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -119,16 +135,22 @@ impl Default for Config {
             show_hints: true,
             first_tip_seen: false,
             color: [255, 59, 64],
-            stroke_width: 3,
+            stroke_widths: [DEFAULT_STROKE_WIDTH; 3],
             text_size: 24,
             last_directory: None,
+            extra: BTreeMap::new(),
         }
     }
 }
 impl Config {
     pub fn validate(&self) -> Result<(), String> {
         self.hotkey.validate()?;
-        if !(1..=12).contains(&self.stroke_width) || !(12..=72).contains(&self.text_size) {
+        if self
+            .stroke_widths
+            .iter()
+            .any(|width| !(MIN_STROKE_WIDTH..=MAX_STROKE_WIDTH).contains(width))
+            || !(12..=72).contains(&self.text_size)
+        {
             return Err("工具默认线宽或字号超出支持范围".into());
         }
         if self.last_directory.as_ref().is_some_and(|path| {
@@ -140,8 +162,8 @@ impl Config {
     }
     pub fn encode(&self) -> Result<String, String> {
         self.validate()?;
-        Ok(format!(
-            "version=1\ntheme={}\nhotkey={}\nshow_hints={}\nfirst_tip_seen={}\ncolor={:02X}{:02X}{:02X}\nstroke_width={}\ntext_size={}\nlast_directory={}\n",
+        let mut text = format!(
+            "version={CONFIG_VERSION}\ntheme={}\nhotkey={}\nshow_hints={}\nfirst_tip_seen={}\ncolor={:02X}{:02X}{:02X}\ntext_size={}\nlast_directory={}\n",
             match self.theme {
                 Theme::System => "system",
                 Theme::Light => "light",
@@ -153,18 +175,30 @@ impl Config {
             self.color[0],
             self.color[1],
             self.color[2],
-            self.stroke_width,
             self.text_size,
             self.last_directory.as_deref().unwrap_or("")
-        ))
+        );
+        use std::fmt::Write as _;
+        for (key, value) in STROKE_KEYS.into_iter().zip(self.stroke_widths) {
+            let _ = writeln!(text, "{key}={value}");
+        }
+        for (key, value) in &self.extra {
+            let _ = writeln!(text, "{key}={value}");
+        }
+        Ok(text)
     }
-    pub fn decode(text: &str) -> Result<Self, String> {
+    pub fn decode(text: &str) -> Result<(Self, bool), String> {
         if text.len() > 65536 {
             return Err("配置文件超过 64 KiB 上限".into());
         }
         let mut config = Self::default();
         let mut seen = BTreeSet::new();
-        let mut version = None;
+        let version = text.lines().find_map(|line| line.strip_prefix("version="));
+        let legacy = match version {
+            Some("1") => true,
+            Some("2") => false,
+            _ => return Err("配置版本不受支持".into()),
+        };
         for line in text.lines() {
             if line.is_empty() || line.starts_with('#') {
                 continue;
@@ -174,7 +208,7 @@ impl Config {
                 return Err(format!("配置项重复：{key}"));
             }
             match key {
-                "version" => version = Some(value),
+                "version" => {}
                 "theme" => {
                     config.theme = match value {
                         "system" => Theme::System,
@@ -197,21 +231,30 @@ impl Config {
                             .map_err(|_| "默认颜色无效")?;
                     }
                 }
-                "stroke_width" => {
-                    config.stroke_width = value.parse().map_err(|_| "默认线宽无效")?
+                "stroke_width" if legacy => {
+                    let width = value.parse::<u8>().map_err(|_| "默认线宽无效")?;
+                    if !(1..=12).contains(&width) {
+                        return Err("旧版默认线宽超出支持范围".into());
+                    }
+                    config.stroke_widths = [width; 3];
                 }
                 "text_size" => config.text_size = value.parse().map_err(|_| "默认字号无效")?,
                 "last_directory" => {
                     config.last_directory = (!value.is_empty()).then(|| value.to_string())
                 }
-                _ => {}
+                _ => {
+                    if let Some(index) = STROKE_KEYS.iter().position(|name| *name == key) {
+                        if !legacy {
+                            config.stroke_widths[index] = parse_stroke_width(value)?;
+                        }
+                    } else {
+                        config.extra.insert(key.to_owned(), value.to_owned());
+                    }
+                }
             }
         }
-        if version != Some("1") {
-            return Err("配置版本不受支持".into());
-        }
         config.validate()?;
-        Ok(config)
+        Ok((config, legacy))
     }
 }
 #[cfg(test)]
@@ -230,19 +273,53 @@ mod tests {
             last_directory: Some("F:\\截图资料\\a=b 项目".into()),
             ..Config::default()
         };
-        assert_eq!(Config::decode(&config.encode().unwrap()).unwrap(), config);
+        assert_eq!(
+            Config::decode(&config.encode().unwrap()).unwrap(),
+            (config.clone(), false)
+        );
         assert_eq!(config.hotkey.label(), "Ctrl+Shift+F10");
-        assert_eq!(Config::decode("version=1\n").unwrap(), Config::default());
+        assert_eq!(
+            Config::decode("version=1\n").unwrap(),
+            (Config::default(), true)
+        );
+    }
+    #[test]
+    fn migration_preserves_v1_values_and_v2_unknown_fields() {
+        let (mut config, legacy) = Config::decode(
+            "theme=dark\nversion=1\nstroke_width=8\ntext_size=32\nshow_hints=false\ncorner_radius=24\nfuture=a=b",
+        ).unwrap();
+        assert!(legacy);
+        assert_eq!(config.stroke_widths, [8; 3]);
+        assert_eq!(config.theme, Theme::Dark);
+        assert_eq!(config.text_size, 32);
+        assert!(!config.show_hints);
+        config.stroke_widths = [1, 23, 64];
+        let encoded = config.encode().unwrap();
+        assert!(encoded.contains("corner_radius=24\n"));
+        assert!(encoded.contains("future=a=b\n"));
+        assert_eq!(Config::decode(&encoded).unwrap(), (config, false));
+        assert_eq!(
+            Config::decode("version=2\npen_width=13")
+                .unwrap()
+                .0
+                .stroke_widths,
+            [3, 3, 13]
+        );
+        for value in ["", "0", "65", "+3", "3.0", "x", "255"] {
+            assert!(parse_stroke_width(value).is_err(), "{value}");
+        }
     }
     #[test]
     fn invalid_preferences_never_partially_apply() {
         for text in [
             "theme=dark",
-            "version=2",
+            "version=3",
             "version=1\nshow_hints=maybe",
             "version=1\ncolor=🚀xx",
             "version=1\ntext_size=255",
             "version=1\nstroke_width=0",
+            "version=1\nstroke_width=13",
+            "version=2\npen_width=65",
             "version=1\nhotkey=Shift+A",
             "version=1\nhotkey=Ctrl+Ctrl+A",
             "version=1\nhotkey=Ctrl+F25",

@@ -5,12 +5,14 @@ use super::{
     selection_render::system_dark,
     settings_render::{self as appearance, Canvas},
     startup,
+    stroke_control::{self, Wheel},
 };
 use crate::core::config::{Config, Hotkey, Theme};
 #[path = "settings_layout.rs"]
 mod settings_layout;
 use settings_layout::{
-    FOOTER, HEADER, Item, Page, Rect, START_CAPTURE, STROKE_SIZES, TEXT_SIZES, Tone,
+    FOOTER, HEADER, Item, Page, Rect, START_CAPTURE, STROKE_EDIT, STROKE_LABELS, STROKE_SLIDER,
+    TEXT_SIZES, Tone,
 };
 use std::{cell::Cell, rc::Rc};
 use windows::{
@@ -47,6 +49,7 @@ struct State {
     icon_font: HFONT,
     brush: HBRUSH,
     suppress: bool,
+    stroke_wheel: (Option<HWND>, Wheel),
     error: Option<String>,
     startup: std::result::Result<startup::State, String>,
 }
@@ -156,6 +159,7 @@ fn open_impl(visible: bool) -> Result<()> {
             icon_font: font_for_icons(dpi),
             brush: CreateSolidBrush(rgb(appearance::background(system_dark()))),
             suppress: true,
+            stroke_wheel: (None, Wheel::default()),
             error: None,
             startup: startup::state().map_err(|e| e.to_string()),
         });
@@ -356,10 +360,40 @@ pub fn refresh() {
             let old = std::mem::replace(&mut (*p).brush, brush);
             let _ = DeleteObject(old.into());
             (*p).suppress = false;
+            refresh_strokes();
             layout(hwnd);
             let _ = InvalidateRect(Some(hwnd), None, true);
         }
     }
+}
+
+pub fn refresh_strokes() {
+    let Some(hwnd) = WINDOW.get() else { return };
+    // SAFETY: only copied settings-child handles are used across window calls.
+    unsafe {
+        let p = pointer(hwnd);
+        if p.is_null() {
+            return;
+        }
+        let widths = preferences::current().stroke_widths;
+        let controls: Vec<_> = (*p).controls.iter().map(|c| (c.hwnd, c.id)).collect();
+        for (child, id) in controls {
+            if let Some(index) = stroke_index(id, STROKE_EDIT) {
+                if GetFocus() != child {
+                    stroke_control::set_edit(child, widths[index]);
+                }
+            } else if stroke_index(id, STROKE_SLIDER).is_some() {
+                let _ = InvalidateRect(Some(child), None, false);
+            }
+        }
+        let _ = InvalidateRect(Some(hwnd), None, false);
+    }
+}
+
+fn stroke_index(id: u16, first: u16) -> Option<usize> {
+    (first..first + 3)
+        .contains(&id)
+        .then(|| usize::from(id - first))
 }
 unsafe fn pointer(hwnd: HWND) -> *mut State {
     unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut State }
@@ -409,10 +443,7 @@ fn caption(id: u16, cfg: &Config, start: &std::result::Result<startup::State, St
                 if cfg.color == COLORS[i] { " ✓" } else { "" }
             )
         }
-        420..=423 => {
-            let n = STROKE_SIZES[(id - 420) as usize];
-            format!("{n} px{}", if cfg.stroke_width == n { " ✓" } else { "" })
-        }
+        420..=422 => STROKE_LABELS[usize::from(id - STROKE_SLIDER)].into(),
         430..=433 => {
             let n = TEXT_SIZES[(id - 430) as usize];
             format!("{n} px{}", if cfg.text_size == n { " ✓" } else { "" })
@@ -458,10 +489,16 @@ fn create_controls(hwnd: HWND) -> Result<()> {
                 800,
             ])
             .chain(410..=417)
-            .chain(420..=423)
+            .chain(STROKE_SLIDER..STROKE_SLIDER + 3)
+            .chain(STROKE_EDIT..STROKE_EDIT + 3)
             .chain(430..=433)
             .chain(600..=602);
         for id in ids {
+            if stroke_index(id, STROKE_EDIT).is_some() {
+                let child = stroke_control::create_edit(hwnd, id, (*p).font)?;
+                (*p).controls.push(Control { hwnd: child, id });
+                continue;
+            }
             let (class, style) = match id {
                 // SS_OWNERDRAW (WinUser.h) is not exported by the current bindings.
                 BRAND => (w!("STATIC"), WINDOW_STYLE(0x000d)),
@@ -485,7 +522,9 @@ fn create_controls(hwnd: HWND) -> Result<()> {
             SendMessageW(child, WM_SETFONT, Some(WPARAM((*p).font.0 as usize)), None);
             if id == 300 {
                 hotkey::theme_control(child)?;
-            } else if id != BRAND && !SetWindowSubclass(child, Some(button_proc), 1, 0).as_bool() {
+            } else if id != BRAND
+                && !SetWindowSubclass(child, Some(button_proc), 1, usize::from(id)).as_bool()
+            {
                 return Err(windows::core::Error::from_win32());
             }
             (*p).controls.push(Control { hwnd: child, id });
@@ -564,7 +603,19 @@ fn layout(hwnd: HWND) {
                     _ => None,
                 }),
             };
-            if let Some(Rect { x, y, w, h }) = bounds {
+            if let Some(Rect {
+                mut x,
+                mut y,
+                mut w,
+                mut h,
+            }) = bounds
+            {
+                if stroke_index(id, STROKE_EDIT).is_some() {
+                    x += 5;
+                    w -= 10;
+                    y += 4;
+                    h -= 8;
+                }
                 let _ = SetWindowPos(
                     child,
                     None,
@@ -646,6 +697,27 @@ fn paint(hwnd: HWND, p: *mut State) -> Result<()> {
                     c.value(label, r.x as f32, r.y as f32 - offset, r.w as f32, sub)
                 }
                 Item::Divider(y) => c.fill(x, *y as f32 - offset, w, 1., appearance::divider(dark)),
+                Item::Control(id, r)
+                    if stroke_index(*id, STROKE_EDIT).is_some()
+                        && r.y - state.scroll >= HEADER
+                        && r.y + r.h - state.scroll <= height as i32 - FOOTER =>
+                {
+                    let focused = state
+                        .controls
+                        .iter()
+                        .any(|c| c.id == *id && c.hwnd == GetFocus());
+                    c.input_frame(
+                        r.x as f32,
+                        r.y as f32 - offset,
+                        r.w as f32,
+                        r.h as f32,
+                        if focused {
+                            appearance::accent(dark)
+                        } else {
+                            appearance::divider(dark)
+                        },
+                    );
+                }
                 Item::Control(..) => {}
             }
         }
@@ -753,10 +825,6 @@ fn action(hwnd: HWND, id: u16) {
                 cfg.color = COLORS[(id - 410) as usize];
                 preferences::update(cfg)
             }
-            420..=423 => {
-                cfg.stroke_width = STROKE_SIZES[(id - 420) as usize];
-                preferences::update(cfg)
-            }
             430..=433 => {
                 cfg.text_size = TEXT_SIZES[(id - 430) as usize];
                 preferences::update(cfg)
@@ -794,20 +862,96 @@ fn action(hwnd: HWND, id: u16) {
         }
     }
 }
+fn commit_stroke_edit(parent: HWND, edit: HWND, index: usize, commit: bool) {
+    // SAFETY: the settings window owns the edit and the preference change is UI-thread-only.
+    unsafe {
+        let p = pointer(parent);
+        if p.is_null() || (*p).suppress {
+            return;
+        }
+        if commit {
+            (*p).error = stroke_control::read_edit(edit)
+                .map_err(str::to_owned)
+                .and_then(|width| preferences::set_stroke_width(index, width))
+                .err();
+        }
+        stroke_control::set_edit(edit, preferences::current().stroke_widths[index]);
+        let _ = InvalidateRect(Some(parent), None, false);
+    }
+}
+
+fn set_stroke_slider(parent: HWND, index: usize, width: u8) {
+    // SAFETY: this function is called by live settings controls on the window thread.
+    unsafe {
+        let p = pointer(parent);
+        if !p.is_null() {
+            (*p).error = preferences::set_stroke_width(index, width).err();
+        }
+    }
+    refresh_strokes();
+}
+
+fn slider_input(
+    hwnd: HWND,
+    parent: HWND,
+    msg: u32,
+    wp: WPARAM,
+    lp: LPARAM,
+    index: usize,
+) -> Option<LRESULT> {
+    // SAFETY: the button, its parent and mouse capture belong to the current window thread.
+    unsafe {
+        match msg {
+            WM_GETDLGCODE => return Some(LRESULT(DLGC_WANTARROWS as isize)),
+            WM_KEYDOWN => {
+                let width = preferences::current().stroke_widths[index];
+                let next = match wp.0 {
+                    37 | 40 => stroke_control::step(width, -1),
+                    38 | 39 => stroke_control::step(width, 1),
+                    35 => crate::core::config::MAX_STROKE_WIDTH,
+                    36 => crate::core::config::MIN_STROKE_WIDTH,
+                    _ => return None,
+                };
+                set_stroke_slider(parent, index, next);
+                return Some(LRESULT(0));
+            }
+            WM_MOUSEWHEEL => return Some(SendMessageW(parent, msg, Some(wp), Some(lp))),
+            WM_LBUTTONDOWN | WM_LBUTTONDBLCLK => {
+                let _ = SetFocus(Some(hwnd));
+                SetCapture(hwnd);
+            }
+            WM_MOUSEMOVE | WM_LBUTTONUP if GetCapture() == hwnd => {}
+            _ => return None,
+        }
+        let mut rect = RECT::default();
+        if GetClientRect(hwnd, &mut rect).is_ok() {
+            let inset = (6. * GetDpiForWindow(hwnd) as f32 / 96.).round();
+            let width = stroke_control::slider_value(
+                f32::from(lp.0 as i16),
+                inset,
+                rect.right as f32 - inset,
+            );
+            set_stroke_slider(parent, index, width);
+        }
+        if msg == WM_LBUTTONUP {
+            let _ = ReleaseCapture();
+        }
+        Some(LRESULT(0))
+    }
+}
+
 unsafe extern "system" fn button_proc(
     hwnd: HWND,
     msg: u32,
     wp: WPARAM,
     lp: LPARAM,
     _: usize,
-    _: usize,
+    id: usize,
 ) -> LRESULT {
     // SAFETY: the subclass belongs to a live settings child. The parent owns the state and
     // removes its pointer before freeing it. This callback does not retain a state reference.
     unsafe {
-        if matches!(msg, WM_MOUSEMOVE | WM_MOUSELEAVE | WM_LBUTTONDOWN)
-            && let Ok(parent) = GetParent(hwnd)
-        {
+        if let Ok(parent) = GetParent(hwnd) {
             let p = pointer(parent);
             if !p.is_null() {
                 if msg == WM_LBUTTONDOWN {
@@ -833,6 +977,11 @@ unsafe extern "system" fn button_proc(
                     (*p).hover = None;
                     let _ = InvalidateRect(Some(hwnd), None, false);
                 }
+            }
+            if let Some(index) = stroke_index(id as u16, STROKE_SLIDER)
+                && let Some(result) = slider_input(hwnd, parent, msg, wp, lp, index)
+            {
+                return result;
             }
         }
         if msg == WM_NCDESTROY {
@@ -940,10 +1089,37 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                     };
                     labels.push((state.icon_font, "\u{e73e}".to_owned(), r, mark, DT_CENTER));
                 }
+            } else if let Some(index) = stroke_index(id, STROKE_SLIDER) {
+                let left = r.left + dip(6);
+                let right = r.right - dip(6);
+                let y = (r.top + r.bottom) / 2;
+                let radius = dip(5).max(1);
+                let x = left
+                    + (stroke_control::fraction(cfg.stroke_widths[index]) * (right - left) as f32)
+                        .round() as i32;
+                let track = RECT {
+                    left,
+                    top: y - dip(1),
+                    right,
+                    bottom: y + dip(2),
+                };
+                shapes.rounded(track, dip(3), appearance::divider(dark));
+                if x > left {
+                    shapes.rounded(RECT { right: x, ..track }, dip(3), accent);
+                }
+                shapes.rounded(
+                    RECT {
+                        left: x - radius,
+                        top: y - radius,
+                        right: x + radius,
+                        bottom: y + radius,
+                    },
+                    2 * radius,
+                    accent,
+                );
             } else {
                 let selected = match id {
                     100..=105 => usize::from(id - 100) == state.page,
-                    420..=423 => cfg.stroke_width == STROKE_SIZES[usize::from(id - 420)],
                     430..=433 => cfg.text_size == TEXT_SIZES[usize::from(id - 430)],
                     600..=602 => {
                         cfg.theme
@@ -1005,26 +1181,6 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                             shapes.rounded(mark, dip(3), accent);
                         }
                         PAGES[usize::from(id - 100)].to_owned()
-                    }
-                    420..=423 => {
-                        let n = STROKE_SIZES[usize::from(id - 420)];
-                        let h = dip(i32::from(n)).max(1);
-                        let y = (r.top + r.bottom - h) / 2;
-                        let x = r.left + dip(7);
-                        if r.right - r.left >= dip(56) {
-                            shapes.rounded(
-                                RECT {
-                                    left: x,
-                                    top: y,
-                                    right: x + dip(16),
-                                    bottom: y + h,
-                                },
-                                h,
-                                text_color,
-                            );
-                            label_bounds.left += dip(22);
-                        }
-                        format!("{n} px")
                     }
                     430..=433 => format!("{} px", TEXT_SIZES[usize::from(id - 430)]),
                     600..=602 => {
@@ -1268,8 +1424,24 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             WM_COMMAND => {
                 let id = (wp.0 & 65535) as u16;
                 let code = (wp.0 >> 16) as u32;
-                if code == BN_CLICKED || id == 300 && code == EN_CHANGE {
+                if let Some(index) = stroke_index(id, STROKE_EDIT) {
+                    let child = HWND(lp.0 as *mut _);
+                    if code == EN_KILLFOCUS && !child.is_invalid() {
+                        commit_stroke_edit(hwnd, child, index, true);
+                    } else if code == EN_SETFOCUS {
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                    }
+                } else if code == BN_CLICKED || id == 300 && code == EN_CHANGE {
                     action(hwnd, id);
+                }
+                LRESULT(0)
+            }
+            stroke_control::EDIT_KEY => {
+                let edit = HWND(lp.0 as *mut _);
+                let id = GetDlgCtrlID(edit) as u16;
+                if let Some(index) = stroke_index(id, STROKE_EDIT) {
+                    commit_stroke_edit(hwnd, edit, index, wp.0 != 27);
+                    SendMessageW(edit, EM_SETSEL, Some(WPARAM(0)), Some(LPARAM(-1)));
                 }
                 LRESULT(0)
             }
@@ -1313,6 +1485,42 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 LRESULT(0)
             }
             WM_MOUSEWHEEL => {
+                let focus = GetFocus();
+                let mut point = POINT::default();
+                let hovered = GetCursorPos(&mut point)
+                    .is_ok()
+                    .then(|| WindowFromPoint(point));
+                let id = if hovered == Some(focus) && GetAncestor(focus, GA_ROOT) == hwnd {
+                    GetDlgCtrlID(focus) as u16
+                } else {
+                    0
+                };
+                let edit = stroke_index(id, STROKE_EDIT);
+                if let Some(index) = edit.or_else(|| stroke_index(id, STROKE_SLIDER)) {
+                    if (*p).stroke_wheel.0 != Some(focus) {
+                        (*p).stroke_wheel = (Some(focus), Wheel::default());
+                    }
+                    let steps = (*p).stroke_wheel.1.steps(wp);
+                    if steps != 0 {
+                        if edit.is_some() {
+                            commit_stroke_edit(hwnd, focus, index, true);
+                            if (*p).error.is_some() {
+                                return LRESULT(0);
+                            }
+                        }
+                        let width = stroke_control::step(
+                            preferences::current().stroke_widths[index],
+                            steps,
+                        );
+                        set_stroke_slider(hwnd, index, width);
+                        if edit.is_some() {
+                            stroke_control::set_edit(focus, width);
+                            SendMessageW(focus, EM_SETSEL, Some(WPARAM(0)), Some(LPARAM(-1)));
+                        }
+                    }
+                    return LRESULT(0);
+                }
+                (*p).stroke_wheel = (None, Wheel::default());
                 (*p).scroll -= i32::from((wp.0 >> 16) as u16 as i16) / 120 * 48;
                 layout(hwnd);
                 LRESULT(0)
@@ -1539,15 +1747,17 @@ mod tests {
             SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(400)), None);
             assert!(!preferences::hints());
             SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(414)), None);
-            SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(423)), None);
+            let width_edit = GetDlgItem(Some(hwnd), i32::from(STROKE_EDIT)).unwrap();
+            stroke_control::set_edit(width_edit, 8);
+            SendMessageW(width_edit, WM_KEYDOWN, Some(WPARAM(13)), None);
             SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(433)), None);
             assert_eq!(
                 (
                     preferences::current().color,
-                    preferences::current().stroke_width,
+                    preferences::current().stroke_widths,
                     preferences::current().text_size
                 ),
-                (COLORS[4], 8, 48)
+                (COLORS[4], [8, 3, 3], 48)
             );
             let blocked = CreateWindowExW(
                 WINDOW_EX_STYLE::default(),
