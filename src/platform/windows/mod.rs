@@ -751,8 +751,8 @@ fn dispatch(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
                 }
                 LRESULT(0)
             }
-            preferences::STROKE_CHANGED => {
-                settings::refresh_strokes();
+            preferences::PARAMETER_CHANGED => {
+                settings::refresh_parameters();
                 LRESULT(0)
             }
             preferences::CHANGED | WM_THEMECHANGED | WM_SETTINGCHANGE => {
@@ -860,6 +860,6 @@ fn dispatch(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
 mod config_store;
 mod hotkey;
 
+mod parameter_control;
 mod preferences;
 mod startup;
-mod stroke_control;

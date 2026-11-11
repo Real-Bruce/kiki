@@ -1,12 +1,13 @@
 //! Native frozen-desktop selection window. Annotation/output controls are staged for P4/P5.
 use super::{
     capture::CaptureResult,
+    parameter_control::{self, Wheel},
     selection_render::{Canvas, Layout, PaintInput, system_dark},
-    stroke_control::{self, Wheel},
     text_input::{TextHit, TextInput, TextStart},
 };
 use crate::core::{
     annotation::{Editor, ObjectHit, Shape, Tool, text_center},
+    config::CaptureParameter,
     display::DisplayInfo,
     geometry::PixelRect,
     selection::{PixelPoint, Selection, contains},
@@ -22,8 +23,8 @@ use windows::{
     core::{Error, Result, w},
 };
 
-const STROKE_TIMER: usize = 6;
-const STROKE_EDIT: u16 = 900;
+const PARAMETER_TIMER: usize = 6;
+const PARAMETER_EDIT: u16 = 900;
 
 pub struct Preview(Rc<Cell<Option<HWND>>>);
 impl Preview {
@@ -98,18 +99,18 @@ impl Preview {
             for (style, width) in editor.styles.iter_mut().zip(cfg.stroke_widths) {
                 style.width = f32::from(width);
             }
-            editor.text_size = f32::from(cfg.text_size);
+            editor.text_size = cfg.text_size;
             let state = State {
                 lifetime,
                 canvas,
                 selection,
                 editor,
                 parameter_down: false,
-                stroke_slider: false,
-                stroke_edit: None,
+                parameter_slider: false,
+                parameter_edit: None,
                 wheel: Wheel::default(),
                 parameter_error: None,
-                width_modified: false,
+                parameter_modified: false,
                 text_input: None,
                 output: None,
                 busy: false,
@@ -171,11 +172,11 @@ struct State {
     selection: Selection,
     editor: Editor,
     parameter_down: bool,
-    stroke_slider: bool,
-    stroke_edit: Option<StrokeEdit>,
+    parameter_slider: bool,
+    parameter_edit: Option<ParameterEdit>,
     wheel: Wheel,
     parameter_error: Option<&'static str>,
-    width_modified: bool,
+    parameter_modified: bool,
     text_input: Option<TextInput>,
     output: Option<super::output::Job>,
     busy: bool,
@@ -189,11 +190,11 @@ struct State {
     focus: usize,
     keyboard_focus: bool,
 }
-struct StrokeEdit {
+struct ParameterEdit {
     hwnd: HWND,
     font: HFONT,
 }
-impl Drop for StrokeEdit {
+impl Drop for ParameterEdit {
     fn drop(&mut self) {
         // SAFETY: the edit is destroyed before deleting its UI-thread font.
         unsafe {
@@ -216,7 +217,7 @@ impl State {
         }
         match index {
             0..=4 => {
-                self.editor.finish_stroke_adjustment();
+                self.editor.finish_parameter_adjustment();
                 self.wheel = Wheel::default();
                 self.editor.cancel();
                 let mut tool = [
@@ -245,17 +246,14 @@ impl State {
                         .editor
                         .selected
                         .and_then(|i| self.editor.objects().get(i))
-                    && let Shape::Text { size, .. } = object.shape
                 {
                     let mut style = object.style;
                     style.width /= self.scale();
                     self.editor.styles[3] = style;
-                    self.editor.text_size = size / self.scale();
                 }
             }
-            19 if self.editor.tool.stroke_index().is_some() => {}
-            11..=21 => {
-                if let Err(message) = self.apply_parameter(index - 11) {
+            11..=18 => {
+                if let Err(message) = self.apply_color(index - 11) {
                     self.editor.warn(message);
                 }
             }
@@ -269,62 +267,60 @@ impl State {
         }
         false
     }
-    fn apply_parameter(&mut self, parameter: usize) -> std::result::Result<(), &'static str> {
+    fn apply_color(&mut self, parameter: usize) -> std::result::Result<(), &'static str> {
         let mut style = self.editor.style();
-        if parameter < 8 {
-            style.color = super::selection_render::ANNOTATION_COLORS[parameter];
-        } else if parameter < 11 && self.editor.tool == Tool::Text {
-            self.editor.text_size = [18., 24., 36.][parameter - 8];
-        } else {
-            return Ok(());
-        }
+        style.color = super::selection_render::ANNOTATION_COLORS[parameter];
         if self.editor.tool == Tool::Text {
-            restyle_text(self, style, parameter >= 8)
+            restyle_text(self, style)
         } else {
             self.editor.set_stroke_color(style.color);
             Ok(())
         }
     }
     fn parameter_at(&self, p: PixelPoint) -> Option<usize> {
-        self.canvas
-            .parameter_at(&self.layout()?, p, self.editor.tool)
+        self.canvas.parameter_at(&self.layout()?, p)
     }
     fn layout(&self) -> Option<Layout> {
         let rect = self.selection.rect.filter(|_| !self.selection.active())?;
         Some(self.canvas.layout(rect, &self.screens, self.editor.tool))
     }
-    fn set_stroke_width(&mut self, width: u8) {
-        if let Some(index) = self.editor.tool.stroke_index() {
-            self.editor.set_stroke_width(width);
-            self.parameter_error = None;
-            match super::preferences::set_stroke_width(index, width) {
-                Ok(()) => self.width_modified = true,
-                Err(_) => self.parameter_error = Some("无法更新默认线宽，当前标注已保留。"),
+    fn parameter(&self) -> Option<(CaptureParameter, u16)> {
+        let parameter = self.editor.tool.parameter()?;
+        let value = match parameter {
+            CaptureParameter::Stroke(_) => self.editor.style().width as u16,
+            CaptureParameter::TextSize => {
+                if let Some(input) = &self.text_input {
+                    input.requested_size() as u16
+                } else if let Some(index) = self.editor.selected
+                    && let Shape::Text { size, .. } = self.editor.objects()[index].shape
+                {
+                    size as u16
+                } else {
+                    self.editor.text_size
+                }
             }
-        }
+        };
+        Some((parameter, value))
     }
-    fn drag_stroke_slider(&mut self) {
-        if let Some((layout, slider)) = self
-            .layout()
-            .and_then(|l| l.stroke_slider().map(|r| (l, r)))
-        {
-            let inset = 6. * layout.scale;
-            let width = stroke_control::slider_value(
-                self.pointer.x as f32,
-                slider.left as f32 + inset,
-                slider.right as f32 - inset,
-            );
-            self.set_stroke_width(width);
-        }
+    fn slider_value(&self) -> Option<u16> {
+        let layout = self.layout()?;
+        let slider = layout.parameter_slider()?;
+        let inset = 6. * layout.scale;
+        Some(parameter_control::slider_value(
+            self.editor.tool.parameter()?,
+            self.pointer.x as f32,
+            slider.left as f32 + inset,
+            slider.right as f32 - inset,
+        ))
     }
-    fn stroke_message(&self) -> Option<&'static str> {
+    fn parameter_message(&self) -> Option<&'static str> {
         self.parameter_error.or_else(|| {
-            (self.width_modified
+            (self.parameter_modified
                 && matches!(
                     super::preferences::status(),
                     super::preferences::SaveStatus::Failed(_)
                 ))
-            .then_some("默认线宽保存失败，标注已保留。可在设置中重试。")
+            .then_some("默认参数保存失败，标注已保留。可在设置中重试。")
         })
     }
     fn window_at(&self, p: PixelPoint) -> Option<PixelRect> {
@@ -378,22 +374,109 @@ impl State {
     }
 }
 
-fn open_stroke_edit(hwnd: HWND, pointer: *mut State) -> Result<()> {
+fn set_parameter_value(pointer: *mut State, value: u16) {
+    // SAFETY: the live window owns State. Move the draft out before calling Rich Edit
+    // so synchronous host notifications cannot reenter with an aliased reference.
+    unsafe {
+        let Some(parameter) = (*pointer).editor.tool.parameter() else {
+            return;
+        };
+        let (min, max) = parameter.bounds();
+        if !(min..=max).contains(&value) {
+            return;
+        }
+        match parameter {
+            CaptureParameter::Stroke(_) => (*pointer).editor.set_stroke_width(value as u8),
+            CaptureParameter::TextSize => {
+                let size = f32::from(value);
+                let result = if let Some(mut input) = (*pointer).text_input.take() {
+                    let result = input.set_size(size);
+                    (*pointer).text_input = Some(input);
+                    result
+                } else {
+                    resize_selected_text(&mut *pointer, size)
+                };
+                if result.is_err() {
+                    (*pointer).parameter_error = Some("无法调整字号，当前文字已保留。");
+                    return;
+                }
+                (*pointer).editor.text_size = value;
+            }
+        }
+        (*pointer).parameter_error = None;
+        match super::preferences::set_parameter(parameter, value) {
+            Ok(()) => (*pointer).parameter_modified = true,
+            Err(_) => (*pointer).parameter_error = Some("无法保存默认参数，当前标注已保留。"),
+        }
+    }
+}
+
+fn resize_selected_text(state: &mut State, size: f32) -> Result<()> {
+    if let Some(index) = state.editor.selected
+        && let Shape::Text {
+            bounds,
+            content,
+            size: previous,
+            wrap_width,
+            angle,
+        } = &state.editor.objects()[index].shape
+        && *previous != size
+    {
+        let anchor = state.editor.text_resize_anchor(index, *bounds);
+        let next = state.canvas.text_bounds(
+            PixelPoint {
+                x: anchor.left,
+                y: anchor.top,
+            },
+            content,
+            size,
+            *wrap_width,
+            (*angle != 0.).then(|| text_center(anchor)),
+        )?;
+        state.editor.resize_text(index, next, size);
+    }
+    Ok(())
+}
+
+fn step_parameter(hwnd: HWND, pointer: *mut State, steps: i32) {
+    // SAFETY: all handles belong to the current dispatch, and no state reference crosses reflow.
+    unsafe {
+        if let Some((parameter, current)) = (*pointer).parameter() {
+            let next = parameter_control::step(parameter, current, steps);
+            if next != current {
+                set_parameter_value(pointer, next);
+                if !(*pointer).editor.active()
+                    && SetTimer(Some(hwnd), PARAMETER_TIMER, 300, None) == 0
+                {
+                    (*pointer).editor.finish_parameter_adjustment();
+                }
+            }
+        }
+    }
+}
+
+fn open_parameter_edit(hwnd: HWND, pointer: *mut State) -> Result<()> {
     // SAFETY: the preview and its numeric child are owned by this UI thread.
     // No Rust state references are held across focus changes or child messages.
     unsafe {
         let state = &*pointer;
-        if state.stroke_edit.is_some() {
+        if state.parameter_edit.is_some() {
+            return Ok(());
+        }
+        if state.text_input.as_ref().is_some_and(TextInput::composing) {
+            (*pointer).parameter_error = Some("确认输入法候选后可输入字号，滚轮和滑杆仍可调节。");
             return Ok(());
         }
         let Some(layout) = state.layout() else {
             return Ok(());
         };
-        let Some(bounds) = layout.stroke_edit() else {
+        let Some(bounds) = layout.parameter_edit() else {
             return Ok(());
         };
         let desktop = state.canvas.bounds();
-        let width = state.editor.style().width as u8;
+        let Some((_, value)) = state.parameter() else {
+            return Ok(());
+        };
         let font = CreateFontW(
             -(14. * layout.scale).round().max(1.) as i32,
             0,
@@ -413,15 +496,15 @@ fn open_stroke_edit(hwnd: HWND, pointer: *mut State) -> Result<()> {
         if font.is_invalid() {
             return Err(Error::from_win32());
         }
-        let child = match stroke_control::create_edit(hwnd, STROKE_EDIT, font) {
+        let child = match parameter_control::create_edit(hwnd, PARAMETER_EDIT, font) {
             Ok(child) => child,
             Err(error) => {
                 let _ = DeleteObject(font.into());
                 return Err(error);
             }
         };
-        let edit = StrokeEdit { hwnd: child, font };
-        stroke_control::set_edit(child, width);
+        let edit = ParameterEdit { hwnd: child, font };
+        parameter_control::set_edit(child, value);
         let mut metrics = TEXTMETRICW::default();
         let dc = GetDC(Some(child));
         let text_height = if dc.is_invalid() {
@@ -444,23 +527,23 @@ fn open_stroke_edit(hwnd: HWND, pointer: *mut State) -> Result<()> {
             text_height,
             SWP_SHOWWINDOW | SWP_NOZORDER | SWP_NOACTIVATE,
         )?;
-        (*pointer).stroke_edit = Some(edit);
+        (*pointer).parameter_edit = Some(edit);
         let _ = SetFocus(Some(child));
         Ok(())
     }
 }
 
-fn close_stroke_edit(hwnd: HWND, pointer: *mut State, commit: bool, restore_focus: bool) {
+fn close_parameter_edit(hwnd: HWND, pointer: *mut State, commit: bool, restore_focus: bool) {
     // SAFETY: removing the owned child from state first makes EN_KILLFOCUS re-entry harmless.
     unsafe {
-        let Some(edit) = (*pointer).stroke_edit.take() else {
+        let Some(edit) = (*pointer).parameter_edit.take() else {
             return;
         };
-        if commit {
-            match stroke_control::read_edit(edit.hwnd) {
-                Ok(width) => {
-                    (*pointer).set_stroke_width(width);
-                    (*pointer).editor.finish_stroke_adjustment();
+        if commit && let Some(parameter) = (*pointer).editor.tool.parameter() {
+            match parameter_control::read_edit(edit.hwnd, parameter) {
+                Ok(value) => {
+                    set_parameter_value(pointer, value);
+                    (*pointer).editor.finish_parameter_adjustment();
                 }
                 Err(message) => (*pointer).parameter_error = Some(message),
             }
@@ -569,9 +652,9 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             return result;
         }
         match msg {
-            WM_TIMER if wp.0 == STROKE_TIMER => {
-                let _ = KillTimer(Some(hwnd), STROKE_TIMER);
-                (*pointer).editor.finish_stroke_adjustment();
+            WM_TIMER if wp.0 == PARAMETER_TIMER => {
+                let _ = KillTimer(Some(hwnd), PARAMETER_TIMER);
+                (*pointer).editor.finish_parameter_adjustment();
                 LRESULT(0)
             }
             WM_TIMER if wp.0 == 5 => {
@@ -624,18 +707,18 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             }
 
             WM_ERASEBKGND => LRESULT(1),
-            stroke_control::EDIT_KEY => {
-                close_stroke_edit(hwnd, pointer, wp.0 != 27, true);
+            parameter_control::EDIT_KEY => {
+                close_parameter_edit(hwnd, pointer, wp.0 != 27, true);
                 if wp.0 == 9 {
                     SendMessageW(hwnd, WM_KEYDOWN, Some(wp), None);
                 }
                 LRESULT(0)
             }
             WM_COMMAND
-                if (wp.0 & 65535) == usize::from(STROKE_EDIT)
+                if (wp.0 & 65535) == usize::from(PARAMETER_EDIT)
                     && (wp.0 >> 16) as u32 == EN_KILLFOCUS =>
             {
-                close_stroke_edit(hwnd, pointer, true, false);
+                close_parameter_edit(hwnd, pointer, true, false);
                 LRESULT(0)
             }
             WM_CTLCOLOREDIT => {
@@ -659,6 +742,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 let _ = BeginPaint(hwnd, &mut ps);
                 let result = {
                     let state = &mut *pointer;
+                    let parameter = state.parameter();
                     state.canvas.paint(PaintInput {
                         selection: &state.selection,
                         editor: &state.editor,
@@ -673,8 +757,9 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                             usize::MAX
                         },
                         pressed: state.down_button,
-                        editing_stroke: state.stroke_edit.is_some(),
-                        parameter_error: state.stroke_message(),
+                        editing_parameter: state.parameter_edit.is_some(),
+                        parameter,
+                        parameter_error: state.parameter_message(),
                     })
                 };
                 let _ = EndPaint(hwnd, &ps);
@@ -685,39 +770,39 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             }
 
             WM_MOUSEMOVE => {
-                {
+                let slider = {
                     let state = &mut *pointer;
                     state.pointer = mouse_position(lp, state.canvas.bounds());
                     state.selection.update(state.pointer);
                     state.editor.update(state.pointer);
-                    if state.stroke_slider {
-                        state.drag_stroke_slider();
-                    }
                     state.hover = state.window_at(state.pointer);
+                    state
+                        .parameter_slider
+                        .then(|| state.slider_value())
+                        .flatten()
+                };
+                if let Some(value) = slider {
+                    set_parameter_value(pointer, value);
                 }
                 let _ = InvalidateRect(Some(hwnd), None, false);
                 LRESULT(0)
             }
             WM_MOUSEWHEEL => {
                 let state = &mut *pointer;
-                if state.editor.tool.stroke_index().is_none()
+                if state.editor.tool.parameter().is_none()
                     || state.busy
                     || state.selection.rect.is_none()
                     || state.selection.active()
-                    || state.stroke_slider
-                    || state.stroke_edit.is_some()
+                    || state.parameter_slider
+                    || state.parameter_edit.is_some()
                     || state.down_button.is_some()
+                    || (state.editor.tool == Tool::Text && state.editor.active())
                 {
                     return LRESULT(0);
                 }
                 let steps = state.wheel.steps(wp);
                 if steps != 0 {
-                    let width = stroke_control::step(state.editor.style().width as u8, steps);
-                    state.set_stroke_width(width);
-                    if !state.editor.active() && SetTimer(Some(hwnd), STROKE_TIMER, 300, None) == 0
-                    {
-                        state.editor.finish_stroke_adjustment();
-                    }
+                    step_parameter(hwnd, pointer, steps);
                     let _ = InvalidateRect(Some(hwnd), None, false);
                 }
                 LRESULT(0)
@@ -726,34 +811,44 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 if (*pointer).selection.active() || (*pointer).editor.active() {
                     return LRESULT(0);
                 }
+                let point = mouse_position(lp, (*pointer).canvas.bounds());
+                let _ = KillTimer(Some(hwnd), PARAMETER_TIMER);
+                (*pointer).editor.finish_parameter_adjustment();
+                close_parameter_edit(hwnd, pointer, true, true);
+                if let Some(control @ (8 | 9)) = (*pointer).parameter_at(point) {
+                    (*pointer).pointer = point;
+                    (*pointer).keyboard_focus = false;
+                    (*pointer).focus = 11 + control;
+                    if control == 8 {
+                        (*pointer).parameter_slider = true;
+                        (*pointer).parameter_down = true;
+                        if let Some(value) = (*pointer).slider_value() {
+                            set_parameter_value(pointer, value);
+                        }
+                        SetCapture(hwnd);
+                    } else if let Err(error) = open_parameter_edit(hwnd, pointer) {
+                        super::show_error(&error.to_string());
+                    }
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                    return LRESULT(0);
+                }
                 let space = (*pointer).text_input.is_none() && GetKeyState(VK_SPACE.0 as i32) < 0;
                 if let Err(error) = finish_text(hwnd, pointer) {
                     super::show_error(&error.to_string());
                     return LRESULT(0);
                 }
-                let _ = KillTimer(Some(hwnd), STROKE_TIMER);
-                (*pointer).editor.finish_stroke_adjustment();
-                close_stroke_edit(hwnd, pointer, true, true);
                 let mut request_text = None;
-                let mut request_stroke = false;
                 let mut error = None;
                 {
                     let state = &mut *pointer;
-                    state.pointer = mouse_position(lp, state.canvas.bounds());
+                    state.pointer = point;
                     state.pressed_window = state.window_at(state.pointer);
                     state.parameter_down = false;
                     state.keyboard_focus = false;
-                    if let Some(parameter) = state.parameter_at(state.pointer) {
+                    if let Some(parameter @ 0..=7) = state.parameter_at(state.pointer) {
                         state.parameter_down = true;
                         state.focus = 11 + parameter;
-                        if parameter >= 8 && state.editor.tool.stroke_index().is_some() {
-                            if parameter == 8 {
-                                state.stroke_slider = true;
-                                state.drag_stroke_slider();
-                            } else {
-                                request_stroke = true;
-                            }
-                        } else if let Err(message) = state.apply_parameter(parameter) {
+                        if let Err(message) = state.apply_color(parameter) {
                             error = Some(message);
                         }
                     } else if let Some(button) = state.button_at(state.pointer) {
@@ -814,14 +909,6 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                         }
                     }
                 }
-                if request_stroke {
-                    (*pointer).parameter_down = false;
-                    if let Err(error) = open_stroke_edit(hwnd, pointer) {
-                        super::show_error(&error.to_string());
-                    }
-                    let _ = InvalidateRect(Some(hwnd), None, false);
-                    return LRESULT(0);
-                }
                 if let Some(index) = request_text {
                     if let Err(e) = start_text(hwnd, pointer, index) {
                         super::show_error(&e.to_string());
@@ -838,10 +925,15 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 LRESULT(0)
             }
             WM_LBUTTONUP => {
+                (*pointer).pointer = mouse_position(lp, (*pointer).canvas.bounds());
+                if (*pointer).parameter_slider
+                    && let Some(value) = (*pointer).slider_value()
+                {
+                    set_parameter_value(pointer, value);
+                }
                 let warning;
                 let close = {
                     let state = &mut *pointer;
-                    state.pointer = mouse_position(lp, state.canvas.bounds());
                     warning = state.editor.take_warning();
                     if let Some(button) = state.down_button.take() {
                         if state.button_at(state.pointer) == Some(button) {
@@ -850,10 +942,9 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                             false
                         }
                     } else {
-                        if state.stroke_slider {
-                            state.drag_stroke_slider();
-                            state.editor.finish_stroke_adjustment();
-                            state.stroke_slider = false;
+                        if state.parameter_slider {
+                            state.editor.finish_parameter_adjustment();
+                            state.parameter_slider = false;
                         } else if state.editor.active() {
                             state.editor.finish(state.pointer);
                         } else if !state.parameter_down {
@@ -885,9 +976,9 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     let state = &mut *pointer;
                     state.selection.cancel_drag();
                     state.editor.cancel();
-                    if state.stroke_slider {
-                        state.editor.finish_stroke_adjustment();
-                        state.stroke_slider = false;
+                    if state.parameter_slider {
+                        state.editor.finish_parameter_adjustment();
+                        state.parameter_slider = false;
                     }
                     state.parameter_down = false;
                     state.down_button = None;
@@ -907,9 +998,9 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     match wp.0 as u32 {
                         27 => {
                             release = true;
-                            if state.stroke_slider {
-                                state.editor.finish_stroke_adjustment();
-                                state.stroke_slider = false;
+                            if state.parameter_slider {
+                                state.editor.finish_parameter_adjustment();
+                                state.parameter_slider = false;
                                 false
                             } else if state.down_button.take().is_some() {
                                 false
@@ -959,8 +1050,8 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                                 && state.keyboard_focus
                                 && state.focus < 22 =>
                         {
-                            if state.editor.tool.stroke_index().is_some() && state.focus == 20 {
-                                if let Err(error) = open_stroke_edit(hwnd, pointer) {
+                            if state.editor.tool.parameter().is_some() && state.focus == 20 {
+                                if let Err(error) = open_parameter_edit(hwnd, pointer) {
                                     super::show_error(&error.to_string());
                                 }
                                 false
@@ -971,16 +1062,10 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                         37..=40
                             if state.keyboard_focus
                                 && state.focus == 19
-                                && state.editor.tool.stroke_index().is_some() =>
+                                && state.editor.tool.parameter().is_some() =>
                         {
                             let step = if matches!(wp.0, 38 | 39) { 1 } else { -1 };
-                            state.set_stroke_width(stroke_control::step(
-                                state.editor.style().width as u8,
-                                step,
-                            ));
-                            if SetTimer(Some(hwnd), STROKE_TIMER, 300, None) == 0 {
-                                state.editor.finish_stroke_adjustment();
-                            }
+                            step_parameter(hwnd, pointer, step);
                             false
                         }
                         13 => {
@@ -1035,9 +1120,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     return LRESULT(1);
                 }
                 let p = position().unwrap_or(state.pointer);
-                let cursor = if state.editor.tool.stroke_index().is_some()
-                    && state.parameter_at(p) == Some(9)
-                {
+                let cursor = if state.parameter_at(p) == Some(9) {
                     IDC_IBEAM
                 } else if state.button_at(p).is_some() || state.parameter_at(p).is_some() {
                     IDC_ARROW
@@ -1089,6 +1172,12 @@ fn dispatch_text(
     // that can synchronously dispatch capture, focus and IME messages.
     unsafe {
         let input = (*pointer).text_input.as_ref()?;
+        if (*pointer).parameter_slider
+            && (matches!(msg, WM_MOUSEMOVE | WM_LBUTTONUP)
+                || msg == WM_KEYDOWN && wp.0 == 27 && !input.composing())
+        {
+            return None;
+        }
         if msg == WM_KEYDOWN && !input.composing() {
             let ctrl = GetKeyState(VK_CONTROL.0 as i32) < 0;
             if wp.0 == 27 {
@@ -1240,7 +1329,6 @@ fn start_text(hwnd: HWND, pointer: *mut State, index: Option<usize>) -> Result<(
             .rect
             .ok_or_else(|| Error::new(E_FAIL, "请先选择截图范围"))?;
         let desktop = state.canvas.bounds();
-        let scale = state.scale();
         let (origin, content, size, style, wrap_width, angle) = if let Some(index) = index {
             let object = &state.editor.objects()[index];
             let Shape::Text {
@@ -1265,6 +1353,7 @@ fn start_text(hwnd: HWND, pointer: *mut State, index: Option<usize>) -> Result<(
                 *angle,
             )
         } else {
+            let size = f32::from(state.editor.text_size);
             let origin = PixelPoint {
                 x: state
                     .pointer
@@ -1273,17 +1362,15 @@ fn start_text(hwnd: HWND, pointer: *mut State, index: Option<usize>) -> Result<(
                 y: state.pointer.y.clamp(
                     area.top,
                     area.bottom
-                        .saturating_sub((state.editor.text_size * scale * 1.3).ceil() as i32)
+                        .saturating_sub((size * 1.3).ceil() as i32)
                         .max(area.top),
                 ),
             };
-            let mut style = state.editor.styles[3];
-            style.width *= scale;
             (
                 origin,
                 String::new(),
-                state.editor.text_size * scale,
-                style,
+                size,
+                state.editor.styles[3],
                 area.right.saturating_sub(origin.x) as f32,
                 0.,
             )
@@ -1316,11 +1403,12 @@ fn start_text(hwnd: HWND, pointer: *mut State, index: Option<usize>) -> Result<(
 fn finish_text(hwnd: HWND, pointer: *mut State) -> Result<()> {
     // SAFETY: UI thread takes ownership before native calls, so EDIT messages cannot alias a State borrow.
     let input = unsafe { (*pointer).text_input.take() };
-    let Some(input) = input else {
+    let Some(mut input) = input else {
         return Ok(());
     };
     let result = (|| {
         input.complete_composition()?;
+        input.set_size(input.requested_size())?;
         let content = input.content()?;
         // SAFETY: synchronous DirectWrite calls do not dispatch window messages; parent State is live.
         unsafe {
@@ -1374,7 +1462,6 @@ fn finish_text(hwnd: HWND, pointer: *mut State) -> Result<()> {
 fn restyle_text(
     state: &mut State,
     style: crate::core::annotation::Style,
-    resize: bool,
 ) -> std::result::Result<(), &'static str> {
     state.editor.styles[3] = style;
     if let Some(index) = state.editor.selected {
@@ -1387,11 +1474,6 @@ fn restyle_text(
                 angle,
             } = &object.shape
             {
-                let size = if resize {
-                    state.editor.text_size * state.scale()
-                } else {
-                    *size
-                };
                 let object = state
                     .canvas
                     .text_object(
@@ -1400,7 +1482,7 @@ fn restyle_text(
                             y: bounds.top,
                         },
                         content.clone(),
-                        size,
+                        *size,
                         *wrap_width,
                         style,
                         (*angle, (*angle != 0.).then(|| text_center(*bounds))),
@@ -1593,7 +1675,7 @@ mod tests {
         }
     }
     #[test]
-    fn stroke_controls_route_native_input_and_render_exact_pixels() {
+    fn parameter_controls_route_native_input_and_render_exact_pixels() {
         use super::super::{
             config_store::Disk,
             preferences::{self, SaveStatus},
@@ -1666,7 +1748,7 @@ mod tests {
             }
             assert_eq!(preferences::current().stroke_widths, [14, 22, 18]);
             assert!(matches!(wait_status(), SaveStatus::Failed(_)));
-            assert!((*p).stroke_message().unwrap().contains("保存失败"));
+            assert!((*p).parameter_message().unwrap().contains("保存失败"));
             drop(lock);
             assert_eq!(std::fs::read(&path).unwrap(), original);
 
@@ -1676,7 +1758,7 @@ mod tests {
             }
             wheel(120);
             wheel(120);
-            SendMessageW(hwnd, WM_TIMER, Some(WPARAM(STROKE_TIMER)), None);
+            SendMessageW(hwnd, WM_TIMER, Some(WPARAM(PARAMETER_TIMER)), None);
             assert_eq!((*p).editor.style().width, 20.);
             (*p).editor.undo();
             assert_eq!((*p).editor.style().width, 18.);
@@ -1684,12 +1766,12 @@ mod tests {
             (*p).editor.redo();
             assert_eq!((*p).editor.style().width, 20.);
             (*p).editor.undo();
-            open_stroke_edit(hwnd, p).unwrap();
-            let edit = (*p).stroke_edit.as_ref().unwrap().hwnd;
+            open_parameter_edit(hwnd, p).unwrap();
+            let edit = (*p).parameter_edit.as_ref().unwrap().hwnd;
             SetWindowTextW(edit, w!("65")).unwrap();
             SendMessageW(edit, WM_KEYDOWN, Some(WPARAM(13)), None);
-            assert!((*p).stroke_edit.is_none());
-            assert!((*p).stroke_message().unwrap().contains("1–64"));
+            assert!((*p).parameter_edit.is_none());
+            assert!((*p).parameter_message().unwrap().contains("1–64"));
             assert_eq!((*p).editor.style().width, 18.);
             assert!(matches!(wait_status(), SaveStatus::Saved));
             assert_eq!(Disk::load(path.clone()).config.stroke_widths, [14, 22, 20]);
@@ -1707,6 +1789,125 @@ mod tests {
             };
             assert_eq!([measure(50), measure(160), measure(260)], [14, 22, 18]);
             drop(guard);
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+    #[test]
+    fn text_size_wheel_reflows_rotated_annotations_and_retains_the_draft() {
+        use super::super::{config_store::Disk, preferences};
+
+        super::super::tests::graphics_runtime();
+        let _com = composition::Apartment::enter().unwrap();
+        let path =
+            std::env::temp_dir().join(format!("kiki-text-size-test-{}.ini", std::process::id()));
+        std::fs::write(&path, "version=2\ntext_size=24\npen_width=11\n").unwrap();
+        // SAFETY: this test owns the hidden preview and its isolated config on this thread.
+        unsafe {
+            register(GetModuleHandleW(None).unwrap().into()).unwrap();
+            let (preview, p) = setup();
+            let hwnd = preview.hwnd().unwrap();
+            let (guard, warning) = preferences::initialize_at(hwnd, path.clone()).unwrap();
+            assert!(warning.is_none());
+            (*p).activate(Tool::Text.button());
+            let index = (*p)
+                .editor
+                .objects()
+                .iter()
+                .position(|object| object.matches_tool(Tool::Text))
+                .unwrap();
+            (*p).editor.selected = Some(index);
+            let original = (*p).editor.objects()[index].clone();
+            let (cx, cy) = text_center(original.bounds());
+            let wheel = |delta: i16| {
+                SendMessageW(
+                    hwnd,
+                    WM_MOUSEWHEEL,
+                    Some(WPARAM(usize::from(delta as u16) << 16)),
+                    None,
+                );
+            };
+            assert_eq!((*p).parameter().unwrap().1, 30);
+            assert_eq!(preferences::current().text_size, 24);
+            let mut samples = Vec::new();
+            for _ in 0..30 {
+                let started = Instant::now();
+                wheel(120);
+                samples.push(started.elapsed().as_micros());
+            }
+            samples.sort_unstable();
+            println!(
+                "F03 committed text wheel us: samples={samples:?}, p50={}, p95={}, max={}",
+                samples[14], samples[28], samples[29]
+            );
+            SendMessageW(hwnd, WM_TIMER, Some(WPARAM(PARAMETER_TIMER)), None);
+            let resized = (*p).editor.objects()[index].clone();
+            let Shape::Text {
+                size,
+                angle,
+                ref content,
+                ..
+            } = resized.shape
+            else {
+                panic!("expected text")
+            };
+            assert_eq!(size, 60.);
+            assert_eq!(angle, 0.41);
+            assert!(content.contains("中文标注\n第二行"));
+            let (next_x, next_y) = text_center(resized.bounds());
+            assert!((next_x - cx).abs() <= 0.5 && (next_y - cy).abs() <= 0.5);
+            (*p).editor.undo();
+            assert_eq!((*p).editor.objects()[index], original);
+            assert_eq!(preferences::current().text_size, 60);
+            (*p).editor.redo();
+            assert_eq!((*p).editor.objects()[index], resized);
+
+            start_text(hwnd, p, Some(index)).unwrap();
+            SendMessageW(hwnd, WM_IME_STARTCOMPOSITION, None, None);
+            wheel(120);
+            assert!((*p).text_input.as_ref().unwrap().composing());
+            assert_eq!((*p).text_input.as_ref().unwrap().size, 60.);
+            assert_eq!((*p).parameter().unwrap().1, 61);
+            open_parameter_edit(hwnd, p).unwrap();
+            assert!(
+                (*p).parameter_edit.is_none(),
+                "numeric focus must not interrupt IME"
+            );
+            SendMessageW(hwnd, WM_IME_ENDCOMPOSITION, None, None);
+            assert_eq!((*p).text_input.as_ref().unwrap().size, 61.);
+            assert_eq!((*p).text_input.as_ref().unwrap().angle, 0.41);
+            // The synthetic IME start replaces any native selection. Reopen the original
+            // draft to exercise exact-value entry and commit with its full original content.
+            SendMessageW(hwnd, WM_KEYDOWN, Some(WPARAM(27)), None);
+            start_text(hwnd, p, Some(index)).unwrap();
+            open_parameter_edit(hwnd, p).unwrap();
+            let edit = (*p).parameter_edit.as_ref().unwrap().hwnd;
+            SetWindowTextW(edit, w!("76")).unwrap();
+            SendMessageW(edit, WM_KEYDOWN, Some(WPARAM(13)), None);
+            let draft = (*p).text_input.as_ref().unwrap();
+            assert_eq!(draft.size, 76.);
+            assert_eq!(draft.content().unwrap(), *content);
+            assert_eq!(draft.angle, 0.41);
+            finish_text(hwnd, p).unwrap();
+            let selection = (*p).selection.rect.unwrap();
+            let output =
+                composition::render(&(*p).canvas.source(), selection, &(*p).editor).unwrap();
+            let png = super::super::png::encode(&output).unwrap();
+            assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+            let object = &(*p).editor.objects()[index];
+            assert!(matches!(
+                object.shape,
+                Shape::Text {
+                    size: 76.,
+                    angle: 0.41,
+                    ..
+                }
+            ));
+            let (final_x, final_y) = text_center(object.bounds());
+            assert!((final_x - next_x).abs() <= 0.5 && (final_y - next_y).abs() <= 0.5);
+            drop(guard);
+            let saved = Disk::load(path.clone()).config;
+            assert_eq!(saved.text_size, 76);
+            assert_eq!(saved.stroke_widths, [3, 3, 11]);
             std::fs::remove_file(path).unwrap();
         }
     }

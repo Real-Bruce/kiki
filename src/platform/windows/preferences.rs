@@ -3,7 +3,7 @@ use super::{
     config_store::{self, Disk, Writer},
     hotkey::Registration,
 };
-use crate::core::config::{Config, Theme};
+use crate::core::config::{CaptureParameter, Config, Theme};
 use std::{cell::RefCell, path::PathBuf};
 use windows::{
     UI::ViewManagement::{UIColorType, UISettings},
@@ -11,7 +11,7 @@ use windows::{
     core::{Error, Result},
 };
 pub const CHANGED: u32 = WM_APP + 61;
-pub const STROKE_CHANGED: u32 = WM_APP + 65;
+pub const PARAMETER_CHANGED: u32 = WM_APP + 65;
 pub const OPEN_SETTINGS: u32 = WM_APP + 70;
 pub const CAPTURE: u32 = WM_APP + 71;
 pub const FULLSCREEN: u32 = WM_APP + 72;
@@ -148,10 +148,17 @@ pub fn update(config: Config) -> std::result::Result<(), String> {
     update_config(config, false, CHANGED)
 }
 
-pub fn set_stroke_width(index: usize, width: u8) -> std::result::Result<(), String> {
+pub fn set_parameter(parameter: CaptureParameter, value: u16) -> std::result::Result<(), String> {
+    let (min, max) = parameter.bounds();
+    if !(min..=max).contains(&value) {
+        return Err("参数超出支持范围".into());
+    }
     let mut config = current();
-    config.stroke_widths[index] = width;
-    update_config(config, false, STROKE_CHANGED)
+    match parameter {
+        CaptureParameter::Stroke(index) => config.stroke_widths[index] = value as u8,
+        CaptureParameter::TextSize => config.text_size = value,
+    }
+    update_config(config, false, PARAMETER_CHANGED)
 }
 
 pub fn set_shortcut(shortcut: crate::core::config::Hotkey) -> std::result::Result<(), String> {

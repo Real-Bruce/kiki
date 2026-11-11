@@ -1,6 +1,6 @@
 //! Editable annotations in global physical pixels; no native handles or image copies.
 use super::{
-    config::{MAX_STROKE_WIDTH, MIN_STROKE_WIDTH},
+    config::{CaptureParameter, DEFAULT_TEXT_SIZE, MAX_STROKE_WIDTH, MIN_STROKE_WIDTH},
     geometry::PixelRect,
     selection::{PixelPoint, Selection},
 };
@@ -15,6 +15,14 @@ pub enum Tool {
     Text,
 }
 impl Tool {
+    pub fn parameter(self) -> Option<CaptureParameter> {
+        if self == Self::Text {
+            Some(CaptureParameter::TextSize)
+        } else {
+            self.stroke_index().map(CaptureParameter::Stroke)
+        }
+    }
+
     pub fn stroke_index(self) -> Option<usize> {
         match self {
             Self::Rectangle => Some(0),
@@ -255,6 +263,17 @@ struct Change {
     before: Option<Object>,
     after: Option<Object>,
 }
+enum ParameterBefore {
+    StrokeWidth {
+        index: usize,
+        width: f32,
+    },
+    TextSize {
+        index: usize,
+        bounds: PixelRect,
+        size: f32,
+    },
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ObjectHit {
     Move(usize),
@@ -280,9 +299,9 @@ pub struct Editor {
     pub styles: [Style; 4],
     objects: Vec<Object>,
     pub selected: Option<usize>,
-    pub text_size: f32,
+    pub text_size: u16,
     drag: Option<Drag>,
-    stroke_before: Option<(usize, f32)>,
+    parameter_before: Option<ParameterBefore>,
     undo: VecDeque<Change>,
     redo: Vec<Change>,
     warning: Option<&'static str>,
@@ -294,9 +313,9 @@ impl Default for Editor {
             styles: [Style::default(); 4],
             objects: Vec::new(),
             selected: None,
-            text_size: 24.,
+            text_size: DEFAULT_TEXT_SIZE,
             drag: None,
-            stroke_before: None,
+            parameter_before: None,
             undo: VecDeque::new(),
             redo: Vec::new(),
             warning: None,
@@ -315,7 +334,7 @@ impl Editor {
         index: Option<usize>,
         object: Object,
     ) -> Result<(), &'static str> {
-        self.finish_stroke_adjustment();
+        self.finish_parameter_adjustment();
         let Shape::Text {
             bounds,
             ref content,
@@ -402,15 +421,14 @@ impl Editor {
         self.drag.is_some()
     }
     pub fn can_undo(&self) -> bool {
-        (!self.undo.is_empty() || self.stroke_before.is_some()) && !self.active()
+        (!self.undo.is_empty() || self.parameter_before.is_some()) && !self.active()
     }
     pub fn can_redo(&self) -> bool {
-        !self.redo.is_empty() && !self.active() && self.stroke_before.is_none()
+        !self.redo.is_empty() && !self.active() && self.parameter_before.is_none()
     }
     pub fn enabled(&self, index: usize) -> bool {
         ((11..=18).contains(&index) && self.tool != Tool::Select)
-            || ((19..=21).contains(&index) && self.tool == Tool::Text)
-            || ((19..=20).contains(&index) && self.tool.stroke_index().is_some())
+            || ((19..=20).contains(&index) && self.tool.parameter().is_some())
             || matches!(index, 0..=4 | 7..=10)
             || (index == 5 && self.can_undo())
             || (index == 6 && self.can_redo())
@@ -442,28 +460,75 @@ impl Editor {
             let previous = self.objects[index].style.width;
             if previous != width {
                 if !self.active() {
-                    self.stroke_before.get_or_insert((index, previous));
+                    self.parameter_before
+                        .get_or_insert(ParameterBefore::StrokeWidth {
+                            index,
+                            width: previous,
+                        });
                 }
                 self.objects[index].style.width = width;
             }
         }
     }
-    pub fn finish_stroke_adjustment(&mut self) {
-        if let Some((index, width)) = self.stroke_before.take() {
-            let after = self.objects[index].clone();
-            if after.style.width != width {
-                let mut before = after.clone();
-                before.style.width = width;
-                self.record(Change {
-                    index,
-                    before: Some(before),
-                    after: Some(after),
-                });
-            }
+    pub fn text_resize_anchor(&self, index: usize, current: PixelRect) -> PixelRect {
+        match self.parameter_before {
+            Some(ParameterBefore::TextSize {
+                index: adjusted,
+                bounds,
+                ..
+            }) if adjusted == index => bounds,
+            _ => current,
         }
     }
+    pub fn resize_text(&mut self, index: usize, next: PixelRect, next_size: f32) {
+        let Shape::Text { bounds, size, .. } = &mut self.objects[index].shape else {
+            return;
+        };
+        if *bounds != next || *size != next_size {
+            if self.drag.is_none() {
+                self.parameter_before
+                    .get_or_insert(ParameterBefore::TextSize {
+                        index,
+                        bounds: *bounds,
+                        size: *size,
+                    });
+            }
+            *bounds = next;
+            *size = next_size;
+        }
+    }
+    pub fn finish_parameter_adjustment(&mut self) {
+        let Some(adjustment) = self.parameter_before.take() else {
+            return;
+        };
+        let index = match adjustment {
+            ParameterBefore::StrokeWidth { index, .. }
+            | ParameterBefore::TextSize { index, .. } => index,
+        };
+        let after = self.objects[index].clone();
+        let mut before = after.clone();
+        match adjustment {
+            ParameterBefore::StrokeWidth { width, .. } => before.style.width = width,
+            ParameterBefore::TextSize { bounds, size, .. } => {
+                if let Shape::Text {
+                    bounds: old_bounds,
+                    size: old_size,
+                    ..
+                } = &mut before.shape
+                {
+                    *old_bounds = bounds;
+                    *old_size = size;
+                }
+            }
+        }
+        self.record(Change {
+            index,
+            before: Some(before),
+            after: Some(after),
+        });
+    }
     pub fn set_stroke_color(&mut self, color: [u8; 3]) {
-        self.finish_stroke_adjustment();
+        self.finish_parameter_adjustment();
         let Some(tool) = self.tool.stroke_index() else {
             return;
         };
@@ -577,7 +642,7 @@ impl Editor {
         p: PixelPoint,
         hit: Option<ObjectHit>,
     ) -> Result<bool, &'static str> {
-        self.finish_stroke_adjustment();
+        self.finish_parameter_adjustment();
         self.cancel();
         self.warning = None;
         if let Some(hit) = hit {
@@ -843,7 +908,7 @@ impl Editor {
             .map(|_| index);
     }
     pub fn undo(&mut self) {
-        self.finish_stroke_adjustment();
+        self.finish_parameter_adjustment();
         self.cancel();
         if let Some(c) = self.undo.pop_back() {
             self.apply(c.index, &c.after, &c.before);
@@ -851,7 +916,7 @@ impl Editor {
         }
     }
     pub fn redo(&mut self) {
-        self.finish_stroke_adjustment();
+        self.finish_parameter_adjustment();
         self.cancel();
         if let Some(c) = self.redo.pop() {
             self.apply(c.index, &c.before, &c.after);
@@ -859,7 +924,7 @@ impl Editor {
         }
     }
     pub fn delete(&mut self) {
-        self.finish_stroke_adjustment();
+        self.finish_parameter_adjustment();
         self.cancel();
         if let Some(index) = self.selected.take() {
             let before = self.objects.remove(index);
@@ -1067,7 +1132,7 @@ mod tests {
         e.set_stroke_width(6);
         e.set_stroke_width(64);
         assert_eq!(e.objects()[0].style.width, 64.);
-        e.finish_stroke_adjustment();
+        e.finish_parameter_adjustment();
         e.set_stroke_color([0, 122, 255]);
         assert_eq!(e.objects()[0].style.width, 64.);
         e.undo();

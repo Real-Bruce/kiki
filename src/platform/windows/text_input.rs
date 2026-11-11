@@ -261,6 +261,8 @@ pub struct TextInput {
     hwnd: HWND,
     view: Rc<View>,
     composing: bool,
+    pending_size: Option<f32>,
+    dpi_y: f32,
     desktop: PixelRect,
     area: PixelRect,
     drag: Option<(PixelPoint, PixelPoint)>,
@@ -309,12 +311,14 @@ impl TextInput {
         // SAFETY: load the OS copy. Exported function and IID have the documented TextServ.h ABI.
         // The host and service are confined to this window thread and drop before the module.
         unsafe {
+            let mut dpi_y = 96.;
             let dc = GetDC(Some(hwnd));
             if !dc.is_invalid() {
                 let dpi = GetDeviceCaps(Some(dc), LOGPIXELSY);
                 let _ = ReleaseDC(Some(hwnd), dc);
                 if dpi > 0 {
-                    format.yHeight = (start.size * 1440. / dpi as f32).round() as i32;
+                    dpi_y = dpi as f32;
+                    format.yHeight = (start.size * 1440. / dpi_y).round() as i32;
                 }
             }
             let dwrite = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
@@ -360,6 +364,8 @@ impl TextInput {
                 hwnd,
                 view,
                 composing: false,
+                pending_size: None,
+                dpi_y,
                 desktop: start.desktop,
                 area: start.area,
                 drag: None,
@@ -397,6 +403,51 @@ impl TextInput {
             self.service.TxSendMessage(msg, wp, lp, &mut result)?;
         }
         Ok(result)
+    }
+    pub fn requested_size(&self) -> f32 {
+        self.pending_size.unwrap_or(self.size)
+    }
+    pub fn set_size(&mut self, size: f32) -> Result<()> {
+        if self.composing {
+            // Formatting a live IME range can disturb the native composition. Keep the
+            // latest requested value and reflow as soon as Rich Edit finishes that range.
+            self.pending_size = Some(size);
+            return Ok(());
+        }
+        if self.size != size {
+            self.set_native_size(size)?;
+            let previous = std::mem::replace(&mut self.size, size);
+            if let Err(error) = self.resize() {
+                self.size = previous;
+                let _ = self.set_native_size(previous);
+                let _ = self.resize();
+                return Err(error);
+            }
+        }
+        self.pending_size = None;
+        Ok(())
+    }
+    fn set_native_size(&self, size: f32) -> Result<()> {
+        let format = CHARFORMATW {
+            cbSize: size_of::<CHARFORMATW>() as u32,
+            dwMask: CFM_SIZE,
+            yHeight: (size * 1440. / self.dpi_y).round() as i32,
+            ..Default::default()
+        };
+        // Plain-text Rich Edit has one uniform format. Update it in place, without
+        // moving the selection or switching the user's input locale.
+        if self
+            .send(
+                EM_SETCHARFORMAT,
+                WPARAM((SCF_DEFAULT | SCF_NOKBUPDATE) as usize),
+                LPARAM((&raw const format) as isize),
+            )?
+            .0
+            == 0
+        {
+            return Err(Error::new(E_FAIL, "无法调整文字输入的字号"));
+        }
+        Ok(())
     }
     pub fn resize(&mut self) -> Result<()> {
         let content = self.content()?;
@@ -461,10 +512,13 @@ impl TextInput {
         if msg == WM_IME_STARTCOMPOSITION {
             self.composing = true;
         }
+        let result = self.send(msg, wp, lp)?;
         if msg == WM_IME_ENDCOMPOSITION {
             self.composing = false;
+            if let Some(size) = self.pending_size {
+                self.set_size(size)?;
+            }
         }
-        let result = self.send(msg, wp, lp)?;
         if matches!(
             msg,
             WM_CHAR
@@ -680,6 +734,62 @@ mod tests {
             input.message(WM_CLEAR, WPARAM(0), LPARAM(0)).unwrap();
             assert_eq!(input.content_bounds(), empty);
             input.message(WM_UNDO, WPARAM(0), LPARAM(0)).unwrap();
+            assert_eq!(input.content().unwrap(), "透明文字\nF");
+            let selection = || {
+                let mut range = CHARRANGE::default();
+                input
+                    .send(EM_EXGETSEL, WPARAM(0), LPARAM((&raw mut range) as isize))
+                    .unwrap();
+                (range.cpMin, range.cpMax)
+            };
+            input.send(EM_SETSEL, WPARAM(1), LPARAM(3)).unwrap();
+            assert_eq!(selection(), (1, 3));
+            let format_height = |input: &TextInput| {
+                let mut format = CHARFORMATW {
+                    cbSize: size_of::<CHARFORMATW>() as u32,
+                    ..Default::default()
+                };
+                input
+                    .send(
+                        EM_GETCHARFORMAT,
+                        WPARAM(SCF_DEFAULT as usize),
+                        LPARAM((&raw mut format) as isize),
+                    )
+                    .unwrap();
+                format.yHeight
+            };
+            let previous_format = format_height(&input);
+            let previous_bounds = input.content_bounds();
+            input.set_size(48.).unwrap();
+            assert_eq!(
+                format_height(&input),
+                (48. * 1440. / input.dpi_y).round() as i32
+            );
+            assert!(format_height(&input) > previous_format);
+            assert!(input.content_bounds().bottom > previous_bounds.bottom);
+            let mut range = CHARRANGE::default();
+            input
+                .send(EM_EXGETSEL, WPARAM(0), LPARAM((&raw mut range) as isize))
+                .unwrap();
+            assert_eq!((range.cpMin, range.cpMax), (1, 3));
+            assert_eq!(input.content().unwrap(), "透明文字\nF");
+            input.send(EM_SETSEL, WPARAM(3), LPARAM(3)).unwrap();
+            input
+                .message(WM_IME_STARTCOMPOSITION, WPARAM(0), LPARAM(0))
+                .unwrap();
+            input.set_size(8.).unwrap();
+            input.set_size(256.).unwrap();
+            assert_eq!(input.requested_size(), 256.);
+            assert_eq!(input.size, 48.);
+            assert!(input.composing());
+            input
+                .message(WM_IME_ENDCOMPOSITION, WPARAM(0), LPARAM(0))
+                .unwrap();
+            assert_eq!(input.size, 256.);
+            assert_eq!(
+                format_height(&input),
+                (256. * 1440. / input.dpi_y).round() as i32
+            );
             assert_eq!(input.content().unwrap(), "透明文字\nF");
             drop(input);
             DestroyWindow(hwnd).unwrap();

@@ -4,10 +4,9 @@ use crate::core::config::Config;
 
 pub const HEADER: i32 = 84;
 pub const START_CAPTURE: u16 = 202;
-pub const STROKE_SLIDER: u16 = 420;
-pub const STROKE_EDIT: u16 = 424;
-pub const STROKE_LABELS: [&str; 3] = ["矩形线宽", "箭头线宽", "画笔线宽"];
-pub const TEXT_SIZES: [u8; 4] = [16, 24, 32, 48];
+pub const PARAMETER_SLIDER: u16 = 420;
+pub const PARAMETER_EDIT: u16 = 424;
+pub const PARAMETER_LABELS: [&str; 4] = ["矩形线宽", "箭头线宽", "画笔线宽", "文字字号"];
 pub const FOOTER: i32 = 56;
 const GROUP_GAP: i32 = 26;
 const ROW: i32 = 42;
@@ -117,28 +116,21 @@ impl Page {
                 let compact = p.width < 510;
                 p.text("颜色", 0, p.width, Tone::Normal);
                 p.choices(410, 8, 34, compact, 26);
-                for (index, label) in STROKE_LABELS.into_iter().enumerate() {
+                for (index, label) in PARAMETER_LABELS.into_iter().enumerate() {
                     let start = (p.width - 276).max(110);
                     p.text(label, 0, start - 10, Tone::Normal);
                     p.control(
-                        STROKE_SLIDER + index as u16,
+                        PARAMETER_SLIDER + index as u16,
                         start,
                         -3,
                         p.width - start - 83,
                         28,
                     );
-                    p.control(STROKE_EDIT + index as u16, p.width - 74, -3, 49, 28);
+                    p.control(PARAMETER_EDIT + index as u16, p.width - 74, -3, 49, 28);
                     p.text("px", p.width - 18, 18, Tone::Muted);
                     p.y += ROW;
                 }
-                let text = if TEXT_SIZES.contains(&cfg.text_size) {
-                    "字号".into()
-                } else {
-                    format!("字号（当前 {} px）", cfg.text_size)
-                };
-                p.text(text, 0, p.width, Tone::Normal);
-                p.choices(430, 4, 76, compact, 26);
-                p.note("线宽为成图实际像素，支持 1–64 px。", Tone::Muted);
+                p.note("成图实际像素 · 线宽 1–64 px · 字号 8–256 px", Tone::Muted);
             }
             3 => {
                 p.heading("窗口操作");

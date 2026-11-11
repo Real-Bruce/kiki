@@ -1,10 +1,11 @@
 use super::{
-    stroke_control, text_input::TextInput, toolbar_icons::ToolbarIcons, ui_palette as palette,
+    parameter_control, text_input::TextInput, toolbar_icons::ToolbarIcons, ui_palette as palette,
 };
 use crate::core::{
     annotation::{
         Editor, Shape, Tool, rotate_point, text_center, text_frame, text_rotation_handle,
     },
+    config::CaptureParameter,
     display::DisplayInfo,
     geometry::PixelRect,
     image::Image,
@@ -43,8 +44,6 @@ const BAR_RADIUS: f32 = 10.;
 const PARAM_WIDTH: f32 = 506.;
 const COLOR_START: f32 = 10.;
 const COLOR_STEP: f32 = 30.;
-const VALUE_START: f32 = 258.;
-const VALUE_STEP: f32 = 52.;
 
 pub struct Layout {
     pub bounds: PixelRect,
@@ -65,10 +64,10 @@ impl Layout {
             bottom: r.bottom - px(inset_y),
         })
     }
-    pub fn stroke_slider(&self) -> Option<PixelRect> {
+    pub fn parameter_slider(&self) -> Option<PixelRect> {
         self.parameter_box(305., 418., 8.)
     }
-    pub fn stroke_edit(&self) -> Option<PixelRect> {
+    pub fn parameter_edit(&self) -> Option<PixelRect> {
         self.parameter_box(430., 477., 7.)
     }
 }
@@ -82,7 +81,8 @@ pub struct PaintInput<'a> {
     pub pointer: PixelPoint,
     pub focus: usize,
     pub pressed: Option<usize>,
-    pub editing_stroke: bool,
+    pub editing_parameter: bool,
+    pub parameter: Option<(CaptureParameter, u16)>,
     pub parameter_error: Option<&'static str>,
 }
 pub struct Canvas {
@@ -174,11 +174,6 @@ impl Canvas {
     pub fn layout(&self, rect: PixelRect, screens: &[DisplayInfo], tool: Tool) -> Layout {
         let (screen, preferred) = self.display(rect, screens);
         let parameters = tool != Tool::Select;
-        let parameter_width = if tool == Tool::Text {
-            418.
-        } else {
-            PARAM_WIDTH
-        };
         let height = BAR_HEIGHT
             + if parameters {
                 PARAM_GAP + PARAM_HEIGHT
@@ -213,9 +208,9 @@ impl Canvas {
                 ..bounds
             },
             parameters: parameters.then(|| PixelRect {
-                left: x((BAR_WIDTH - parameter_width) / 2.),
+                left: x((BAR_WIDTH - PARAM_WIDTH) / 2.),
                 top: y(BAR_HEIGHT + PARAM_GAP),
-                right: x((BAR_WIDTH + parameter_width) / 2.),
+                right: x((BAR_WIDTH + PARAM_WIDTH) / 2.),
                 bottom: bounds.bottom,
             }),
             bounds,
@@ -256,7 +251,8 @@ impl Canvas {
             pointer,
             focus,
             pressed,
-            editing_stroke,
+            editing_parameter,
+            parameter,
             parameter_error,
         } = input;
         let editing = text_input.and_then(|input| input.index);
@@ -388,7 +384,10 @@ impl Canvas {
             };
             if let Some(layout) = layout {
                 self.paint_toolbar(&layout, editor, pointer, focus, pressed, busy);
-                self.paint_parameters(&layout, editor, focus, editing_stroke);
+                self.paint_parameters(&layout, editor, focus);
+                if let Some(parameter) = parameter {
+                    self.paint_parameter_slider(&layout, parameter, focus, editing_parameter);
+                }
             }
             if busy || parameter_error.is_some() || super::preferences::hints() {
                 let selected = selection.rect.is_some();
@@ -534,7 +533,27 @@ impl Canvas {
         style: crate::core::annotation::Style,
         (angle, center): (f64, Option<(f64, f64)>),
     ) -> Result<crate::core::annotation::Object> {
-        let metrics = super::annotation_render::text_metrics(&self.dw, &content, size, width)?;
+        let bounds = self.text_bounds(origin, &content, size, width, center)?;
+        Ok(crate::core::annotation::Object {
+            shape: Shape::Text {
+                bounds,
+                content,
+                size,
+                wrap_width: width,
+                angle,
+            },
+            style,
+        })
+    }
+    pub fn text_bounds(
+        &self,
+        origin: PixelPoint,
+        content: &str,
+        size: f32,
+        width: f32,
+        center: Option<(f64, f64)>,
+    ) -> Result<PixelRect> {
+        let metrics = super::annotation_render::text_metrics(&self.dw, content, size, width)?;
         let w = metrics.widthIncludingTrailingWhitespace.ceil().max(1.);
         let h = metrics.height.ceil().max(1.);
         if !w.is_finite() || !h.is_finite() || w > i32::MAX as f32 || h > i32::MAX as f32 {
@@ -557,23 +576,14 @@ impl Canvas {
         let bottom = origin.y.checked_add(h as i32).ok_or_else(|| {
             windows::core::Error::new(windows::Win32::Foundation::E_FAIL, "文字范围溢出")
         })?;
-        Ok(crate::core::annotation::Object {
-            shape: Shape::Text {
-                bounds: PixelRect {
-                    left: origin.x,
-                    top: origin.y,
-                    right,
-                    bottom,
-                },
-                content,
-                size,
-                wrap_width: width,
-                angle,
-            },
-            style,
+        Ok(PixelRect {
+            left: origin.x,
+            top: origin.y,
+            right,
+            bottom,
         })
     }
-    pub fn parameter_at(&self, layout: &Layout, p: PixelPoint, tool: Tool) -> Option<usize> {
+    pub fn parameter_at(&self, layout: &Layout, p: PixelPoint) -> Option<usize> {
         let r = layout.parameters?;
         if !contains(r, p) {
             return None;
@@ -581,28 +591,15 @@ impl Canvas {
         let x = (p.x - r.left) as f32 / layout.scale;
         if (COLOR_START..COLOR_START + 8. * COLOR_STEP).contains(&x) {
             Some(((x - COLOR_START) / COLOR_STEP) as usize)
-        } else if tool.stroke_index().is_some() {
-            if layout.stroke_slider().is_some_and(|r| contains(r, p)) {
-                Some(8)
-            } else if layout.stroke_edit().is_some_and(|r| contains(r, p)) {
-                Some(9)
-            } else {
-                None
-            }
-        } else if (VALUE_START..VALUE_START + 3. * VALUE_STEP).contains(&x) {
-            let offset = x - VALUE_START;
-            (offset % VALUE_STEP < 46.).then_some(8 + (offset / VALUE_STEP) as usize)
+        } else if layout.parameter_slider().is_some_and(|r| contains(r, p)) {
+            Some(8)
+        } else if layout.parameter_edit().is_some_and(|r| contains(r, p)) {
+            Some(9)
         } else {
             None
         }
     }
-    fn paint_parameters(
-        &self,
-        layout: &Layout,
-        editor: &Editor,
-        focus: usize,
-        editing_stroke: bool,
-    ) {
+    fn paint_parameters(&self, layout: &Layout, editor: &Editor, focus: usize) {
         let Some(bounds) = layout.parameters else {
             return;
         };
@@ -647,38 +644,16 @@ impl Canvas {
                     None,
                 );
             }
-            if editor.tool.stroke_index().is_some() {
-                self.paint_stroke_width(layout, editor.style().width as u8, focus, editing_stroke);
-                return;
-            }
-            for (i, size) in [18., 24., 36.].into_iter().enumerate() {
-                let b = D2D_RECT_F {
-                    left: r.left + (VALUE_START + i as f32 * VALUE_STEP) * s,
-                    top: r.top + 6. * s,
-                    right: r.left + (VALUE_START + 46. + i as f32 * VALUE_STEP) * s,
-                    bottom: r.bottom - 6. * s,
-                };
-                let selected = size == editor.text_size;
-                if selected {
-                    self.round(b, 6. * s, tone(palette::selected(dark), 1.));
-                }
-                if focus == 19 + i {
-                    self.outline(b, 6. * s, 1.5 * s, tone(palette::accent(dark), 1.));
-                }
-                let foreground = tone(
-                    if selected {
-                        palette::accent(dark)
-                    } else {
-                        palette::foreground(dark)
-                    },
-                    1.,
-                );
-                self.label(&format!("{}", size as i32), b, foreground);
-            }
         }
     }
-    fn paint_stroke_width(&self, layout: &Layout, width: u8, focus: usize, editing: bool) {
-        let Some((slider, edit)) = layout.stroke_slider().zip(layout.stroke_edit()) else {
+    fn paint_parameter_slider(
+        &self,
+        layout: &Layout,
+        (parameter, value): (CaptureParameter, u16),
+        focus: usize,
+        editing: bool,
+    ) {
+        let Some((slider, edit)) = layout.parameter_slider().zip(layout.parameter_edit()) else {
             return;
         };
         let slider = self.local(slider);
@@ -691,7 +666,7 @@ impl Canvas {
         let y = (slider.top + slider.bottom) / 2.;
         let left = slider.left + 6. * s;
         let right = slider.right - 6. * s;
-        let thumb = left + stroke_control::fraction(width) * (right - left);
+        let thumb = left + parameter_control::fraction(parameter, value) * (right - left);
         let track = D2D_RECT_F {
             left,
             top: y - 1.5 * s,
@@ -732,7 +707,10 @@ impl Canvas {
             divider,
         );
         self.label(
-            "线宽",
+            match parameter {
+                CaptureParameter::Stroke(_) => "线宽",
+                CaptureParameter::TextSize => "字号",
+            },
             D2D_RECT_F {
                 left: slider.left - 47. * s,
                 right: slider.left - 8. * s,
@@ -761,7 +739,7 @@ impl Canvas {
             },
         );
         if !editing {
-            self.label(&width.to_string(), edit, foreground);
+            self.label(&value.to_string(), edit, foreground);
         }
     }
     fn paint_annotations(

@@ -1,5 +1,5 @@
-//! Shared Win32 input and slider mapping for physical-pixel stroke widths.
-use crate::core::config::{MAX_STROKE_WIDTH, MIN_STROKE_WIDTH, parse_stroke_width};
+//! Shared Win32 input and slider mapping for integer capture parameters.
+use crate::core::config::CaptureParameter;
 use windows::{
     Win32::{
         Foundation::*,
@@ -23,19 +23,20 @@ impl Wheel {
     }
 }
 
-pub fn step(width: u8, steps: i32) -> u8 {
-    (i32::from(width) + steps).clamp(i32::from(MIN_STROKE_WIDTH), i32::from(MAX_STROKE_WIDTH)) as u8
+pub fn step(parameter: CaptureParameter, value: u16, steps: i32) -> u16 {
+    let (min, max) = parameter.bounds();
+    (i32::from(value) + steps).clamp(i32::from(min), i32::from(max)) as u16
 }
 
-pub fn fraction(width: u8) -> f32 {
-    f32::from(width - MIN_STROKE_WIDTH) / f32::from(MAX_STROKE_WIDTH - MIN_STROKE_WIDTH)
+pub fn fraction(parameter: CaptureParameter, value: u16) -> f32 {
+    let (min, max) = parameter.bounds();
+    f32::from(value.clamp(min, max) - min) / f32::from(max - min)
 }
 
-pub fn slider_value(x: f32, left: f32, right: f32) -> u8 {
-    MIN_STROKE_WIDTH
-        + (((x - left) / (right - left).max(1.)).clamp(0., 1.)
-            * f32::from(MAX_STROKE_WIDTH - MIN_STROKE_WIDTH))
-        .round() as u8
+pub fn slider_value(parameter: CaptureParameter, x: f32, left: f32, right: f32) -> u16 {
+    let (min, max) = parameter.bounds();
+    min + (((x - left) / (right - left).max(1.)).clamp(0., 1.) * f32::from(max - min)).round()
+        as u16
 }
 
 pub fn create_edit(parent: HWND, id: u16, font: HFONT) -> Result<HWND> {
@@ -67,19 +68,22 @@ pub fn create_edit(parent: HWND, id: u16, font: HFONT) -> Result<HWND> {
     }
 }
 
-pub fn set_edit(edit: HWND, width: u8) {
-    let text: Vec<u16> = width.to_string().encode_utf16().chain(Some(0)).collect();
+pub fn set_edit(edit: HWND, value: u16) {
+    let text: Vec<u16> = value.to_string().encode_utf16().chain(Some(0)).collect();
     // SAFETY: the caller supplies a live edit on this thread and the string is NUL-terminated.
     unsafe {
         let _ = SetWindowTextW(edit, PCWSTR(text.as_ptr()));
     }
 }
 
-pub fn read_edit(edit: HWND) -> std::result::Result<u8, &'static str> {
+pub fn read_edit(
+    edit: HWND,
+    parameter: CaptureParameter,
+) -> std::result::Result<u16, &'static str> {
     let mut text = [0u16; 17];
     // SAFETY: GetWindowTextW writes within the call-scoped buffer.
     let len = unsafe { GetWindowTextW(edit, &mut text) } as usize;
-    parse_stroke_width(&String::from_utf16_lossy(&text[..len]))
+    parameter.parse(&String::from_utf16_lossy(&text[..len]))
 }
 
 unsafe extern "system" fn edit_proc(

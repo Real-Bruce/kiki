@@ -382,7 +382,7 @@ mod tests {
             writer.request(
                 revision,
                 Config {
-                    text_size: 12 + (revision % 60) as u8,
+                    text_size: 12 + (revision % 60) as u16,
                     ..Config::default()
                 },
             );

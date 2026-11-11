@@ -104,15 +104,42 @@ pub const CONFIG_VERSION: u32 = 2;
 pub const MIN_STROKE_WIDTH: u8 = 1;
 pub const MAX_STROKE_WIDTH: u8 = 64;
 pub const DEFAULT_STROKE_WIDTH: u8 = 3;
+pub const DEFAULT_TEXT_SIZE: u16 = 24;
 const STROKE_KEYS: [&str; 3] = ["rectangle_width", "arrow_width", "pen_width"];
 
-pub fn parse_stroke_width(value: &str) -> Result<u8, &'static str> {
-    value
-        .parse::<u8>()
-        .ok()
-        .filter(|width| (MIN_STROKE_WIDTH..=MAX_STROKE_WIDTH).contains(width))
-        .filter(|_| value.bytes().all(|byte| byte.is_ascii_digit()))
-        .ok_or("请输入 1–64 之间的整数线宽（px）。")
+#[derive(Clone, Copy)]
+pub enum CaptureParameter {
+    Stroke(usize),
+    TextSize,
+}
+
+impl CaptureParameter {
+    pub const fn bounds(self) -> (u16, u16) {
+        match self {
+            Self::Stroke(_) => (MIN_STROKE_WIDTH as u16, MAX_STROKE_WIDTH as u16),
+            Self::TextSize => (8, 256),
+        }
+    }
+
+    pub fn parse(self, value: &str) -> Result<u16, &'static str> {
+        let (min, max) = self.bounds();
+        value
+            .parse::<u16>()
+            .ok()
+            .filter(|value| (min..=max).contains(value))
+            .filter(|_| value.bytes().all(|byte| byte.is_ascii_digit()))
+            .ok_or(match self {
+                Self::Stroke(_) => "请输入 1–64 之间的整数线宽（px）。",
+                Self::TextSize => "请输入 8–256 之间的整数字号（px）。",
+            })
+    }
+
+    pub fn value(self, config: &Config) -> u16 {
+        match self {
+            Self::Stroke(index) => u16::from(config.stroke_widths[index]),
+            Self::TextSize => config.text_size,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -123,7 +150,7 @@ pub struct Config {
     pub first_tip_seen: bool,
     pub color: [u8; 3],
     pub stroke_widths: [u8; 3],
-    pub text_size: u8,
+    pub text_size: u16,
     pub last_directory: Option<String>,
     pub extra: BTreeMap<String, String>,
 }
@@ -136,7 +163,7 @@ impl Default for Config {
             first_tip_seen: false,
             color: [255, 59, 64],
             stroke_widths: [DEFAULT_STROKE_WIDTH; 3],
-            text_size: 24,
+            text_size: DEFAULT_TEXT_SIZE,
             last_directory: None,
             extra: BTreeMap::new(),
         }
@@ -145,11 +172,12 @@ impl Default for Config {
 impl Config {
     pub fn validate(&self) -> Result<(), String> {
         self.hotkey.validate()?;
+        let (min_text, max_text) = CaptureParameter::TextSize.bounds();
         if self
             .stroke_widths
             .iter()
             .any(|width| !(MIN_STROKE_WIDTH..=MAX_STROKE_WIDTH).contains(width))
-            || !(12..=72).contains(&self.text_size)
+            || !(min_text..=max_text).contains(&self.text_size)
         {
             return Err("工具默认线宽或字号超出支持范围".into());
         }
@@ -238,14 +266,20 @@ impl Config {
                     }
                     config.stroke_widths = [width; 3];
                 }
-                "text_size" => config.text_size = value.parse().map_err(|_| "默认字号无效")?,
+                "text_size" => {
+                    config.text_size = CaptureParameter::TextSize.parse(value)?;
+                    if legacy && !(12..=72).contains(&config.text_size) {
+                        return Err("旧版默认字号超出支持范围".into());
+                    }
+                }
                 "last_directory" => {
                     config.last_directory = (!value.is_empty()).then(|| value.to_string())
                 }
                 _ => {
                     if let Some(index) = STROKE_KEYS.iter().position(|name| *name == key) {
                         if !legacy {
-                            config.stroke_widths[index] = parse_stroke_width(value)?;
+                            config.stroke_widths[index] =
+                                CaptureParameter::Stroke(index).parse(value)? as u8;
                         }
                     } else {
                         config.extra.insert(key.to_owned(), value.to_owned());
@@ -306,7 +340,29 @@ mod tests {
             [3, 3, 13]
         );
         for value in ["", "0", "65", "+3", "3.0", "x", "255"] {
-            assert!(parse_stroke_width(value).is_err(), "{value}");
+            assert!(CaptureParameter::Stroke(0).parse(value).is_err(), "{value}");
+        }
+    }
+    #[test]
+    fn text_size_keeps_legacy_values_and_accepts_the_full_v2_range() {
+        let legacy = Config::decode("version=1\ntext_size=72").unwrap().0;
+        assert_eq!(legacy.text_size, 72);
+        assert_eq!(
+            Config::decode(&legacy.encode().unwrap())
+                .unwrap()
+                .0
+                .text_size,
+            72
+        );
+        for size in [8, 24, 255, 256] {
+            let config = Config {
+                text_size: size,
+                ..Config::default()
+            };
+            assert_eq!(Config::decode(&config.encode().unwrap()).unwrap().0, config);
+        }
+        for value in ["7", "257", "", "24.5", "-8", "abc"] {
+            assert!(CaptureParameter::TextSize.parse(value).is_err());
         }
     }
     #[test]
