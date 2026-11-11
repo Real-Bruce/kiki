@@ -7,6 +7,7 @@ pub const START_CAPTURE: u16 = 202;
 pub const PARAMETER_SLIDER: u16 = 420;
 pub const PARAMETER_EDIT: u16 = 425;
 pub const OUTPUT_FORMAT: u16 = 430;
+pub const RESET_CAPTURE: u16 = 431;
 pub const PARAMETER_LABELS: [&str; 5] =
     ["矩形线宽", "箭头线宽", "画笔线宽", "文字字号", "圆角半径"];
 pub const FOOTER: i32 = 56;
@@ -146,7 +147,9 @@ impl Page {
                     p.width - 122,
                     Tone::Muted,
                 );
-                p.y += 48;
+                p.y += 70;
+                p.control(RESET_CAPTURE, 0, 0, 148, 38);
+                p.y += 38;
             }
             3 => {
                 p.heading("窗口操作");

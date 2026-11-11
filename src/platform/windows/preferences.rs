@@ -148,6 +148,12 @@ pub fn update(config: Config) -> std::result::Result<(), String> {
     update_config(config, false, CHANGED)
 }
 
+pub fn reset_capture_defaults() -> std::result::Result<(), String> {
+    let mut config = current();
+    config.reset_capture_defaults();
+    update(config)
+}
+
 pub fn set_parameter(parameter: CaptureParameter, value: u16) -> std::result::Result<(), String> {
     let (min, max) = parameter.bounds();
     if !(min..=max).contains(&value) {

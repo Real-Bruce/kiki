@@ -8,11 +8,13 @@ use super::{
     startup,
 };
 use crate::core::config::{CaptureParameter, Config, Hotkey, OutputFormat, Theme};
+#[path = "settings_reset_dialog.rs"]
+mod reset_dialog;
 #[path = "settings_layout.rs"]
 mod settings_layout;
 use settings_layout::{
     FOOTER, HEADER, Item, OUTPUT_FORMAT, PARAMETER_EDIT, PARAMETER_LABELS, PARAMETER_SLIDER, Page,
-    Rect, START_CAPTURE, Tone,
+    RESET_CAPTURE, Rect, START_CAPTURE, Tone,
 };
 use std::{cell::Cell, rc::Rc};
 use windows::{
@@ -340,23 +342,9 @@ pub fn refresh() {
                     hotkey::set_control(child, cfg.hotkey);
                 }
             }
-            let dark = BOOL::from(system_dark());
-            let _ = DwmSetWindowAttribute(
-                hwnd,
-                DWMWA_USE_IMMERSIVE_DARK_MODE,
-                &dark as *const _ as *const _,
-                std::mem::size_of::<BOOL>() as u32,
-            );
-            let caption = rgb(appearance::sidebar(dark.as_bool()));
-            let text = rgb(appearance::foreground(dark.as_bool()));
-            let _ = DwmSetWindowAttribute(
-                hwnd,
-                DWMWA_CAPTION_COLOR,
-                &caption as *const _ as *const _,
-                4,
-            );
-            let _ = DwmSetWindowAttribute(hwnd, DWMWA_TEXT_COLOR, &text as *const _ as *const _, 4);
-            let brush = CreateSolidBrush(rgb(appearance::background(dark.as_bool())));
+            let dark = system_dark();
+            apply_window_theme(hwnd, dark);
+            let brush = CreateSolidBrush(rgb(appearance::background(dark)));
             let old = std::mem::replace(&mut (*p).brush, brush);
             let _ = DeleteObject(old.into());
             (*p).suppress = false;
@@ -364,6 +352,28 @@ pub fn refresh() {
             layout(hwnd);
             let _ = InvalidateRect(Some(hwnd), None, true);
         }
+    }
+}
+
+fn apply_window_theme(hwnd: HWND, dark: bool) {
+    let caption = rgb(appearance::sidebar(dark));
+    let text = rgb(appearance::foreground(dark));
+    let dark = BOOL::from(dark);
+    // SAFETY: the caller supplies a live window. Each DWM attribute copies a 32-bit value.
+    unsafe {
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE,
+            (&dark as *const BOOL).cast(),
+            4,
+        );
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_CAPTION_COLOR,
+            (&caption as *const COLORREF).cast(),
+            4,
+        );
+        let _ = DwmSetWindowAttribute(hwnd, DWMWA_TEXT_COLOR, (&text as *const COLORREF).cast(), 4);
     }
 }
 
@@ -448,6 +458,7 @@ fn caption(id: u16, cfg: &Config, start: &std::result::Result<startup::State, St
         }
         420..=424 => PARAMETER_LABELS[usize::from(id - PARAMETER_SLIDER)].into(),
         OUTPUT_FORMAT => format!("输出格式：{}", cfg.output_format.label()),
+        RESET_CAPTURE => "恢复默认".into(),
         500 => "关闭贴图".into(),
         600..=602 => {
             let i = (id - 600) as usize;
@@ -483,6 +494,7 @@ fn create_controls(hwnd: HWND) -> Result<()> {
                 301,
                 400,
                 OUTPUT_FORMAT,
+                RESET_CAPTURE,
                 500,
                 700,
                 701,
@@ -798,6 +810,7 @@ fn paint(hwnd: HWND, p: *mut State) -> Result<()> {
 }
 
 fn action(hwnd: HWND, id: u16) {
+    // SAFETY: commands are dispatched to the live settings window on its owning thread.
     unsafe {
         let p = pointer(hwnd);
         if p.is_null() || (*p).suppress {
@@ -845,6 +858,14 @@ fn action(hwnd: HWND, id: u16) {
                 preferences::update(cfg)
             }
             OUTPUT_FORMAT => choose_output_format(hwnd, cfg.output_format),
+            RESET_CAPTURE if (*p).page == 2 => match reset_dialog::confirm(hwnd, system_dark()) {
+                Ok(true) if life.get() == Some(hwnd) => {
+                    // Other preference updates may have arrived while the dialog was open.
+                    preferences::reset_capture_defaults()
+                }
+                Ok(_) => Ok(()),
+                Err(error) => Err(format!("无法打开恢复默认确认框：{error}")),
+            },
             500 => {
                 super::pinned::close_all();
                 Ok(())
@@ -1270,6 +1291,10 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                             text_color,
                         );
                         cfg.output_format.label().to_owned()
+                    }
+                    RESET_CAPTURE => {
+                        shapes.focus_ring(r, dip(8) as f32, dpi_scale, appearance::divider(dark));
+                        caption(id, &cfg, &state.startup)
                     }
                     _ => caption(id, &cfg, &state.startup),
                 };

@@ -1959,6 +1959,123 @@ mod tests {
         }
     }
     #[test]
+    fn reset_capture_defaults_preserves_active_editor_and_seeds_next_preview() {
+        use super::super::{
+            config_store::Disk,
+            preferences::{self, SaveStatus},
+        };
+        use crate::core::config::{Config, Key, OutputFormat, Theme};
+
+        super::super::tests::graphics_runtime();
+        let _com = composition::Apartment::enter().unwrap();
+        let path = std::env::temp_dir().join(format!("kiki-reset-{}.ini", std::process::id()));
+        let mut before = Config {
+            theme: Theme::Dark,
+            show_hints: false,
+            first_tip_seen: true,
+            color: [0, 122, 255],
+            stroke_widths: [9, 12, 14],
+            text_size: 47,
+            corner_radius: 62,
+            output_format: OutputFormat::Jpeg,
+            last_directory: Some(r"C:\kiki-output".into()),
+            ..Config::default()
+        };
+        before.hotkey.key = Key::Function(16);
+        before.extra.insert("custom_option".into(), "a=b".into());
+        std::fs::write(&path, before.encode().unwrap()).unwrap();
+        // SAFETY: both hidden previews and their preference session belong to
+        // this thread, and each editor is inspected outside window callbacks.
+        unsafe {
+            register(GetModuleHandleW(None).unwrap().into()).unwrap();
+            let (active, p) = setup();
+            let hwnd = active.hwnd().unwrap();
+            let (guard, warning) = preferences::initialize_at(hwnd, path.clone()).unwrap();
+            assert!(warning.is_none());
+            assert!(preferences::active());
+            let objects = (*p).editor.objects().to_vec();
+            let index = objects
+                .iter()
+                .position(|o| o.matches_tool(Tool::Text))
+                .unwrap();
+            (*p).activate(Tool::Text.button());
+            start_text(hwnd, p, Some(index)).unwrap();
+            let draft = (*p).text_input.as_ref().unwrap();
+            let original = (draft.content().unwrap(), draft.size, draft.angle);
+
+            preferences::reset_capture_defaults().unwrap();
+            let defaults = Config::default();
+            let expected = Config {
+                theme: before.theme,
+                hotkey: before.hotkey,
+                first_tip_seen: before.first_tip_seen,
+                last_directory: before.last_directory,
+                extra: before.extra,
+                ..defaults.clone()
+            };
+            assert_eq!(preferences::current(), expected);
+            assert!(preferences::active());
+            assert_eq!((*p).editor.objects(), objects);
+            let draft = (*p).text_input.as_ref().unwrap();
+            assert_eq!(
+                (draft.content().unwrap(), draft.size, draft.angle),
+                original
+            );
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while matches!(preferences::status(), SaveStatus::Saving) {
+                assert!(Instant::now() < deadline, "reset was not persisted");
+                preferences::poll();
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert!(matches!(preferences::status(), SaveStatus::Saved));
+            let saved_at = std::fs::metadata(&path).unwrap().modified().unwrap();
+            for _ in 0..2 {
+                preferences::reset_capture_defaults().unwrap();
+                assert!(matches!(preferences::status(), SaveStatus::Saved));
+            }
+            drop(guard);
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().modified().unwrap(),
+                saved_at
+            );
+            assert_eq!(Disk::load(path.clone()).config, expected);
+
+            let (reopened, warning) = preferences::initialize_at(hwnd, path.clone()).unwrap();
+            assert!(warning.is_none());
+            assert_eq!(preferences::current(), expected);
+            assert!(preferences::active());
+
+            let (image, _) = composition::fixture().unwrap();
+            let next = Preview::open_inner(
+                CaptureResult {
+                    image,
+                    #[cfg(feature = "diagnostics")]
+                    elapsed: Duration::ZERO,
+                    screens: Vec::new(),
+                    windows: Vec::new(),
+                },
+                false,
+            )
+            .unwrap();
+            let next_state = GetWindowLongPtrW(next.hwnd().unwrap(), GWLP_USERDATA) as *const State;
+            for (style, width) in (*next_state)
+                .editor
+                .styles
+                .iter()
+                .zip(defaults.stroke_widths)
+            {
+                assert_eq!(style.width, f32::from(width));
+                assert_eq!(style.color, defaults.color);
+            }
+            assert_eq!((*next_state).editor.text_size, defaults.text_size);
+            assert_eq!((*next_state).corner_radius, defaults.corner_radius);
+            drop(next);
+            drop(reopened);
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn selection_edges_win_over_annotation_handles_and_space_moves_selection() {
         super::super::tests::graphics_runtime();
         let _com = composition::Apartment::enter().unwrap();

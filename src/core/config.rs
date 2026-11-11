@@ -202,6 +202,16 @@ impl Default for Config {
     }
 }
 impl Config {
+    pub fn reset_capture_defaults(&mut self) {
+        let defaults = Self::default();
+        self.show_hints = defaults.show_hints;
+        self.color = defaults.color;
+        self.stroke_widths = defaults.stroke_widths;
+        self.text_size = defaults.text_size;
+        self.corner_radius = defaults.corner_radius;
+        self.output_format = defaults.output_format;
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         self.hotkey.validate()?;
         let (min_text, max_text) = CaptureParameter::TextSize.bounds();
