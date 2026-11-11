@@ -7,12 +7,12 @@ use super::{
     settings_render::{self as appearance, Canvas},
     startup,
 };
-use crate::core::config::{CaptureParameter, Config, Hotkey, Theme};
+use crate::core::config::{CaptureParameter, Config, Hotkey, OutputFormat, Theme};
 #[path = "settings_layout.rs"]
 mod settings_layout;
 use settings_layout::{
-    FOOTER, HEADER, Item, PARAMETER_EDIT, PARAMETER_LABELS, PARAMETER_SLIDER, Page, Rect,
-    START_CAPTURE, Tone,
+    FOOTER, HEADER, Item, OUTPUT_FORMAT, PARAMETER_EDIT, PARAMETER_LABELS, PARAMETER_SLIDER, Page,
+    Rect, START_CAPTURE, Tone,
 };
 use std::{cell::Cell, rc::Rc};
 use windows::{
@@ -447,6 +447,7 @@ fn caption(id: u16, cfg: &Config, start: &std::result::Result<startup::State, St
             )
         }
         420..=424 => PARAMETER_LABELS[usize::from(id - PARAMETER_SLIDER)].into(),
+        OUTPUT_FORMAT => format!("输出格式：{}", cfg.output_format.label()),
         500 => "关闭贴图".into(),
         600..=602 => {
             let i = (id - 600) as usize;
@@ -481,6 +482,7 @@ fn create_controls(hwnd: HWND) -> Result<()> {
                 300,
                 301,
                 400,
+                OUTPUT_FORMAT,
                 500,
                 700,
                 701,
@@ -704,12 +706,16 @@ fn paint(hwnd: HWND, p: *mut State) -> Result<()> {
                     c.value(label, r.x as f32, r.y as f32 - offset, r.w as f32, sub)
                 }
                 Item::Divider(y) => c.fill(x, *y as f32 - offset, w, 1., appearance::divider(dark)),
-                Item::CornerPreview(r) => c.corner_preview(
-                    r.x as f32,
-                    r.y as f32 - offset,
-                    preferences::current().corner_radius,
-                    dark,
-                ),
+                Item::CornerPreview(r) => {
+                    let cfg = preferences::current();
+                    c.corner_preview(
+                        r.x as f32,
+                        r.y as f32 - offset,
+                        cfg.corner_radius,
+                        cfg.output_format,
+                        dark,
+                    );
+                }
                 Item::Control(id, r)
                     if setting_parameter(*id, PARAMETER_EDIT).is_some()
                         && r.y - state.scroll >= HEADER
@@ -838,6 +844,7 @@ fn action(hwnd: HWND, id: u16) {
                 cfg.color = COLORS[(id - 410) as usize];
                 preferences::update(cfg)
             }
+            OUTPUT_FORMAT => choose_output_format(hwnd, cfg.output_format),
             500 => {
                 super::pinned::close_all();
                 Ok(())
@@ -870,6 +877,50 @@ fn action(hwnd: HWND, id: u16) {
             refresh();
         }
     }
+}
+
+fn choose_output_format(hwnd: HWND, selected: OutputFormat) -> std::result::Result<(), String> {
+    let mut bounds = RECT::default();
+    // SAFETY: the settings button is live on this thread. No state reference
+    // crosses the native menu's modal loop.
+    unsafe {
+        let button = GetDlgItem(Some(hwnd), i32::from(OUTPUT_FORMAT)).map_err(|e| e.to_string())?;
+        GetWindowRect(button, &mut bounds).map_err(|e| e.to_string())?;
+    }
+    let entries = [
+        (
+            1,
+            if selected == OutputFormat::Png {
+                "✓ PNG"
+            } else {
+                "   PNG"
+            },
+            true,
+        ),
+        (
+            2,
+            if selected == OutputFormat::Jpeg {
+                "✓ JPEG"
+            } else {
+                "   JPEG"
+            },
+            true,
+        ),
+    ];
+    let format = match super::menu::popup(
+        hwnd,
+        bounds.left,
+        bounds.bottom,
+        super::menu::Style::Settings,
+        &entries,
+    ) {
+        1 => OutputFormat::Png,
+        2 => OutputFormat::Jpeg,
+        _ => return Ok(()),
+    };
+    let mut config = preferences::current();
+    config.output_format = format;
+    preferences::update(config)
 }
 fn commit_parameter_edit(parent: HWND, edit: HWND, parameter: CaptureParameter, commit: bool) {
     // SAFETY: the settings window owns the edit and the preference change is UI-thread-only.
@@ -1203,6 +1254,23 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                             name.to_owned()
                         }
                     }
+                    OUTPUT_FORMAT => {
+                        shapes.focus_ring(r, dip(6) as f32, dpi_scale, appearance::divider(dark));
+                        label_bounds.right -= dip(20);
+                        let center_x = r.right - dip(15);
+                        let center_y = (r.top + r.bottom) / 2;
+                        shapes.chevron_down(
+                            RECT {
+                                left: center_x - dip(4),
+                                right: center_x + dip(4),
+                                top: center_y - dip(2),
+                                bottom: center_y + dip(2),
+                            },
+                            1.25 * dpi_scale,
+                            text_color,
+                        );
+                        cfg.output_format.label().to_owned()
+                    }
                     _ => caption(id, &cfg, &state.startup),
                 };
                 labels.push((
@@ -1416,6 +1484,11 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         let p = pointer(hwnd);
         if p.is_null() {
             return DefWindowProcW(hwnd, msg, wp, lp);
+        }
+        if matches!(msg, WM_MEASUREITEM | WM_DRAWITEM)
+            && let Some(result) = super::menu::handle(msg, lp)
+        {
+            return result;
         }
         match msg {
             RESTORE_HOTKEY => {
@@ -1644,7 +1717,7 @@ fn open_folder(hwnd: HWND) -> std::result::Result<(), String> {
 }
 fn help(cfg: &Config) -> String {
     format!(
-        "开始截图：{}，或点击系统托盘图标。\r\n\r\n拖动选择区域；拖动边框调整。\r\n选择矩形、箭头、画笔或文字进行标注。\r\nCtrl+Z 撤销；Ctrl+Y 重做；Esc 取消。\r\n复制后可用 Ctrl+V 粘贴。保存生成 PNG 图片。贴图会把截图置顶。\r\n\r\n贴图：拖动移动，滚轮缩放，Ctrl+0 原始比例。\r\nCtrl+C 复制，Ctrl+S 保存，Esc 关闭。\r\n\r\n右键托盘可打开设置、关闭贴图或退出。",
+        "开始截图：{}，或点击系统托盘图标。\r\n\r\n拖动选择区域；拖动边框调整。\r\n选择矩形、箭头、画笔或文字进行标注。\r\nCtrl+Z 撤销；Ctrl+Y 重做；Esc 取消。\r\n复制后可用 Ctrl+V 粘贴。保存可选择 PNG 或 JPEG。贴图会把截图置顶。\r\n\r\n贴图：拖动移动，滚轮缩放，Ctrl+0 原始比例。\r\nCtrl+C 复制，Ctrl+S 保存，Esc 关闭。\r\n\r\n右键托盘可打开设置、关闭贴图或退出。",
         cfg.hotkey.label()
     )
 }

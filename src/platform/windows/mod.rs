@@ -5,6 +5,7 @@ mod composition;
 mod diagnostics;
 mod display;
 mod icon;
+mod image_encode;
 mod menu;
 mod output;
 #[cfg(feature = "diagnostics")]
@@ -12,7 +13,6 @@ mod performance;
 mod pinned;
 mod pinned_device;
 mod pinned_render;
-mod png;
 mod preview;
 mod runtime;
 mod selection_render;
@@ -168,7 +168,11 @@ pub fn run() -> Result<()> {
             .map_err(|e| Error::new(E_FAIL, e.to_string()))?
             .join()
             .map_err(|_| Error::new(E_FAIL, "诊断线程意外退出"))??;
-        png::save(&result.image, &folder.join("capture.png"))?;
+        image_encode::save(
+            &result.image,
+            &folder.join("capture.png"),
+            crate::core::config::OutputFormat::Png,
+        )?;
         let bounds = result.image.bounds();
         let quarter = |a: i32, b: i32, n: i64| {
             i32::try_from(i64::from(a) + (i64::from(b) - i64::from(a)) * n / 4)
@@ -183,7 +187,11 @@ pub fn run() -> Result<()> {
                 bottom: quarter(bounds.top, bounds.bottom, 3)?,
             })
             .map_err(|e| Error::new(E_FAIL, e))?;
-        png::save(&region, &folder.join("capture-region.png"))?;
+        image_encode::save(
+            &region,
+            &folder.join("capture-region.png"),
+            crate::core::config::OutputFormat::Png,
+        )?;
         std::fs::write(
             folder.join("capture.txt"),
             format!(

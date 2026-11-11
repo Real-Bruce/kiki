@@ -1,5 +1,10 @@
 use super::geometry::PixelRect;
 
+pub fn blend_over_white(channel: u8, alpha: u8) -> u8 {
+    let alpha = u16::from(alpha);
+    ((u16::from(channel) * alpha + 255 * (255 - alpha) + 127) / 255) as u8
+}
+
 /// Owned, tightly packed, top-down BGRA8 SDR frame. No platform resources escape.
 pub struct Image {
     bounds: PixelRect,

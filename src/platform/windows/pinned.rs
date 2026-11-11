@@ -585,7 +585,7 @@ fn context_menu(hwnd: HWND, p: (i32, i32), busy: bool) -> u32 {
         super::menu::Style::Pinned,
         &[
             (1, "复制\tCtrl+C", !busy),
-            (2, "保存 PNG\tCtrl+S", !busy),
+            (2, "保存\tCtrl+S", !busy),
             (3, "恢复原始比例\tCtrl+0", !busy),
             (0, "", true),
             (4, "关闭\tEsc", true),
@@ -626,7 +626,7 @@ fn action(hwnd: HWND, pointer: *mut State, command: u32) {
                 return;
             }
             match result {
-                Ok(Some(path)) => Destination::File(path),
+                Ok(Some(target)) => Destination::File(target),
                 Ok(None) => {
                     (*pointer).busy = false;
                     let _ = InvalidateRect(Some(hwnd), None, false);

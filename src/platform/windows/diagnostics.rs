@@ -96,7 +96,11 @@ fn stress(path: PathBuf, cancel: bool) -> Result<()> {
     if cancel {
         // Recovery must work in the same worker/process after all canceled sessions release.
         let recovered = capture::desktop()?;
-        super::png::save(&recovered.image, &path.join("recovered.png"))?;
+        super::image_encode::save(
+            &recovered.image,
+            &path.join("recovered.png"),
+            crate::core::config::OutputFormat::Png,
+        )?;
     }
     Ok(())
 }

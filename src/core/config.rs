@@ -147,6 +147,29 @@ impl CaptureParameter {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OutputFormat {
+    #[default]
+    Png,
+    Jpeg,
+}
+
+impl OutputFormat {
+    pub const fn extension(self) -> &'static str {
+        match self {
+            Self::Png => "png",
+            Self::Jpeg => "jpeg",
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Png => "PNG",
+            Self::Jpeg => "JPEG",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
     pub theme: Theme,
@@ -157,6 +180,7 @@ pub struct Config {
     pub stroke_widths: [u8; 3],
     pub text_size: u16,
     pub corner_radius: u16,
+    pub output_format: OutputFormat,
     pub last_directory: Option<String>,
     pub extra: BTreeMap<String, String>,
 }
@@ -171,6 +195,7 @@ impl Default for Config {
             stroke_widths: [DEFAULT_STROKE_WIDTH; 3],
             text_size: DEFAULT_TEXT_SIZE,
             corner_radius: 0,
+            output_format: OutputFormat::Png,
             last_directory: None,
             extra: BTreeMap::new(),
         }
@@ -201,7 +226,7 @@ impl Config {
     pub fn encode(&self) -> Result<String, String> {
         self.validate()?;
         let mut text = format!(
-            "version={CONFIG_VERSION}\ntheme={}\nhotkey={}\nshow_hints={}\nfirst_tip_seen={}\ncolor={:02X}{:02X}{:02X}\ntext_size={}\ncorner_radius={}\nlast_directory={}\n",
+            "version={CONFIG_VERSION}\ntheme={}\nhotkey={}\nshow_hints={}\nfirst_tip_seen={}\ncolor={:02X}{:02X}{:02X}\ntext_size={}\ncorner_radius={}\noutput_format={}\nlast_directory={}\n",
             match self.theme {
                 Theme::System => "system",
                 Theme::Light => "light",
@@ -215,6 +240,7 @@ impl Config {
             self.color[2],
             self.text_size,
             self.corner_radius,
+            self.output_format.extension(),
             self.last_directory.as_deref().unwrap_or("")
         );
         use std::fmt::Write as _;
@@ -286,6 +312,13 @@ impl Config {
                 "corner_radius" => {
                     config.corner_radius = CaptureParameter::CornerRadius.parse(value)?;
                 }
+                "output_format" => {
+                    config.output_format = match value {
+                        "png" => OutputFormat::Png,
+                        "jpeg" => OutputFormat::Jpeg,
+                        _ => return Err("截图输出格式无效".into()),
+                    }
+                }
                 "last_directory" => {
                     config.last_directory = (!value.is_empty()).then(|| value.to_string())
                 }
@@ -319,6 +352,7 @@ mod tests {
                 key: Key::Function(10),
             },
             last_directory: Some("F:\\截图资料\\a=b 项目".into()),
+            output_format: OutputFormat::Jpeg,
             ..Config::default()
         };
         assert_eq!(
@@ -393,6 +427,7 @@ mod tests {
             "version=2\npen_width=65",
             "version=2\ncorner_radius=257",
             "version=2\ncorner_radius=-1",
+            "version=2\noutput_format=webp",
             "version=1\nhotkey=Shift+A",
             "version=1\nhotkey=Ctrl+Ctrl+A",
             "version=1\nhotkey=Ctrl+F25",

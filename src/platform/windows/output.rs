@@ -1,5 +1,10 @@
 //! One bounded output worker. No image encoding or file IO runs on the UI thread.
-use crate::core::{annotation::Editor, geometry::PixelRect, image::Image};
+use crate::core::{
+    annotation::Editor,
+    config::OutputFormat,
+    geometry::PixelRect,
+    image::{Image, blend_over_white},
+};
 use std::{
     path::{Path, PathBuf},
     sync::{
@@ -28,8 +33,29 @@ impl Drop for Permit {
 }
 pub enum Destination {
     Clipboard,
-    File(PathBuf),
+    File(SaveTarget),
     Pin,
+}
+#[derive(Clone)]
+pub(super) struct SaveTarget {
+    path: PathBuf,
+    format: OutputFormat,
+}
+
+impl SaveTarget {
+    pub(super) fn new(path: PathBuf, format: OutputFormat) -> Result<Self> {
+        if !path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case(format.extension()))
+        {
+            return Err(fail(&format!(
+                "请选择 .{} 扩展名保存 {} 图片",
+                format.extension(),
+                format.label()
+            )));
+        }
+        Ok(Self { path, format })
+    }
 }
 pub enum Completed {
     Done,
@@ -107,8 +133,8 @@ fn launch(
                         clipboard(&image, owner, &worker_cancel)?;
                         Ok(Completed::Done)
                     }
-                    Destination::File(path) => {
-                        save_atomic(&image, &path, &worker_cancel)?;
+                    Destination::File(target) => {
+                        save_atomic(&image, &target, &worker_cancel)?;
                         Ok(Completed::Done)
                     }
                     Destination::Pin => Ok(Completed::Pinned(image)),
@@ -122,12 +148,13 @@ fn launch(
 }
 thread_local! {static LAST_DIRECTORY:std::cell::RefCell<Option<PathBuf>>=const {std::cell::RefCell::new(None)};}
 #[cfg(test)]
-thread_local! {pub(super) static TEST_DIALOG:std::cell::RefCell<Option<Option<PathBuf>>>=const{std::cell::RefCell::new(None)};}
-pub fn save_dialog(owner: HWND) -> Result<Option<PathBuf>> {
+thread_local! {pub(super) static TEST_DIALOG:std::cell::RefCell<Option<Option<SaveTarget>>>=const{std::cell::RefCell::new(None)};}
+pub(super) fn save_dialog(owner: HWND) -> Result<Option<SaveTarget>> {
     #[cfg(test)]
     if let Some(path) = TEST_DIALOG.with_borrow_mut(Option::take) {
         return Ok(path);
     }
+    let config = super::preferences::current();
     let _apartment = super::composition::Apartment::enter()?;
     // SAFETY: called on the UI STA, with no application-state borrow. Dialog owns strings during calls; returned shell path is freed with CoTaskMemFree.
     unsafe {
@@ -141,19 +168,31 @@ pub fn save_dialog(owner: HWND) -> Result<Option<PathBuf>> {
                 | FOS_PATHMUSTEXIST
                 | FOS_STRICTFILETYPES,
         )?;
-        dialog.SetFileTypes(&[Common::COMDLG_FILTERSPEC {
-            pszName: w!("PNG 图片"),
-            pszSpec: w!("*.png"),
-        }])?;
-        dialog.SetDefaultExtension(w!("png"))?;
+        dialog.SetFileTypes(&[
+            Common::COMDLG_FILTERSPEC {
+                pszName: w!("PNG 图片 (*.png)"),
+                pszSpec: w!("*.png"),
+            },
+            Common::COMDLG_FILTERSPEC {
+                pszName: w!("JPEG 图片 (*.jpeg)"),
+                pszSpec: w!("*.jpeg"),
+            },
+        ])?;
+        let (index, extension) = match config.output_format {
+            OutputFormat::Png => (1, w!("png")),
+            OutputFormat::Jpeg => (2, w!("jpeg")),
+        };
+        dialog.SetFileTypeIndex(index)?;
+        dialog.SetDefaultExtension(extension)?;
         let date = GetLocalTime();
+        // The shell appends the extension for the current filter, including after a type change.
         let name = format!(
-            "kiki_{:04}{:02}{:02}_{:02}{:02}{:02}.png",
+            "kiki_{:04}{:02}{:02}_{:02}{:02}{:02}",
             date.wYear, date.wMonth, date.wDay, date.wHour, date.wMinute, date.wSecond
         );
         let name: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
         dialog.SetFileName(PCWSTR(name.as_ptr()))?;
-        if let Some(directory) = super::preferences::current()
+        if let Some(directory) = config
             .last_directory
             .map(PathBuf::from)
             .or_else(|| LAST_DIRECTORY.with_borrow(Clone::clone))
@@ -172,16 +211,23 @@ pub fn save_dialog(owner: HWND) -> Result<Option<PathBuf>> {
             }
             return Err(e);
         }
+        let format = match dialog.GetFileTypeIndex()? {
+            1 => OutputFormat::Png,
+            2 => OutputFormat::Jpeg,
+            _ => return Err(fail("无效的保存格式")),
+        };
         let item = dialog.GetResult()?;
         let path = item.GetDisplayName(SIGDN_FILESYSPATH)?;
         use std::os::windows::ffi::OsStringExt;
         let result = PathBuf::from(std::ffi::OsString::from_wide(path.as_wide()));
         CoTaskMemFree(Some(path.0.cast()));
-        LAST_DIRECTORY.with_borrow_mut(|last| *last = result.parent().map(Path::to_path_buf));
-        if let Some(parent) = result.parent() {
+        // Validate the shell's confirmed path without changing it after overwrite confirmation.
+        let target = SaveTarget::new(result, format)?;
+        LAST_DIRECTORY.with_borrow_mut(|last| *last = target.path.parent().map(Path::to_path_buf));
+        if let Some(parent) = target.path.parent() {
             super::preferences::remember_directory(parent);
         }
-        Ok(Some(result))
+        Ok(Some(target))
     }
 }
 struct Temporary(PathBuf);
@@ -190,10 +236,10 @@ impl Drop for Temporary {
         let _ = std::fs::remove_file(&self.0);
     }
 }
-pub fn save_atomic(image: &Image, path: &Path, cancel: &AtomicBool) -> Result<()> {
+pub(super) fn save_atomic(image: &Image, target: &SaveTarget, cancel: &AtomicBool) -> Result<()> {
     use std::os::windows::ffi::OsStrExt;
     check(cancel)?;
-    let parent = path.parent().ok_or_else(|| fail("保存目录无效"))?;
+    let parent = target.path.parent().ok_or_else(|| fail("保存目录无效"))?;
     let mut reserved = None;
     for _ in 0..16 {
         let path = parent.join(format!(
@@ -216,7 +262,7 @@ pub fn save_atomic(image: &Image, path: &Path, cancel: &AtomicBool) -> Result<()
         }
     }
     let temporary = reserved.ok_or_else(|| fail("无法创建临时输出文件"))?;
-    super::png::save(image, &temporary.0)?;
+    super::image_encode::save(image, &temporary.0, target.format)?;
     check(cancel)?;
     let from: Vec<u16> = temporary
         .0
@@ -224,7 +270,12 @@ pub fn save_atomic(image: &Image, path: &Path, cancel: &AtomicBool) -> Result<()
         .encode_wide()
         .chain(Some(0))
         .collect();
-    let to: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let to: Vec<u16> = target
+        .path
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
     // SAFETY: closed sibling temporary file replaces target only after successful encoding and cancellation check. Both UTF-16 paths live through the call.
     unsafe {
         MoveFileExW(
@@ -320,9 +371,9 @@ fn dib(image: &Image, v5: bool) -> Result<Vec<u8>> {
     bytes[header..].copy_from_slice(image.pixels());
     if !v5 {
         for p in bytes[header..].chunks_exact_mut(4) {
-            let a = u32::from(p[3]);
+            let a = p[3];
             for c in p.iter_mut().take(3) {
-                *c = ((u32::from(*c) * a + 255 * (255 - a) + 127) / 255) as u8;
+                *c = blend_over_white(*c, a);
             }
             p[3] = 255;
         }
@@ -332,7 +383,7 @@ fn dib(image: &Image, v5: bool) -> Result<Vec<u8>> {
 fn clipboard(image: &Image, owner: usize, cancel: &AtomicBool) -> Result<()> {
     let mut v5 = Block::from_bytes(&dib(image, true)?)?;
     let mut standard = Block::from_bytes(&dib(image, false)?)?;
-    let mut png = Block::from_bytes(&super::png::encode(image)?)?;
+    let mut png = Block::from_bytes(&super::image_encode::encode_png(image)?)?;
     // SAFETY: formats and storage are prepared before touching the clipboard. Open retries are bounded on the worker, never the UI thread.
     unsafe {
         let format = RegisterClipboardFormatW(w!("PNG"));
@@ -430,6 +481,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("existing.png");
         std::fs::write(&path, b"original").unwrap();
+        let target = SaveTarget::new(path.clone(), OutputFormat::Png).unwrap();
+        assert!(SaveTarget::new(path.clone(), OutputFormat::Jpeg).is_err());
         let image = Image::new(PixelRect {
             left: 0,
             top: 0,
@@ -437,24 +490,39 @@ mod tests {
             bottom: 2,
         })
         .unwrap();
-        assert!(save_atomic(&image, &path, &AtomicBool::new(true)).is_err());
+        assert!(save_atomic(&image, &target, &AtomicBool::new(true)).is_err());
         assert_eq!(std::fs::read(&path).unwrap(), b"original");
         assert!(
             save_atomic(
                 &image,
-                &dir.join("missing/file.png"),
+                &SaveTarget::new(dir.join("missing/file.png"), OutputFormat::Png).unwrap(),
                 &AtomicBool::new(false)
             )
             .is_err()
         );
-        let blocked = dir.join("directory-target");
+        let blocked = dir.join("directory-target.png");
         std::fs::create_dir(&blocked).unwrap();
-        assert!(save_atomic(&image, &blocked, &AtomicBool::new(false)).is_err());
+        let blocked_target = SaveTarget::new(blocked.clone(), OutputFormat::Png).unwrap();
+        assert!(save_atomic(&image, &blocked_target, &AtomicBool::new(false)).is_err());
         assert_eq!(std::fs::read(&path).unwrap(), b"original");
         std::fs::remove_dir(blocked).unwrap();
-        save_atomic(&image, &path, &AtomicBool::new(false)).unwrap();
+        save_atomic(&image, &target, &AtomicBool::new(false)).unwrap();
         assert_eq!(&std::fs::read(&path).unwrap()[..8], b"\x89PNG\r\n\x1a\n");
-        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        let jpeg_path = dir.join("编码失败.jpeg");
+        std::fs::write(&jpeg_path, b"previous JPEG").unwrap();
+        let jpeg = SaveTarget::new(jpeg_path.clone(), OutputFormat::Jpeg).unwrap();
+        let too_wide = Image::new(PixelRect {
+            left: 0,
+            top: 0,
+            right: 65_536,
+            bottom: 1,
+        })
+        .unwrap();
+        let error = save_atomic(&too_wide, &jpeg, &AtomicBool::new(false)).unwrap_err();
+        assert!(error.message().contains("65535"));
+        assert_eq!(std::fs::read(&jpeg_path).unwrap(), b"previous JPEG");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2);
+        std::fs::remove_file(jpeg_path).unwrap();
         std::fs::remove_file(path).unwrap();
         std::fs::remove_dir(dir).unwrap();
     }

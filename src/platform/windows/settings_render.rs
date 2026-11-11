@@ -1,5 +1,6 @@
 //! Retained Direct2D surface and palette for the settings window.
 pub use super::ui_palette::*;
+use crate::core::config::OutputFormat;
 use windows::{
     Win32::{
         Foundation::{HWND, RECT},
@@ -144,6 +145,33 @@ impl ControlShapes<'_> {
         }
     }
 
+    pub fn chevron_down(&self, bounds: RECT, width: f32, rgb: u32) {
+        use windows_numerics::Vector2;
+        let rect = self.rect(bounds);
+        let left = Vector2 {
+            X: rect.left,
+            Y: rect.top,
+        };
+        let middle = Vector2 {
+            X: (rect.left + rect.right) / 2.,
+            Y: rect.bottom,
+        };
+        let right = Vector2 {
+            X: rect.right,
+            Y: rect.top,
+        };
+        // SAFETY: the target and brush belong to the active control paint.
+        unsafe {
+            self.surface.brush.SetColor(&color(rgb));
+            self.surface
+                .target
+                .DrawLine(left, middle, &self.surface.brush, width, None);
+            self.surface
+                .target
+                .DrawLine(middle, right, &self.surface.brush, width, None);
+        }
+    }
+
     pub fn clipped(&self, bounds: RECT, draw: impl FnOnce()) {
         // SAFETY: this clip belongs to the active draw. The closure only draws within this pass.
         unsafe {
@@ -251,21 +279,32 @@ impl Canvas {
             );
         }
     }
-    pub fn corner_preview(&self, x: f32, y: f32, configured: u16, dark: bool) {
-        let cell = 9.;
-        for row in 0..8 {
-            for column in 0..12 {
-                self.fill(
-                    x + column as f32 * cell,
-                    y + row as f32 * cell,
-                    cell,
-                    cell,
-                    if (row + column) % 2 == 0 {
-                        divider(dark)
-                    } else {
-                        sidebar(dark)
-                    },
-                );
+    pub fn corner_preview(
+        &self,
+        x: f32,
+        y: f32,
+        configured: u16,
+        format: OutputFormat,
+        dark: bool,
+    ) {
+        if format == OutputFormat::Jpeg {
+            self.fill(x, y, 108., 72., 0xffffff);
+        } else {
+            let cell = 9.;
+            for row in 0..8 {
+                for column in 0..12 {
+                    self.fill(
+                        x + column as f32 * cell,
+                        y + row as f32 * cell,
+                        cell,
+                        cell,
+                        if (row + column) % 2 == 0 {
+                            divider(dark)
+                        } else {
+                            sidebar(dark)
+                        },
+                    );
+                }
             }
         }
         // Represent a 768 × 512 px image at 108 × 72 DIP so the whole radius range is visible.

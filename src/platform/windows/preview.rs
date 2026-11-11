@@ -838,7 +838,9 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     return LRESULT(0);
                 }
                 let space = (*pointer).text_input.is_none() && GetKeyState(VK_SPACE.0 as i32) < 0;
-                if let Err(error) = finish_text(hwnd, pointer) {
+                if (*pointer).button_at(point) != Some(8)
+                    && let Err(error) = finish_text(hwnd, pointer)
+                {
                     super::show_error(&error.to_string());
                     return LRESULT(0);
                 }
@@ -1201,13 +1203,12 @@ fn dispatch_text(
                 None
             };
             if (ctrl && wp.0 == 13) || output.is_some() {
-                let result = finish_text(hwnd, pointer).and_then(|()| {
-                    if let Some(button) = output {
-                        (*pointer).pending_output = Some(button);
-                        begin_output(hwnd, pointer)?;
-                    }
-                    Ok(())
-                });
+                let result = if let Some(button) = output {
+                    (*pointer).pending_output = Some(button);
+                    begin_output(hwnd, pointer)
+                } else {
+                    finish_text(hwnd, pointer)
+                };
                 if let Err(error) = result {
                     super::show_error(&error.to_string());
                 }
@@ -1412,36 +1413,10 @@ fn finish_text(hwnd: HWND, pointer: *mut State) -> Result<()> {
         return Ok(());
     };
     let result = (|| {
-        input.complete_composition()?;
-        input.set_size(input.requested_size())?;
-        let content = input.content()?;
+        let object = prepare_text_annotation(pointer, &mut input)?;
         // SAFETY: synchronous DirectWrite calls do not dispatch window messages; parent State is live.
         unsafe {
-            let state = &mut *pointer;
-            let center = if input.angle != 0. {
-                input
-                    .index
-                    .and_then(|i| state.editor.objects().get(i))
-                    .map(|object| {
-                        let old = object.bounds();
-                        let (cx, cy) = text_center(old);
-                        (
-                            cx + f64::from(input.origin.x) - f64::from(old.left),
-                            cy + f64::from(input.origin.y) - f64::from(old.top),
-                        )
-                    })
-            } else {
-                None
-            };
-            let object = state.canvas.text_object(
-                input.origin,
-                content,
-                input.size,
-                input.wrap_width,
-                input.style,
-                (input.angle, center),
-            )?;
-            state
+            (*pointer)
                 .editor
                 .commit_text(input.index, object)
                 .map_err(|message| Error::new(E_FAIL, message))
@@ -1462,6 +1437,58 @@ fn finish_text(hwnd: HWND, pointer: *mut State) -> Result<()> {
             }
             Err(error)
         }
+    }
+}
+
+fn prepare_text_annotation(
+    pointer: *mut State,
+    input: &mut TextInput,
+) -> Result<crate::core::annotation::Object> {
+    input.complete_composition()?;
+    input.set_size(input.requested_size())?;
+    let content = input.content()?;
+    // SAFETY: callers own the live UI-thread state and temporarily took its TextInput.
+    let state = unsafe { &*pointer };
+    let center = if input.angle != 0. {
+        input
+            .index
+            .and_then(|i| state.editor.objects().get(i))
+            .map(|object| {
+                let old = object.bounds();
+                let (cx, cy) = text_center(old);
+                (
+                    cx + f64::from(input.origin.x) - f64::from(old.left),
+                    cy + f64::from(input.origin.y) - f64::from(old.top),
+                )
+            })
+    } else {
+        None
+    };
+    state.canvas.text_object(
+        input.origin,
+        content,
+        input.size,
+        input.wrap_width,
+        input.style,
+        (input.angle, center),
+    )
+}
+
+fn save_snapshot(pointer: *mut State) -> Result<Editor> {
+    // SAFETY: the output dispatcher owns the live state. Move the input out before
+    // native calls, and restore it so a failed save can resume editing the draft.
+    unsafe {
+        let mut snapshot = (*pointer).editor.snapshot();
+        if let Some(mut input) = (*pointer).text_input.take() {
+            let result = prepare_text_annotation(pointer, &mut input).and_then(|object| {
+                snapshot
+                    .commit_text(input.index, object)
+                    .map_err(|message| Error::new(E_FAIL, message))
+            });
+            (*pointer).text_input = Some(input);
+            result?;
+        }
+        Ok(snapshot)
     }
 }
 fn restyle_text(
@@ -1512,7 +1539,9 @@ fn begin_output(hwnd: HWND, pointer: *mut State) -> Result<()> {
         };
         (kind, state.lifetime.clone())
     };
-    finish_text(hwnd, pointer)?;
+    if kind != 8 {
+        finish_text(hwnd, pointer)?;
+    }
     // SAFETY: the state borrow ends before ReleaseCapture can reenter the message pump.
     unsafe {
         {
@@ -1532,7 +1561,7 @@ fn begin_output(hwnd: HWND, pointer: *mut State) -> Result<()> {
             return Ok(());
         }
         match result {
-            Ok(Some(path)) => super::output::Destination::File(path),
+            Ok(Some(target)) => super::output::Destination::File(target),
             Ok(None) => {
                 // SAFETY: lifetime above confirms the same live window.
                 unsafe {
@@ -1556,6 +1585,18 @@ fn begin_output(hwnd: HWND, pointer: *mut State) -> Result<()> {
     };
     // SAFETY: timer posts only to this live UI window; snapshot owns geometry, Arc shares immutable pixels without copying the desktop.
     unsafe {
+        let snapshot = if kind == 8 {
+            match save_snapshot(pointer) {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    (*pointer).busy = false;
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                    return Err(error);
+                }
+            }
+        } else {
+            (*pointer).editor.snapshot()
+        };
         if SetTimer(Some(hwnd), 5, 20, None) == 0 {
             (*pointer).busy = false;
             return Err(Error::new(E_FAIL, "无法启动输出检查，请重试"));
@@ -1568,7 +1609,7 @@ fn begin_output(hwnd: HWND, pointer: *mut State) -> Result<()> {
         match super::output::start(
             state.canvas.source(),
             rect,
-            state.editor.snapshot(),
+            snapshot,
             state.corner_radius,
             hwnd.0 as usize,
             destination,
@@ -1897,7 +1938,7 @@ mod tests {
             let selection = (*p).selection.rect.unwrap();
             let output =
                 composition::render(&(*p).canvas.source(), selection, &(*p).editor, 0).unwrap();
-            let png = super::super::png::encode(&output).unwrap();
+            let png = super::super::image_encode::encode_png(&output).unwrap();
             assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
             let object = &(*p).editor.objects()[index];
             assert!(matches!(
@@ -2052,6 +2093,8 @@ mod tests {
     }
     #[test]
     fn real_output_failures_preserve_editing_then_retry_and_cancel() {
+        use crate::core::config::OutputFormat;
+
         super::super::tests::graphics_runtime();
         let _com = composition::Apartment::enter().unwrap();
         // SAFETY: this test owns all hidden HWNDs; only genuine output calls, clipboard locks, native EDIT and window messages are exercised.
@@ -2068,6 +2111,28 @@ mod tests {
             let hwnd = preview.0.get().unwrap();
             let objects = (*p).editor.objects().to_vec();
             (*p).corner_radius = 256;
+            let bounds = (*p).canvas.bounds();
+            let draft = "保存失败后继续编辑";
+            (*p).text_input = Some(
+                TextInput::open(
+                    hwnd,
+                    TextStart {
+                        index: None,
+                        origin: PixelPoint {
+                            x: bounds.left + 180,
+                            y: bounds.top + 150,
+                        },
+                        desktop: bounds,
+                        area: bounds,
+                        content: draft,
+                        size: 24.,
+                        wrap_width: 320.,
+                        style: crate::core::annotation::Style::default(),
+                        angle: 0.,
+                    },
+                )
+                .unwrap(),
+            );
             let sequence = GetClipboardSequenceNumber();
             output::TEST_DIALOG.with_borrow_mut(|path| *path = Some(None));
             (*p).pending_output = Some(8);
@@ -2075,25 +2140,29 @@ mod tests {
             assert!(!(*p).busy);
             assert!(preview.is_open());
             assert_eq!((*p).editor.objects(), objects);
+            assert_eq!((*p).text_input.as_ref().unwrap().content().unwrap(), draft);
             let dir =
                 std::env::temp_dir().join(format!("kiki-native-output-{}", std::process::id()));
             std::fs::create_dir_all(&dir).unwrap();
-            let path = dir.join("readonly.png");
+            let path = dir.join("只读 文件.jpeg");
+            let target = output::SaveTarget::new(path.clone(), OutputFormat::Jpeg).unwrap();
             std::fs::write(&path, b"keep original").unwrap();
             let original_permissions = std::fs::metadata(&path).unwrap().permissions();
             let mut permissions = original_permissions.clone();
             permissions.set_readonly(true);
             std::fs::set_permissions(&path, permissions).unwrap();
-            output::TEST_DIALOG.with_borrow_mut(|value| *value = Some(Some(path.clone())));
+            output::TEST_DIALOG.with_borrow_mut(|value| *value = Some(Some(target.clone())));
             (*p).pending_output = Some(8);
             begin_output(hwnd, p).unwrap();
             pump_until_done(&preview);
             assert!(preview.is_open());
             assert_eq!((*p).editor.objects(), objects);
+            assert_eq!((*p).text_input.as_ref().unwrap().content().unwrap(), draft);
             assert_eq!(std::fs::read(&path).unwrap(), b"keep original");
             assert_eq!(take_ui_errors().len(), 1);
             assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
             assert_eq!(GetClipboardSequenceNumber(), sequence);
+            drop((*p).text_input.take());
             // Real clipboard contention, without clearing the user's current formats.
             let locker = CreateWindowExW(
                 WINDOW_EX_STYLE::default(),
@@ -2128,22 +2197,21 @@ mod tests {
                 .share_mode(0)
                 .open(&path)
                 .unwrap();
-            output::TEST_DIALOG.with_borrow_mut(|value| *value = Some(Some(path.clone())));
+            output::TEST_DIALOG.with_borrow_mut(|value| *value = Some(Some(target.clone())));
             (*p).pending_output = Some(8);
             begin_output(hwnd, p).unwrap();
             pump_until_done(&preview);
             assert!(preview.is_open());
             assert_eq!(take_ui_errors().len(), 1);
             drop(locked);
-            output::TEST_DIALOG.with_borrow_mut(|value| *value = Some(Some(path.clone())));
+            output::TEST_DIALOG.with_borrow_mut(|value| *value = Some(Some(target.clone())));
             (*p).pending_output = Some(8);
             begin_output(hwnd, p).unwrap();
             pump_until_done(&preview);
             assert!(!preview.is_open());
             assert_eq!(GetClipboardSequenceNumber(), sequence);
             let bytes = std::fs::read(&path).unwrap();
-            assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n");
-            assert_eq!(u32::from_be_bytes(bytes[16..20].try_into().unwrap()), 640);
+            assert_eq!(&bytes[..3], b"\xff\xd8\xff");
             assert!(take_ui_errors().is_empty());
             // A live native multi-line draft is committed before pinning; source desktop ownership is released.
             let (preview, p) = setup();
@@ -2218,7 +2286,7 @@ mod tests {
             assert!(weak.upgrade().is_none());
             let (image, editor) = composition::fixture().unwrap();
             let rendered = composition::render(&image, image.bounds(), &editor, 0).unwrap();
-            output::save_atomic(&rendered, &path, &AtomicBool::new(false)).unwrap();
+            output::save_atomic(&rendered, &target, &AtomicBool::new(false)).unwrap();
             assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
             std::fs::remove_file(path).unwrap();
             std::fs::remove_dir(dir).unwrap();

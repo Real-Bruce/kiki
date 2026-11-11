@@ -1,11 +1,12 @@
 //! Settings page geometry shared by native control positioning and canvas painting.
 use super::startup;
-use crate::core::config::Config;
+use crate::core::config::{Config, OutputFormat};
 
 pub const HEADER: i32 = 84;
 pub const START_CAPTURE: u16 = 202;
 pub const PARAMETER_SLIDER: u16 = 420;
 pub const PARAMETER_EDIT: u16 = 425;
+pub const OUTPUT_FORMAT: u16 = 430;
 pub const PARAMETER_LABELS: [&str; 5] =
     ["矩形线宽", "箭头线宽", "画笔线宽", "文字字号", "圆角半径"];
 pub const FOOTER: i32 = 56;
@@ -125,8 +126,19 @@ impl Page {
                 p.divider();
                 p.heading("图像输出");
                 p.parameter_row(4);
+                p.text("输出格式", 0, p.width - 126, Tone::Normal);
+                p.control(OUTPUT_FORMAT, p.width - 116, -4, 116, 32);
+                p.y += ROW;
                 p.items.push(Item::CornerPreview(p.rect(0, 0, 108, 72)));
-                p.text("PNG 四角透明", 122, p.width - 122, Tone::Normal);
+                p.text(
+                    match cfg.output_format {
+                        OutputFormat::Png => "PNG 四角透明",
+                        OutputFormat::Jpeg => "JPEG 白底 · 品质 90%",
+                    },
+                    122,
+                    p.width - 122,
+                    Tone::Normal,
+                );
                 p.y += 24;
                 p.text(
                     "0–256 px · 实际半径最多为选区短边的一半",

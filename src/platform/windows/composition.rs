@@ -245,9 +245,10 @@ fn fixture_at(left: i32, top: i32) -> Result<(Image, Editor)> {
 pub fn probe(path: &std::path::Path) -> Result<()> {
     std::fs::create_dir_all(path).map_err(|e| fail(&e.to_string()))?;
     let (source, editor) = fixture()?;
-    super::png::save(
+    super::image_encode::save(
         &render(&source, source.bounds(), &editor, 0)?,
         &path.join("fixture-annotated.png"),
+        crate::core::config::OutputFormat::Png,
     )?;
     let capture = std::thread::Builder::new()
         .name("annotation-probe".into())
@@ -263,9 +264,10 @@ pub fn probe(path: &std::path::Path) -> Result<()> {
         bottom: bounds.top + (bounds.bottom - bounds.top).min(360),
     };
     let (_, desktop_editor) = fixture_at(crop.left, crop.top)?;
-    super::png::save(
+    super::image_encode::save(
         &render(&capture.image, crop, &desktop_editor, 0)?,
         &path.join("desktop-annotated.png"),
+        crate::core::config::OutputFormat::Png,
     )?;
     Ok(())
 }

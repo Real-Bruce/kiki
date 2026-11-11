@@ -16,6 +16,7 @@ use windows::{
 pub enum Style {
     Tray,
     Pinned,
+    Settings,
 }
 
 #[repr(C)]
@@ -93,7 +94,7 @@ pub fn popup(owner: HWND, x: i32, y: i32, style: Style, entries: &[(u32, &str, b
             DEFAULT_CHARSET,
             OUT_DEFAULT_PRECIS,
             CLIP_DEFAULT_PRECIS,
-            if style == Style::Tray {
+            if style != Style::Pinned {
                 CLEARTYPE_QUALITY
             } else {
                 DEFAULT_QUALITY
@@ -113,12 +114,12 @@ pub fn popup(owner: HWND, x: i32, y: i32, style: Style, entries: &[(u32, &str, b
         };
         let info = MENUINFO {
             cbSize: std::mem::size_of::<MENUINFO>() as u32,
-            fMask: if style == Style::Tray {
+            fMask: if style != Style::Pinned {
                 MIM_BACKGROUND | MIM_STYLE
             } else {
                 MIM_BACKGROUND
             },
-            dwStyle: if style == Style::Tray {
+            dwStyle: if style != Style::Pinned {
                 MNS_NOCHECK
             } else {
                 Default::default()
@@ -213,11 +214,19 @@ pub fn handle(msg: u32, lp: LPARAM) -> Option<LRESULT> {
                 size.cx
             };
             let text = &item.text[..item.text.len() - 1];
-            (info.itemWidth, info.itemHeight) = if item.style == Style::Tray {
+            (info.itemWidth, info.itemHeight) = if item.style != Style::Pinned {
                 let mut parts = text.split(|c| *c == u16::from(b'\t'));
                 let label = parts.next().map_or(0, width);
                 let shortcut = parts.next().map_or(0, |key| width(key) + item.px(20));
-                ((label + shortcut + item.px(24)) as u32, item.px(36) as u32)
+                let width = label + shortcut + item.px(24);
+                (
+                    if item.style == Style::Settings {
+                        width.max(item.px(108))
+                    } else {
+                        width
+                    } as u32,
+                    item.px(36) as u32,
+                )
             } else {
                 (
                     (width(text).max(190) as f32 + 56. * scale) as u32,
@@ -256,7 +265,7 @@ pub fn handle(msg: u32, lp: LPARAM) -> Option<LRESULT> {
             let selected = info.itemState.0 & ODS_SELECTED.0 != 0;
             let disabled = info.itemState.0 & (ODS_DISABLED.0 | ODS_GRAYED.0) != 0;
             let bg = if selected {
-                if item.style == Style::Tray {
+                if item.style != Style::Pinned {
                     appearance::selected(dark)
                 } else if dark {
                     0x174b73
@@ -266,7 +275,7 @@ pub fn handle(msg: u32, lp: LPARAM) -> Option<LRESULT> {
             } else {
                 surface
             };
-            if item.style == Style::Tray && selected && !disabled {
+            if item.style != Style::Pinned && selected && !disabled {
                 let horizontal = item.px(4);
                 let vertical = item.px(1);
                 let r = info.rcItem;
@@ -292,7 +301,7 @@ pub fn handle(msg: u32, lp: LPARAM) -> Option<LRESULT> {
             SetBkMode(info.hDC, TRANSPARENT);
             SetTextColor(
                 info.hDC,
-                rgb(if item.style == Style::Tray {
+                rgb(if item.style != Style::Pinned {
                     if disabled {
                         appearance::muted(dark)
                     } else if selected {
@@ -310,7 +319,7 @@ pub fn handle(msg: u32, lp: LPARAM) -> Option<LRESULT> {
             );
             let old = SelectObject(info.hDC, item.font.into());
             let mut rect = info.rcItem;
-            let pad = item.px(if item.style == Style::Tray { 12 } else { 16 });
+            let pad = item.px(if item.style == Style::Pinned { 16 } else { 12 });
             rect.left += pad;
             rect.right -= pad;
             let text = String::from_utf16_lossy(&item.text[..item.text.len() - 1]);
@@ -402,7 +411,7 @@ fn is_class(window: HWND, expected: &str) -> bool {
 
 fn menu_background(style: Style, dark: bool) -> u32 {
     match (style, dark) {
-        (Style::Tray, _) => super::settings_render::background(dark),
+        (Style::Tray | Style::Settings, _) => super::settings_render::background(dark),
         (Style::Pinned, true) => 0x292929,
         (Style::Pinned, false) => 0xffffff,
     }
