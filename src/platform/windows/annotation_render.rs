@@ -66,6 +66,7 @@ pub fn layouts(
     factory: &IDWriteFactory,
     editor: &Editor,
 ) -> Result<Vec<Option<IDWriteTextLayout>>> {
+    let mut sequence = 0;
     editor
         .objects()
         .iter()
@@ -76,10 +77,41 @@ pub fn layouts(
                 wrap_width,
                 ..
             } => text_layout(factory, content, *size, *wrap_width).map(Some),
+            Shape::Sequence { diameter, .. } => {
+                sequence += 1;
+                sequence_layout(factory, sequence, f32::from(*diameter)).map(Some)
+            }
             _ => Ok(None),
         })
         .collect()
 }
+
+fn sequence_layout(
+    factory: &IDWriteFactory,
+    number: usize,
+    diameter: f32,
+) -> Result<IDWriteTextLayout> {
+    let label = number.to_string();
+    let size = diameter * 0.56_f32.min(1.35 / label.len() as f32);
+    let wide: Vec<u16> = label.encode_utf16().collect();
+    // SAFETY: the factory is live on this thread and the text slice lives through layout creation.
+    unsafe {
+        let format = factory.CreateTextFormat(
+            w!("Segoe UI"),
+            None,
+            DWRITE_FONT_WEIGHT_MEDIUM,
+            DWRITE_FONT_STYLE_NORMAL,
+            DWRITE_FONT_STRETCH_NORMAL,
+            size,
+            w!("zh-CN"),
+        )?;
+        format.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER)?;
+        format.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
+        format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
+        factory.CreateTextLayout(&wide, &format, diameter, diameter)
+    }
+}
+
 pub struct Geometry {
     paths: Vec<Option<ID2D1PathGeometry>>,
     round: ID2D1StrokeStyle,
@@ -227,6 +259,39 @@ pub fn draw(
                 }
                 Shape::Rectangle(r) => target.DrawRectangle(&local(*r), brush, width, None),
                 Shape::Mosaic { .. } => {}
+                Shape::Sequence { center, diameter } => {
+                    let center = point(*center);
+                    let diameter = f32::from(*diameter);
+                    let stroke = (diameter * 0.05).max(1.);
+                    let radius = (diameter - stroke) / 2.;
+                    brush.SetColor(&D2D1_COLOR_F {
+                        r: 1.,
+                        g: 59. / 255.,
+                        b: 64. / 255.,
+                        a: 1.,
+                    });
+                    target.DrawEllipse(
+                        &D2D1_ELLIPSE {
+                            point: center,
+                            radiusX: radius,
+                            radiusY: radius,
+                        },
+                        brush,
+                        stroke,
+                        None,
+                    );
+                    if let Some(layout) = &layouts[index] {
+                        target.DrawTextLayout(
+                            Vector2 {
+                                X: center.X - diameter / 2.,
+                                Y: center.Y - diameter / 2.,
+                            },
+                            layout,
+                            brush,
+                            D2D1_DRAW_TEXT_OPTIONS_NONE,
+                        );
+                    }
+                }
                 Shape::Arrow(start, end) => {
                     if let Some(head) = &geometry.paths[index] {
                         let [left, right] = arrow_head(*start, *end, width).map(point);

@@ -1,8 +1,8 @@
 //! Editable annotations in global physical pixels; no native handles or image copies.
 use super::{
     config::{
-        CaptureParameter, DEFAULT_MOSAIC_SIZE, DEFAULT_TEXT_SIZE, MAX_STROKE_WIDTH,
-        MIN_STROKE_WIDTH,
+        CAPTURE_TOOL_COUNT, CaptureParameter, DEFAULT_MOSAIC_SIZE, DEFAULT_SEQUENCE_SIZE,
+        DEFAULT_TEXT_SIZE, MAX_STROKE_WIDTH, MIN_STROKE_WIDTH,
     },
     geometry::PixelRect,
     selection::{PixelPoint, Selection, contains},
@@ -17,15 +17,21 @@ pub enum Tool {
     Pen,
     Text,
     Mosaic,
+    Sequence,
 }
 impl Tool {
-    pub const DRAWING: [Self; 5] = [
+    pub const DRAWING: [Self; CAPTURE_TOOL_COUNT] = [
         Self::Rectangle,
         Self::Arrow,
         Self::Pen,
         Self::Text,
         Self::Mosaic,
+        Self::Sequence,
     ];
+
+    pub fn index(self) -> Option<usize> {
+        Self::DRAWING.iter().position(|&tool| tool == self)
+    }
 
     pub fn label(self) -> &'static str {
         match self {
@@ -35,6 +41,7 @@ impl Tool {
             Self::Pen => "画笔",
             Self::Text => "文字",
             Self::Mosaic => "马赛克",
+            Self::Sequence => "编号",
         }
     }
 
@@ -42,6 +49,7 @@ impl Tool {
         match self {
             Self::Text => Some(CaptureParameter::TextSize),
             Self::Mosaic => Some(CaptureParameter::MosaicSize),
+            Self::Sequence => Some(CaptureParameter::SequenceSize),
             _ => self.stroke_index().map(CaptureParameter::Stroke),
         }
     }
@@ -55,7 +63,7 @@ impl Tool {
             Self::Rectangle => Some(0),
             Self::Arrow => Some(1),
             Self::Pen => Some(2),
-            Self::Select | Self::Text | Self::Mosaic => None,
+            Self::Select | Self::Text | Self::Mosaic | Self::Sequence => None,
         }
     }
 }
@@ -78,6 +86,10 @@ pub enum Shape {
     Mosaic {
         bounds: PixelRect,
         size: u16,
+    },
+    Sequence {
+        center: PixelPoint,
+        diameter: u16,
     },
     Arrow(PixelPoint, PixelPoint),
     Pen(Vec<PixelPoint>),
@@ -104,12 +116,22 @@ impl Object {
                 | (Shape::Pen(_), Tool::Pen)
                 | (Shape::Text { .. }, Tool::Text)
                 | (Shape::Mosaic { .. }, Tool::Mosaic)
+                | (Shape::Sequence { .. }, Tool::Sequence)
         )
     }
     pub fn bounds(&self) -> PixelRect {
         match &self.shape {
             Shape::Text { bounds, .. } | Shape::Mosaic { bounds, .. } => *bounds,
             Shape::Rectangle(r) => *r,
+            Shape::Sequence { center, diameter } => {
+                let radius = i32::from(diameter.div_ceil(2));
+                PixelRect {
+                    left: center.x.saturating_sub(radius),
+                    top: center.y.saturating_sub(radius),
+                    right: center.x.saturating_add(radius),
+                    bottom: center.y.saturating_add(radius),
+                }
+            }
             Shape::Arrow(a, b) => {
                 let mut bounds = rect(*a, *b);
                 for p in arrow_head(*a, *b, self.style.width) {
@@ -140,7 +162,7 @@ impl Object {
                 Selection::handles(*r).to_vec()
             }
             Shape::Arrow(a, b) => vec![*a, *b],
-            Shape::Pen(_) | Shape::Text { .. } => Vec::new(),
+            Shape::Pen(_) | Shape::Text { .. } | Shape::Sequence { .. } => Vec::new(),
         }
     }
     pub fn rotation_handle(&self, scale: f32) -> Option<PixelPoint> {
@@ -153,6 +175,9 @@ impl Object {
         let t = tolerance + f64::from(self.style.width) / 2.;
         match &self.shape {
             Shape::Mosaic { bounds, .. } => contains(*bounds, p),
+            Shape::Sequence { center, diameter } => {
+                distance(p, *center, *center) <= f64::from(*diameter) / 2.
+            }
             Shape::Text { bounds, angle, .. } => {
                 let (x, y) = rotate_point(*bounds, -*angle, f64::from(p.x), f64::from(p.y));
                 x >= f64::from(bounds.left)
@@ -293,6 +318,10 @@ enum ParameterBefore {
         index: usize,
         size: u16,
     },
+    SequenceSize {
+        index: usize,
+        diameter: u16,
+    },
     StrokeWidth {
         index: usize,
         width: f32,
@@ -330,6 +359,7 @@ pub struct Editor {
     pub selected: Option<usize>,
     pub text_size: u16,
     pub mosaic_size: u16,
+    pub sequence_size: u16,
     drag: Option<Drag>,
     parameter_before: Option<ParameterBefore>,
     undo: VecDeque<Change>,
@@ -345,6 +375,7 @@ impl Default for Editor {
             selected: None,
             text_size: DEFAULT_TEXT_SIZE,
             mosaic_size: DEFAULT_MOSAIC_SIZE,
+            sequence_size: DEFAULT_SEQUENCE_SIZE,
             drag: None,
             parameter_before: None,
             undo: VecDeque::new(),
@@ -443,6 +474,7 @@ impl Editor {
             styles: self.styles,
             text_size: self.text_size,
             mosaic_size: self.mosaic_size,
+            sequence_size: self.sequence_size,
             ..Default::default()
         }
     }
@@ -454,6 +486,14 @@ impl Editor {
             Shape::Mosaic { bounds, size } => Some((bounds, size)),
             _ => None,
         })
+    }
+    pub fn next_sequence(&self) -> usize {
+        // History restores original object indices, so their order is the numbering order.
+        self.objects
+            .iter()
+            .filter(|object| matches!(object.shape, Shape::Sequence { .. }))
+            .count()
+            + 1
     }
     fn front_to_back(&self) -> impl Iterator<Item = (usize, &Object)> {
         let objects = self.objects.iter().enumerate().rev();
@@ -501,6 +541,31 @@ impl Editor {
                     .get_or_insert(ParameterBefore::MosaicSize { index, size: *size });
             }
             *size = value;
+        }
+    }
+    pub fn current_sequence_size(&self) -> u16 {
+        match self.selected.and_then(|index| self.objects.get(index)) {
+            Some(Object {
+                shape: Shape::Sequence { diameter, .. },
+                ..
+            }) => *diameter,
+            _ => self.sequence_size,
+        }
+    }
+    pub fn set_sequence_size(&mut self, value: u16) {
+        self.sequence_size = value;
+        let Some(index) = self.selected else { return };
+        if let Shape::Sequence { diameter, .. } = &mut self.objects[index].shape
+            && *diameter != value
+        {
+            if self.drag.is_none() {
+                self.parameter_before
+                    .get_or_insert(ParameterBefore::SequenceSize {
+                        index,
+                        diameter: *diameter,
+                    });
+            }
+            *diameter = value;
         }
     }
     fn selected_stroke(&self) -> Option<usize> {
@@ -565,7 +630,8 @@ impl Editor {
         let index = match adjustment {
             ParameterBefore::StrokeWidth { index, .. }
             | ParameterBefore::TextSize { index, .. }
-            | ParameterBefore::MosaicSize { index, .. } => index,
+            | ParameterBefore::MosaicSize { index, .. }
+            | ParameterBefore::SequenceSize { index, .. } => index,
         };
         let after = self.objects[index].clone();
         let mut before = after.clone();
@@ -574,6 +640,15 @@ impl Editor {
             ParameterBefore::MosaicSize { size, .. } => {
                 if let Shape::Mosaic { size: old_size, .. } = &mut before.shape {
                     *old_size = size;
+                }
+            }
+            ParameterBefore::SequenceSize { diameter, .. } => {
+                if let Shape::Sequence {
+                    diameter: old_diameter,
+                    ..
+                } = &mut before.shape
+                {
+                    *old_diameter = diameter;
                 }
             }
             ParameterBefore::TextSize { bounds, size, .. } => {
@@ -743,6 +818,10 @@ impl Editor {
                 bounds: rect(p, p),
                 size: self.mosaic_size,
             },
+            Tool::Sequence => Shape::Sequence {
+                center: p,
+                diameter: self.sequence_size,
+            },
             Tool::Select | Tool::Text => return Ok(false),
         };
         let style = self.default_style();
@@ -764,7 +843,7 @@ impl Editor {
         let object = &mut self.objects[drag.index];
         match &drag.kind {
             DragKind::Create => match &mut object.shape {
-                Shape::Text { .. } => {}
+                Shape::Text { .. } | Shape::Sequence { .. } => {}
                 Shape::Rectangle(r) | Shape::Mosaic { bounds: r, .. } => *r = rect(drag.start, p),
                 Shape::Arrow(_, b) => *b = p,
                 Shape::Pen(points) => {
@@ -823,6 +902,9 @@ impl Editor {
                         }
                         (Shape::Arrow(a, b), Shape::Arrow(from, to)) => {
                             (*a, *b) = (shift(*from), shift(*to));
+                        }
+                        (Shape::Sequence { center, .. }, Shape::Sequence { center: from, .. }) => {
+                            *center = shift(*from);
                         }
                         (Shape::Pen(points), Shape::Pen(original)) => {
                             for (point, &previous) in points.iter_mut().zip(original) {
@@ -909,7 +991,7 @@ impl Editor {
                                 Shape::Arrow(*a, shift(*b))
                             }
                         }
-                        Shape::Pen(_) | Shape::Text { .. } => {}
+                        Shape::Pen(_) | Shape::Text { .. } | Shape::Sequence { .. } => {}
                     }
                 }
             }
@@ -926,6 +1008,7 @@ impl Editor {
             Shape::Rectangle(r) => r.size().is_some(),
             Shape::Arrow(a, b) => a != b,
             Shape::Pen(points) => !points.is_empty(),
+            Shape::Sequence { .. } => true,
         };
         if !valid {
             if let Some(before) = drag.before {

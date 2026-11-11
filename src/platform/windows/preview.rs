@@ -102,6 +102,7 @@ impl Preview {
             }
             editor.text_size = cfg.text_size;
             editor.mosaic_size = cfg.mosaic_size;
+            editor.sequence_size = cfg.sequence_size;
             let state = State {
                 lifetime,
                 canvas,
@@ -176,7 +177,7 @@ struct State {
     canvas: Canvas,
     selection: Selection,
     editor: Editor,
-    drawing_tools: [bool; 5],
+    drawing_tools: [bool; Tool::DRAWING.len()],
     corner_radius: u16,
     parameter_down: bool,
     parameter_slider: bool,
@@ -330,6 +331,7 @@ impl State {
             CaptureParameter::CornerRadius => return None,
             CaptureParameter::Stroke(_) => self.editor.style().width as u16,
             CaptureParameter::MosaicSize => self.editor.current_mosaic_size(),
+            CaptureParameter::SequenceSize => self.editor.current_sequence_size(),
             CaptureParameter::TextSize => {
                 if let Some(input) = &self.text_input {
                     input.requested_size() as u16
@@ -422,6 +424,7 @@ fn set_parameter_value(pointer: *mut State, value: u16) {
             CaptureParameter::CornerRadius => return,
             CaptureParameter::Stroke(_) => (*pointer).editor.set_stroke_width(value as u8),
             CaptureParameter::MosaicSize => (*pointer).editor.set_mosaic_size(value),
+            CaptureParameter::SequenceSize => (*pointer).editor.set_sequence_size(value),
             CaptureParameter::TextSize => {
                 let size = f32::from(value);
                 let result = if let Some(mut input) = (*pointer).text_input.take() {
@@ -599,6 +602,7 @@ fn refresh_tool_visibility(hwnd: HWND, pointer: *mut State) {
     unsafe {
         let state = &mut *pointer;
         state.editor.mosaic_size = config.mosaic_size;
+        state.editor.sequence_size = config.sequence_size;
         if state.drawing_tools == drawing_tools {
             return;
         }
@@ -1270,7 +1274,9 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 LRESULT(1)
             }
             super::preferences::PARAMETER_CHANGED => {
-                (*pointer).editor.mosaic_size = super::preferences::current().mosaic_size;
+                let config = super::preferences::current();
+                (*pointer).editor.mosaic_size = config.mosaic_size;
+                (*pointer).editor.sequence_size = config.sequence_size;
                 let _ = InvalidateRect(Some(hwnd), None, false);
                 LRESULT(0)
             }
@@ -2231,7 +2237,7 @@ mod tests {
             let size = draft.size;
             let angle = draft.angle;
 
-            config.drawing_tools = [false, true, true, false, false];
+            config.drawing_tools = [false, true, true, false, false, false];
             super::super::preferences::update(config.clone()).unwrap();
             let mut message = MSG::default();
             let changed = super::super::preferences::CHANGED;

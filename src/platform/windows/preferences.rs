@@ -165,6 +165,7 @@ pub fn set_parameter(parameter: CaptureParameter, value: u16) -> std::result::Re
         CaptureParameter::TextSize => config.text_size = value,
         CaptureParameter::CornerRadius => config.corner_radius = value,
         CaptureParameter::MosaicSize => config.mosaic_size = value,
+        CaptureParameter::SequenceSize => config.sequence_size = value,
     }
     update_config(config, false, PARAMETER_CHANGED)
 }

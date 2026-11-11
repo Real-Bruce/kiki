@@ -106,7 +106,10 @@ pub const MAX_STROKE_WIDTH: u8 = 64;
 pub const DEFAULT_STROKE_WIDTH: u8 = 3;
 pub const DEFAULT_TEXT_SIZE: u16 = 24;
 pub const DEFAULT_MOSAIC_SIZE: u16 = 12;
-pub const DEFAULT_DRAWING_TOOLS: [bool; 5] = [true, true, true, true, false];
+pub const DEFAULT_SEQUENCE_SIZE: u16 = 28;
+pub const CAPTURE_TOOL_COUNT: usize = DRAWING_TOOL_KEYS.len();
+pub const DEFAULT_DRAWING_TOOLS: [bool; CAPTURE_TOOL_COUNT] =
+    [true, true, true, true, false, false];
 pub const MAX_CORNER_RADIUS: u16 = 256;
 const STROKE_KEYS: [&str; 3] = ["rectangle_width", "arrow_width", "pen_width"];
 
@@ -116,6 +119,7 @@ pub enum CaptureParameter {
     TextSize,
     CornerRadius,
     MosaicSize,
+    SequenceSize,
 }
 
 impl CaptureParameter {
@@ -125,6 +129,7 @@ impl CaptureParameter {
             Self::TextSize => (8, 256),
             Self::CornerRadius => (0, MAX_CORNER_RADIUS),
             Self::MosaicSize => (2, 64),
+            Self::SequenceSize => (16, 128),
         }
     }
 
@@ -140,6 +145,7 @@ impl CaptureParameter {
                 Self::TextSize => "请输入 8–256 之间的整数字号（px）。",
                 Self::CornerRadius => "请输入 0–256 之间的整数圆角半径（px）。",
                 Self::MosaicSize => "请输入 2–64 之间的整数颗粒大小（px）。",
+                Self::SequenceSize => "请输入 16–128 之间的整数编号直径（px）。",
             })
     }
 
@@ -149,6 +155,7 @@ impl CaptureParameter {
             Self::TextSize => config.text_size,
             Self::CornerRadius => config.corner_radius,
             Self::MosaicSize => config.mosaic_size,
+            Self::SequenceSize => config.sequence_size,
         }
     }
 }
@@ -187,8 +194,9 @@ pub struct Config {
     pub text_size: u16,
     pub corner_radius: u16,
     pub output_format: OutputFormat,
-    pub drawing_tools: [bool; 5],
+    pub drawing_tools: [bool; CAPTURE_TOOL_COUNT],
     pub mosaic_size: u16,
+    pub sequence_size: u16,
     pub last_directory: Option<String>,
     pub extra: BTreeMap<String, String>,
 }
@@ -206,6 +214,7 @@ impl Default for Config {
             output_format: OutputFormat::Png,
             drawing_tools: DEFAULT_DRAWING_TOOLS,
             mosaic_size: DEFAULT_MOSAIC_SIZE,
+            sequence_size: DEFAULT_SEQUENCE_SIZE,
             last_directory: None,
             extra: BTreeMap::new(),
         }
@@ -222,6 +231,7 @@ impl Config {
         self.output_format = defaults.output_format;
         self.drawing_tools = defaults.drawing_tools;
         self.mosaic_size = defaults.mosaic_size;
+        self.sequence_size = defaults.sequence_size;
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -241,6 +251,10 @@ impl Config {
         let (min, max) = CaptureParameter::MosaicSize.bounds();
         if !(min..=max).contains(&self.mosaic_size) {
             return Err("马赛克颗粒大小超出支持范围".into());
+        }
+        let (min, max) = CaptureParameter::SequenceSize.bounds();
+        if !(min..=max).contains(&self.sequence_size) {
+            return Err("编号直径超出支持范围".into());
         }
         if self.last_directory.as_ref().is_some_and(|path| {
             path.encode_utf16().count() > 32767 || path.chars().any(char::is_control)
@@ -271,6 +285,7 @@ impl Config {
         );
         use std::fmt::Write as _;
         let _ = writeln!(text, "mosaic_size={}", self.mosaic_size);
+        let _ = writeln!(text, "sequence_size={}", self.sequence_size);
         for (key, value) in STROKE_KEYS.into_iter().zip(self.stroke_widths) {
             let _ = writeln!(text, "{key}={value}");
         }
@@ -343,6 +358,9 @@ impl Config {
                     config.corner_radius = CaptureParameter::CornerRadius.parse(value)?;
                 }
                 "mosaic_size" => config.mosaic_size = CaptureParameter::MosaicSize.parse(value)?,
+                "sequence_size" => {
+                    config.sequence_size = CaptureParameter::SequenceSize.parse(value)?;
+                }
                 "output_format" => {
                     config.output_format = match value {
                         "png" => OutputFormat::Png,
@@ -376,12 +394,13 @@ impl Config {
     }
 }
 
-const DRAWING_TOOL_KEYS: [&str; 5] = [
+const DRAWING_TOOL_KEYS: [&str; 6] = [
     "rectangle_enabled",
     "arrow_enabled",
     "pen_enabled",
     "text_enabled",
     "mosaic_enabled",
+    "sequence_enabled",
 ];
 #[cfg(test)]
 mod tests {
@@ -392,23 +411,28 @@ mod tests {
             let config = Config::decode(old).unwrap().0;
             assert_eq!(config.drawing_tools, DEFAULT_DRAWING_TOOLS);
             assert_eq!(config.mosaic_size, DEFAULT_MOSAIC_SIZE);
+            assert_eq!(config.sequence_size, DEFAULT_SEQUENCE_SIZE);
         }
         let mut config = Config::decode(
-            "version=2\ntheme=dark\nrectangle_enabled=false\npen_enabled=false\nmosaic_enabled=true\nmosaic_size=29\nsequence_enabled=true",
+            "version=2\ntheme=dark\nrectangle_enabled=false\npen_enabled=false\nmosaic_enabled=true\nmosaic_size=29\nsequence_enabled=true\nsequence_size=42\nfuture_tool_enabled=true",
         )
         .unwrap()
         .0;
-        assert_eq!(config.drawing_tools, [false, true, false, true, true]);
+        assert_eq!(config.drawing_tools, [false, true, false, true, true, true]);
         assert_eq!(config.mosaic_size, 29);
+        assert_eq!(config.sequence_size, 42);
         assert_eq!(Config::decode(&config.encode().unwrap()).unwrap().0, config);
         assert!(Config::decode("version=2\npen_enabled=maybe").is_err());
         assert!(Config::decode("version=2\nmosaic_size=65").is_err());
         assert!(Config::decode("version=2\nmosaic_size=1").is_err());
+        assert!(Config::decode("version=2\nsequence_size=15").is_err());
+        assert!(Config::decode("version=2\nsequence_size=129").is_err());
         config.reset_capture_defaults();
         assert_eq!(config.drawing_tools, DEFAULT_DRAWING_TOOLS);
         assert_eq!(config.mosaic_size, DEFAULT_MOSAIC_SIZE);
+        assert_eq!(config.sequence_size, DEFAULT_SEQUENCE_SIZE);
         assert_eq!(config.theme, Theme::Dark);
-        assert_eq!(config.extra["sequence_enabled"], "true");
+        assert_eq!(config.extra["future_tool_enabled"], "true");
     }
     #[test]
     fn preferences_roundtrip_preserves_unicode_paths_and_equal_signs() {

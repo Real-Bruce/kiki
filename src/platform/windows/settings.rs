@@ -410,6 +410,7 @@ fn setting_parameter(id: u16, first: u16) -> Option<CaptureParameter> {
         3 => Some(CaptureParameter::TextSize),
         4 => Some(CaptureParameter::CornerRadius),
         5 => Some(CaptureParameter::MosaicSize),
+        6 => Some(CaptureParameter::SequenceSize),
         _ => None,
     }
 }
@@ -2065,7 +2066,7 @@ mod tests {
                 SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(usize::from(id))), None);
             }
             let hidden = preferences::current();
-            assert_eq!(hidden.drawing_tools, [false; 5]);
+            assert_eq!(hidden.drawing_tools, [false; Tool::DRAWING.len()]);
             assert_eq!(hidden.stroke_widths, [8, 3, 3]);
             for id in DRAWING_TOOL_IDS.take(4) {
                 SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(usize::from(id))), None);

@@ -12,13 +12,14 @@ pub const RESET_CAPTURE: u16 = 431;
 pub const DRAWING_TOOL: u16 = 432;
 pub const DRAWING_TOOL_IDS: std::ops::Range<u16> =
     DRAWING_TOOL..DRAWING_TOOL + Tool::DRAWING.len() as u16;
-pub const PARAMETER_LABELS: [&str; 6] = [
+pub const PARAMETER_LABELS: [&str; 7] = [
     "矩形线宽",
     "箭头线宽",
     "画笔线宽",
     "文字字号",
     "圆角半径",
     "马赛克颗粒大小",
+    "编号直径",
 ];
 pub const FOOTER: i32 = 56;
 const GROUP_GAP: i32 = 26;
@@ -135,9 +136,19 @@ impl Page {
                     p.parameter_row(index);
                 }
                 p.note("成图实际像素 · 线宽 1–64 px · 字号 8–256 px", Tone::Muted);
-                if cfg.drawing_tools[Tool::DRAWING.len() - 1] {
+                if Tool::Mosaic
+                    .index()
+                    .is_some_and(|index| cfg.drawing_tools[index])
+                {
                     p.parameter_row(5);
                     p.note("成图实际像素 · 马赛克颗粒 2–64 px", Tone::Muted);
+                }
+                if Tool::Sequence
+                    .index()
+                    .is_some_and(|index| cfg.drawing_tools[index])
+                {
+                    p.parameter_row(6);
+                    p.note("成图实际像素 · 编号直径 16–128 px", Tone::Muted);
                 }
                 p.divider();
                 p.heading("图像输出");

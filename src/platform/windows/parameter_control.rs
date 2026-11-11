@@ -25,6 +25,10 @@ impl Wheel {
 
 pub fn step(parameter: CaptureParameter, value: u16, steps: i32) -> u16 {
     let (min, max) = parameter.bounds();
+    let steps = match parameter {
+        CaptureParameter::SequenceSize => steps * 2,
+        _ => steps,
+    };
     (i32::from(value) + steps).clamp(i32::from(min), i32::from(max)) as u16
 }
 

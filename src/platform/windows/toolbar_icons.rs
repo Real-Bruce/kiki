@@ -1,6 +1,6 @@
 //! Outline shapes measured against the capture design, in toolbar DIPs.
 use super::{
-    capture_toolbar::{BUTTON_HEIGHT, Layout, MORE, MOSAIC},
+    capture_toolbar::{BUTTON_HEIGHT, Layout, MORE, MOSAIC, SEQUENCE},
     ui_palette as palette,
 };
 use crate::core::{geometry::PixelRect, selection::PixelPoint};
@@ -268,6 +268,31 @@ impl ToolbarIcons {
                             target.DrawRectangle(&tile, brush, 0.8 * scale, None);
                         }
                     }
+                }
+                return;
+            }
+            if index == SEQUENCE {
+                let radius = 8. * scale;
+                target.DrawEllipse(
+                    &D2D1_ELLIPSE {
+                        point: center,
+                        radiusX: radius,
+                        radiusY: radius,
+                    },
+                    brush,
+                    1.4 * scale,
+                    None,
+                );
+                let point = |x: f32, y: f32| Vector2 {
+                    X: center.X + x * scale,
+                    Y: center.Y + y * scale,
+                };
+                for (a, b) in [
+                    (point(-2., -2.), point(0., -4.)),
+                    (point(0., -4.), point(0., 4.)),
+                    (point(-2., 4.), point(2., 4.)),
+                ] {
+                    target.DrawLine(a, b, brush, 1.4 * scale, &self.stroke);
                 }
                 return;
             }

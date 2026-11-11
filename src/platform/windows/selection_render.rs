@@ -40,7 +40,7 @@ pub struct PaintInput<'a> {
     pub busy: bool,
     pub hover: Option<PixelRect>,
     pub screens: &'a [DisplayInfo],
-    pub drawing_tools: [bool; 5],
+    pub drawing_tools: [bool; Tool::DRAWING.len()],
     pub pointer: PixelPoint,
     pub focus: usize,
     pub pressed: Option<usize>,
@@ -145,7 +145,7 @@ impl Canvas {
         rect: PixelRect,
         screens: &[DisplayInfo],
         tool: Tool,
-        drawing_tools: [bool; 5],
+        drawing_tools: [bool; Tool::DRAWING.len()],
     ) -> Layout {
         let (screen, preferred) = self.display(rect, screens);
         Layout::new(rect, screen, preferred, tool, drawing_tools)
@@ -587,7 +587,7 @@ impl Canvas {
             return None;
         }
         let x = (p.x - r.left) as f32 / layout.parameter_scale;
-        if !layout.mosaic_parameters && (COLOR_START..COLOR_START + 8. * COLOR_STEP).contains(&x) {
+        if layout.color_parameters() && (COLOR_START..COLOR_START + 8. * COLOR_STEP).contains(&x) {
             Some(((x - COLOR_START) / COLOR_STEP) as usize)
         } else if layout.parameter_slider().is_some_and(|r| contains(r, p)) {
             Some(8)
@@ -605,6 +605,22 @@ impl Canvas {
         let s = layout.parameter_scale;
         let dark = self.dark;
         self.panel(r, BAR_RADIUS * s);
+        if editor.tool == Tool::Sequence {
+            let text = self
+                .parameter_text
+                .as_ref()
+                .map_or(&self.text, |(_, text)| text);
+            self.label_with_format(
+                &format!("下一编号 {}", editor.next_sequence()),
+                D2D_RECT_F {
+                    left: r.left + 8. * s,
+                    right: r.left + 108. * s,
+                    ..r
+                },
+                tone(palette::foreground(dark), 1.),
+                text,
+            );
+        }
         if !editor.tool.has_color() {
             return;
         }
@@ -705,7 +721,7 @@ impl Canvas {
         if focus == 19 {
             self.outline(slider, 5. * s, 1.5 * s, accent);
         }
-        if !layout.mosaic_parameters {
+        if layout.color_parameters() {
             self.fill(
                 D2D_RECT_F {
                     left: slider.left - 53. * s,
@@ -722,9 +738,15 @@ impl Canvas {
                 CaptureParameter::TextSize => "字号",
                 CaptureParameter::CornerRadius => "圆角",
                 CaptureParameter::MosaicSize => "颗粒大小",
+                CaptureParameter::SequenceSize => "直径",
             },
             D2D_RECT_F {
-                left: slider.left - if layout.mosaic_parameters { 80. } else { 47. } * s,
+                left: slider.left
+                    - if matches!(parameter, CaptureParameter::MosaicSize) {
+                        80.
+                    } else {
+                        47.
+                    } * s,
                 right: slider.left - 8. * s,
                 ..slider
             },
@@ -831,6 +853,20 @@ impl Canvas {
                     self.brush.SetColor(&tone(palette::accent(self.dark), 1.));
                     self.target
                         .DrawRectangle(&self.local(bounds), &self.brush, 1., None);
+                }
+                if let Shape::Sequence { center, diameter } = object.shape {
+                    let radius = f32::from(diameter) / 2. + 2. * self.scale;
+                    self.brush.SetColor(&tone(palette::accent(self.dark), 1.));
+                    self.target.DrawEllipse(
+                        &D2D1_ELLIPSE {
+                            point: point(center),
+                            radiusX: radius,
+                            radiusY: radius,
+                        },
+                        &self.brush,
+                        self.scale,
+                        None,
+                    );
                 }
                 for p in object.handles() {
                     let p = point(p);

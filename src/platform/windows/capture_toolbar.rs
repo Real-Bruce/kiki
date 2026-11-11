@@ -7,12 +7,13 @@ use crate::core::{
 
 pub const MORE: usize = 21;
 pub const MOSAIC: usize = 22;
+pub const SEQUENCE: usize = 23;
 pub const BUTTON_HEIGHT: f32 = 36.;
 pub const BAR_HEIGHT: f32 = 48.;
 const PARAM_HEIGHT: f32 = 42.;
 const PARAM_WIDTH: f32 = 506.;
 const BUTTON_GAP: f32 = 4.;
-const DRAWING: &[usize; Tool::DRAWING.len()] = &[1, 2, 3, 4, MOSAIC];
+const DRAWING: &[usize; Tool::DRAWING.len()] = &[1, 2, 3, 4, MOSAIC, SEQUENCE];
 const HISTORY: &[usize] = &[5, 6];
 const OUTPUT: &[usize] = &[7, 8, 9];
 const CANCEL: &[usize] = &[10];
@@ -21,10 +22,7 @@ const COLLAPSED_DRAWING: &[&[usize]] = &[&[MORE], HISTORY, OUTPUT, CANCEL];
 const COLLAPSED_ALL: &[&[usize]] = &[&[MORE], OUTPUT, CANCEL];
 
 pub fn tool_button(tool: Tool) -> usize {
-    Tool::DRAWING
-        .iter()
-        .position(|&item| item == tool)
-        .map_or(0, |index| DRAWING[index])
+    tool.index().map_or(0, |index| DRAWING[index])
 }
 
 pub fn drawing_tool(id: usize) -> Option<Tool> {
@@ -34,7 +32,7 @@ pub fn drawing_tool(id: usize) -> Option<Tool> {
         .map(|index| Tool::DRAWING[index])
 }
 
-pub fn tool_visible(drawing_tools: [bool; 5], id: usize) -> bool {
+pub fn tool_visible(drawing_tools: [bool; Tool::DRAWING.len()], id: usize) -> bool {
     DRAWING
         .iter()
         .position(|&button| button == id)
@@ -105,12 +103,12 @@ pub struct Layout {
     pub toolbar: PixelRect,
     pub parameters: Option<PixelRect>,
     pub screen: PixelRect,
-    buttons: [Option<Button>; 11],
+    buttons: [Option<Button>; DRAWING.len() + HISTORY.len() + OUTPUT.len() + CANCEL.len()],
     dividers: [Option<i32>; 3],
-    overflow: [Option<usize>; 7],
+    overflow: [Option<usize>; DRAWING.len() + HISTORY.len()],
     pub scale: f32,
     pub parameter_scale: f32,
-    pub mosaic_parameters: bool,
+    parameter_tool: Tool,
 }
 
 impl Layout {
@@ -119,12 +117,12 @@ impl Layout {
         screen: PixelRect,
         preferred: f32,
         tool: Tool,
-        drawing_tools: [bool; 5],
+        drawing_tools: [bool; Tool::DRAWING.len()],
     ) -> Self {
         Self::build(rect, screen, preferred, tool, drawing_tools, true)
     }
 
-    pub fn preview(bounds: PixelRect, drawing_tools: [bool; 5]) -> Self {
+    pub fn preview(bounds: PixelRect, drawing_tools: [bool; Tool::DRAWING.len()]) -> Self {
         Self::build(bounds, bounds, 1., Tool::Select, drawing_tools, false)
     }
 
@@ -133,7 +131,7 @@ impl Layout {
         screen: PixelRect,
         preferred: f32,
         tool: Tool,
-        drawing_tools: [bool; 5],
+        drawing_tools: [bool; Tool::DRAWING.len()],
         allow_overflow: bool,
     ) -> Self {
         let visible = |id| tool_visible(drawing_tools, id);
@@ -142,7 +140,7 @@ impl Layout {
         let mut groups = FULL;
         let mut padding = 18.;
         let mut group_gap = 18.;
-        let mut overflow = [None; 7];
+        let mut overflow = [None; DRAWING.len() + HISTORY.len()];
         if allow_overflow && bar_width(FULL, visible, padding, group_gap) * preferred > available {
             if drawing_tools.into_iter().any(|enabled| enabled) {
                 groups = COLLAPSED_DRAWING;
@@ -171,8 +169,11 @@ impl Layout {
         }
         let bar_dip = bar_width(groups, visible, padding, group_gap);
         let mut scale = preferred.min(available / bar_dip);
-        let mosaic_parameters = tool == Tool::Mosaic;
-        let parameter_width = if mosaic_parameters { 360. } else { PARAM_WIDTH };
+        let parameter_width = match tool {
+            Tool::Mosaic => 360.,
+            Tool::Sequence => 415.,
+            _ => PARAM_WIDTH,
+        };
         let parameters = tool.parameter().is_some();
         let mut parameter_scale = preferred.min(available / parameter_width);
         let mut height = BAR_HEIGHT * scale;
@@ -200,7 +201,7 @@ impl Layout {
         let x = |offset: f32| left + (offset * scale).round() as i32;
         let y = |offset: f32| area.top + (offset * scale).round() as i32;
         let mut offset = padding;
-        let mut buttons = [None; 11];
+        let mut buttons = [None; DRAWING.len() + HISTORY.len() + OUTPUT.len() + CANCEL.len()];
         let mut button_count = 0;
         let mut dividers = [None; 3];
         let present = groups
@@ -247,7 +248,7 @@ impl Layout {
             overflow,
             scale,
             parameter_scale,
-            mosaic_parameters,
+            parameter_tool: tool,
         }
     }
 
@@ -281,19 +282,25 @@ impl Layout {
     }
 
     pub fn parameter_slider(&self) -> Option<PixelRect> {
-        if self.mosaic_parameters {
-            self.parameter_box(94., 270., 8.)
-        } else {
-            self.parameter_box(305., 418., 8.)
-        }
+        let (left, right) = match self.parameter_tool {
+            Tool::Mosaic => (94., 270.),
+            Tool::Sequence => (160., 325.),
+            _ => (305., 418.),
+        };
+        self.parameter_box(left, right, 8.)
     }
 
     pub fn parameter_edit(&self) -> Option<PixelRect> {
-        if self.mosaic_parameters {
-            self.parameter_box(282., 329., 7.)
-        } else {
-            self.parameter_box(430., 477., 7.)
-        }
+        let (left, right) = match self.parameter_tool {
+            Tool::Mosaic => (282., 329.),
+            Tool::Sequence => (337., 384.),
+            _ => (430., 477.),
+        };
+        self.parameter_box(left, right, 7.)
+    }
+
+    pub fn color_parameters(&self) -> bool {
+        self.parameter_tool.has_color()
     }
 }
 
@@ -315,10 +322,10 @@ mod tests {
         let display = rect(-2200, -900, 2000, 1200);
         let selection = rect(-2100, 10, 2020, 275);
         for scale in [1., 1.25, 1.5, 2.] {
-            for mask in 0u32..32 {
+            for mask in 0u32..1 << Tool::DRAWING.len() {
                 let tools = std::array::from_fn(|i| mask & (1 << i) != 0);
                 let layout = Layout::new(selection, display, scale, Tool::Select, tools);
-                let expected: Vec<_> = [1, 2, 3, 4, MOSAIC, 5, 6, 7, 8, 9, 10]
+                let expected: Vec<_> = [1, 2, 3, 4, MOSAIC, SEQUENCE, 5, 6, 7, 8, 9, 10]
                     .into_iter()
                     .filter(|&id| tool_visible(tools, id))
                     .collect();
@@ -326,7 +333,7 @@ mod tests {
                 assert_eq!(layout.dividers().count(), if mask == 0 { 2 } else { 3 });
                 assert_eq!(layout.overflow().count(), 0);
                 assert_eq!(layout.toolbar.intersection(display), Some(layout.toolbar));
-                let width = ((621 - (5 - mask.count_ones()) * 46 - if mask == 0 { 14 } else { 0 })
+                let width = ((667 - (6 - mask.count_ones()) * 46 - if mask == 0 { 14 } else { 0 })
                     as f32
                     * scale)
                     .round() as i32;
@@ -347,16 +354,19 @@ mod tests {
 
     #[test]
     fn narrow_display_overflow_keeps_full_size_output_and_has_no_hidden_tools() {
-        let tools = [true, false, true, true, true];
+        let tools = [true, false, true, true, true, false];
         let selection = rect(-320, 700, 470, 200);
         let medium = Layout::new(
             selection,
             rect(-1020, 0, 1000, 900),
             2.,
             Tool::Select,
-            [true; 5],
+            [true; Tool::DRAWING.len()],
         );
-        assert_eq!(medium.overflow().collect::<Vec<_>>(), [1, 2, 3, 4, MOSAIC]);
+        assert_eq!(
+            medium.overflow().collect::<Vec<_>>(),
+            [1, 2, 3, 4, MOSAIC, SEQUENCE]
+        );
         assert_eq!(
             medium.buttons().map(|b| b.id).collect::<Vec<_>>(),
             [MORE, 5, 6, 7, 8, 9, 10]
