@@ -2075,6 +2075,16 @@ mod tests {
                 preferences::current().capture_tools,
                 crate::core::config::DEFAULT_CAPTURE_TOOLS
             );
+            for tool in [Tool::Sequence, Tool::Picker] {
+                let index = tool.index().unwrap();
+                let id = CAPTURE_TOOL + index as u16;
+                SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(usize::from(id))), None);
+                assert!(preferences::current().capture_tools[index]);
+            }
+            let diameter = GetDlgItem(Some(hwnd), i32::from(PARAMETER_EDIT + 6)).unwrap();
+            SetWindowTextW(diameter, w!("64")).unwrap();
+            SendMessageW(diameter, WM_KEYDOWN, Some(WPARAM(13)), None);
+            assert_eq!(preferences::current().sequence_size, 64);
             SetWindowPos(hwnd, None, 0, 0, 860, 480, SWP_NOZORDER | SWP_NOACTIVATE).unwrap();
             SendMessageW(hwnd, WM_VSCROLL, Some(WPARAM(SB_PAGEDOWN.0 as usize)), None);
             assert!((*pointer(hwnd)).scroll > 0);

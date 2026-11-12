@@ -287,6 +287,17 @@ pub fn close_all() {
         })
     });
 }
+#[cfg(test)]
+pub(super) fn test_image() -> Option<Arc<Image>> {
+    WINDOWS.with_borrow(|windows| {
+        let hwnd = windows.last()?.life.upgrade()?.get()?;
+        // SAFETY: this registry only contains live windows on the calling test thread.
+        unsafe {
+            let state = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const State;
+            Some(state.as_ref()?.image.clone())
+        }
+    })
+}
 unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match std::panic::catch_unwind(|| dispatch(hwnd, msg, wp, lp)) {
         Ok(value) => value,

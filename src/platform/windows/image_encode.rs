@@ -164,6 +164,9 @@ pub fn encode_png(image: &Image) -> Result<Vec<u8>> {
     }
 }
 #[cfg(test)]
+pub(super) use tests::decode_file;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::geometry::PixelRect;
@@ -233,7 +236,7 @@ mod tests {
         std::fs::remove_file(file).unwrap();
         std::fs::remove_dir(directory).unwrap();
     }
-    fn decode_file(file: &Path) -> ((u32, u32), Vec<u8>) {
+    pub(in crate::platform::windows) fn decode_file(file: &Path) -> ((u32, u32), Vec<u8>) {
         use std::os::windows::ffi::OsStrExt;
         let wide: Vec<u16> = file.as_os_str().encode_wide().chain(Some(0)).collect();
         let _apartment = super::super::composition::Apartment::enter().unwrap();

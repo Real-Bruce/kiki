@@ -1934,6 +1934,10 @@ pub(super) fn performance_finish(hwnd: HWND, pin: bool) -> Result<()> {
 }
 
 #[cfg(test)]
+#[path = "preview_acceptance_tests.rs"]
+mod acceptance_tests;
+
+#[cfg(test)]
 mod tests {
     use super::super::{composition, output, tests::take_ui_errors};
     use super::*;
@@ -2650,6 +2654,14 @@ mod tests {
             )
             .unwrap();
             OpenClipboard(Some(locker)).unwrap();
+            (*p).capture_tools[Tool::Picker.index().unwrap()] = true;
+            (*p).activate(tool_button(Tool::Picker));
+            begin_color_copy(hwnd, p, "#A0CEBB".into());
+            acceptance_tests::pump_until(|| (*p).output.is_none());
+            assert!((*p).picker_notice == Some(PickerNotice::Failed));
+            assert!(preview.is_open());
+            assert_eq!((*p).editor.objects(), objects);
+            assert_eq!(GetClipboardSequenceNumber(), sequence);
             (*p).pending_output = Some(9);
             begin_output(hwnd, p).unwrap();
             pump_until_done(&preview);
