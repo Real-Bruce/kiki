@@ -9,14 +9,15 @@ pub const MORE: usize = 21;
 pub const MOSAIC: usize = 22;
 pub const SEQUENCE: usize = 23;
 pub const PICKER: usize = 24;
+pub const LONG_CAPTURE: usize = 25;
 pub const BUTTON_HEIGHT: f32 = 36.;
 pub const BAR_HEIGHT: f32 = 48.;
 const PARAM_HEIGHT: f32 = 42.;
 const PARAM_WIDTH: f32 = 506.;
 const BUTTON_GAP: f32 = 4.;
-const TOOLS: [usize; Tool::TOOLBAR.len()] = [1, 2, 3, 4, MOSAIC, SEQUENCE, PICKER];
-const DRAWING: &[usize] = TOOLS.split_at(TOOLS.len() - 1).0;
-const PICKING: &[usize] = TOOLS.split_at(TOOLS.len() - 1).1;
+const TOOLS: [usize; Tool::TOOLBAR.len()] = [1, 2, 3, 4, MOSAIC, SEQUENCE, LONG_CAPTURE, PICKER];
+const DRAWING: &[usize] = TOOLS.split_at(TOOLS.len() - 2).0;
+const PICKING: &[usize] = TOOLS.split_at(TOOLS.len() - 2).1;
 const HISTORY: &[usize] = &[5, 6];
 const OUTPUT: &[usize] = &[7, 8, 9];
 const CANCEL: &[usize] = &[10];
@@ -328,13 +329,28 @@ mod tests {
             for mask in 0u32..1 << Tool::TOOLBAR.len() {
                 let tools = std::array::from_fn(|i| mask & (1 << i) != 0);
                 let layout = Layout::new(selection, display, scale, Tool::Select, tools);
-                let expected: Vec<_> = [1, 2, 3, 4, MOSAIC, SEQUENCE, PICKER, 5, 6, 7, 8, 9, 10]
-                    .into_iter()
-                    .filter(|&id| tool_visible(tools, id))
-                    .collect();
+                let expected: Vec<_> = [
+                    1,
+                    2,
+                    3,
+                    4,
+                    MOSAIC,
+                    SEQUENCE,
+                    LONG_CAPTURE,
+                    PICKER,
+                    5,
+                    6,
+                    7,
+                    8,
+                    9,
+                    10,
+                ]
+                .into_iter()
+                .filter(|&id| tool_visible(tools, id))
+                .collect();
                 assert_eq!(layout.buttons().map(|b| b.id).collect::<Vec<_>>(), expected);
-                let groups =
-                    usize::from(tools[..6].iter().any(|&enabled| enabled)) + usize::from(tools[6]);
+                let groups = usize::from(tools[..6].iter().any(|&enabled| enabled))
+                    + usize::from(tools[6..].iter().any(|&enabled| enabled));
                 assert_eq!(layout.dividers().count(), 2 + groups);
                 assert_eq!(layout.overflow().count(), 0);
                 assert_eq!(layout.toolbar.intersection(display), Some(layout.toolbar));
@@ -357,7 +373,7 @@ mod tests {
 
     #[test]
     fn narrow_display_overflow_keeps_full_size_output_and_has_no_hidden_tools() {
-        let tools = [true, false, true, true, true, false, false];
+        let tools = [true, false, true, true, true, false, false, false];
         let selection = rect(-320, 700, 470, 200);
         let medium = Layout::new(
             selection,
@@ -368,7 +384,7 @@ mod tests {
         );
         assert_eq!(
             medium.overflow().collect::<Vec<_>>(),
-            [1, 2, 3, 4, MOSAIC, SEQUENCE, PICKER]
+            [1, 2, 3, 4, MOSAIC, SEQUENCE, LONG_CAPTURE, PICKER]
         );
         assert_eq!(
             medium.buttons().map(|b| b.id).collect::<Vec<_>>(),

@@ -28,6 +28,7 @@ struct Entry {
 struct State {
     life: Rc<Cell<Option<HWND>>>,
     image: Arc<Image>,
+    preview: Option<Image>,
     canvas: Option<Canvas>,
     view: View,
     minimum: (i32, i32),
@@ -58,7 +59,13 @@ impl State {
         // A flip-model HWND accepts only one swap chain: release the old one before recreating it.
         self.canvas = None;
         let (w, h) = self.view.dimensions(self.minimum);
-        let canvas = Canvas::new(hwnd, &self.image, w, h, self.dpi)?;
+        let canvas = Canvas::new(
+            hwnd,
+            self.preview.as_ref().unwrap_or(&self.image),
+            w,
+            h,
+            self.dpi,
+        )?;
         draw(&canvas)?;
         self.canvas = Some(canvas);
         Ok(())
@@ -101,10 +108,31 @@ pub fn register(instance: HINSTANCE) -> Result<()> {
     Ok(())
 }
 pub fn open(image: Arc<Image>, anchor: PixelPoint) -> Result<()> {
-    open_inner(image, anchor, !cfg!(test))
+    open_with_preview(image, None, anchor, !cfg!(test))
 }
+#[cfg(any(test, feature = "diagnostics"))]
 fn open_inner(image: Arc<Image>, anchor: PixelPoint, visible: bool) -> Result<()> {
-    let bytes = image.pixels().len();
+    open_with_preview(image, None, anchor, visible)
+}
+
+pub(super) fn open_output(
+    image: Arc<Image>,
+    preview: Option<Image>,
+    anchor: PixelPoint,
+) -> Result<()> {
+    open_with_preview(image, preview, anchor, !cfg!(test))
+}
+
+fn open_with_preview(
+    image: Arc<Image>,
+    preview: Option<Image>,
+    anchor: PixelPoint,
+    visible: bool,
+) -> Result<()> {
+    let bytes = image
+        .pixels()
+        .len()
+        .saturating_add(preview.as_ref().map_or(0, |i| i.pixels().len()));
     let allowed = WINDOWS.with_borrow_mut(|windows| {
         windows.retain(|entry| {
             entry
@@ -191,7 +219,7 @@ fn open_inner(image: Arc<Image>, anchor: PixelPoint, visible: bool) -> Result<()
             0,
         );
         let life = Rc::new(Cell::new(Some(hwnd)));
-        let canvas = Canvas::new(hwnd, &image, w, h, dpi)?;
+        let canvas = Canvas::new(hwnd, preview.as_ref().unwrap_or(&image), w, h, dpi)?;
         let corner = DWMWCP_ROUNDSMALL;
         let _ = DwmSetWindowAttribute(
             hwnd,
@@ -202,6 +230,7 @@ fn open_inner(image: Arc<Image>, anchor: PixelPoint, visible: bool) -> Result<()
         let state = State {
             life: life.clone(),
             image,
+            preview,
             canvas: Some(canvas),
             view,
             minimum,
@@ -497,7 +526,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     let _ = InvalidateRect(Some(hwnd), None, false);
                     match result {
                         Ok(Completed::Done) => notice(hwnd, pointer, "已完成".into()),
-                        Ok(Completed::Pinned(_)) => {}
+                        Ok(Completed::Pinned(..)) => {}
                         Err(e) => super::show_error(&format!("输出失败，贴图已保留：{e}")),
                     }
                 }
@@ -515,7 +544,15 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 let rect = *(lp.0 as *const RECT);
                 let (w, h) = (*pointer).view.dimensions((*pointer).minimum);
                 (*pointer).canvas = None;
-                (*pointer).canvas = Canvas::new(hwnd, &(*pointer).image, w, h, (*pointer).dpi).ok();
+                let state = &mut *pointer;
+                state.canvas = Canvas::new(
+                    hwnd,
+                    state.preview.as_ref().unwrap_or(&state.image),
+                    w,
+                    h,
+                    state.dpi,
+                )
+                .ok();
                 let _ = SetWindowPos(
                     hwnd,
                     None,

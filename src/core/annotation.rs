@@ -18,6 +18,7 @@ pub enum Tool {
     Text,
     Mosaic,
     Sequence,
+    LongCapture,
     Picker,
 }
 impl Tool {
@@ -28,6 +29,7 @@ impl Tool {
         Self::Text,
         Self::Mosaic,
         Self::Sequence,
+        Self::LongCapture,
         Self::Picker,
     ];
 
@@ -44,6 +46,7 @@ impl Tool {
             Self::Text => "文字",
             Self::Mosaic => "马赛克",
             Self::Sequence => "编号",
+            Self::LongCapture => "长截图",
             Self::Picker => "取色",
         }
     }
@@ -66,7 +69,12 @@ impl Tool {
             Self::Rectangle => Some(0),
             Self::Arrow => Some(1),
             Self::Pen => Some(2),
-            Self::Select | Self::Text | Self::Mosaic | Self::Sequence | Self::Picker => None,
+            Self::Select
+            | Self::Text
+            | Self::Mosaic
+            | Self::Sequence
+            | Self::LongCapture
+            | Self::Picker => None,
         }
     }
 }
@@ -470,6 +478,16 @@ impl Editor {
     pub fn take_warning(&mut self) -> Option<&'static str> {
         self.warning.take()
     }
+    pub fn clear_document(&mut self) {
+        *self = Self {
+            styles: self.styles,
+            text_size: self.text_size,
+            mosaic_size: self.mosaic_size,
+            sequence_size: self.sequence_size,
+            ..Self::default()
+        };
+    }
+
     pub fn snapshot(&self) -> Self {
         Self {
             objects: self.objects.clone(),
@@ -803,7 +821,10 @@ impl Editor {
             });
             return Ok(true);
         }
-        if matches!(self.tool, Tool::Select | Tool::Text | Tool::Picker) {
+        if matches!(
+            self.tool,
+            Tool::Select | Tool::Text | Tool::LongCapture | Tool::Picker
+        ) {
             self.selected = None;
             return Ok(false);
         }
@@ -825,7 +846,7 @@ impl Editor {
                 center: p,
                 diameter: self.sequence_size,
             },
-            Tool::Select | Tool::Text | Tool::Picker => return Ok(false),
+            Tool::Select | Tool::Text | Tool::LongCapture | Tool::Picker => return Ok(false),
         };
         let style = self.default_style();
         let index = self.objects.len();
@@ -1235,6 +1256,26 @@ mod tests {
         e.tool = tool;
         assert!(e.begin(a, 6, 1.).unwrap());
         e.finish(b);
+    }
+    #[test]
+    fn clearing_for_long_capture_drops_history_and_restarts_numbering() {
+        let mut editor = Editor {
+            text_size: 48,
+            ..Editor::default()
+        };
+        editor.commit_text(None, text("旧截图")).unwrap();
+        draw(&mut editor, Tool::Sequence, p(100, 100), p(100, 100));
+        editor.undo();
+        assert!(editor.can_undo() && editor.can_redo());
+
+        editor.clear_document();
+        editor.undo();
+        editor.redo();
+        assert!(editor.objects().is_empty());
+        assert!(!editor.can_undo() && !editor.can_redo());
+        assert_eq!(editor.selected, None);
+        assert_eq!(editor.next_sequence(), 1);
+        assert_eq!(editor.text_size, 48);
     }
     #[test]
     fn gesture_history_cancel_and_redo_branch() {

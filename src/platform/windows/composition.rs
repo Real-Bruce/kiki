@@ -44,10 +44,36 @@ pub fn render(
     editor: &Editor,
     corner_radius: u16,
 ) -> Result<Image> {
+    let (width, height) = selection.size().ok_or_else(|| fail("无效输出范围"))?;
     let _apartment = Apartment::enter()?;
+    let mut output = if width > 4096 || height > 4096 {
+        let mut output = Image::new(selection).map_err(|e| fail(&e))?;
+        for top in (selection.top..selection.bottom).step_by(1024) {
+            for left in (selection.left..selection.right).step_by(4096) {
+                let band = PixelRect {
+                    left,
+                    top,
+                    right: left.saturating_add(4096).min(selection.right),
+                    bottom: top.saturating_add(1024).min(selection.bottom),
+                };
+                output.blit(&render_band(source, band, editor)?);
+            }
+        }
+        output
+    } else {
+        render_band(source, selection, editor)?
+    };
+    output.round_corners(corner_radius);
+    Ok(output)
+}
+
+fn render_band(source: &Image, selection: PixelRect, editor: &Editor) -> Result<Image> {
     let mut output = source.region(selection).map_err(|e| fail(&e))?;
     for (bounds, size) in editor.mosaics() {
         output.pixelate(source, bounds, size);
+    }
+    if editor.objects().is_empty() && !editor.active() {
+        return Ok(output);
     }
     let (width, height) = selection.size().ok_or_else(|| fail("无效输出范围"))?;
     let lock_width = i32::try_from(width).map_err(|_| fail("输出范围过宽"))?;
@@ -163,7 +189,6 @@ pub fn render(
             }
         }
     }
-    output.round_corners(corner_radius);
     Ok(output)
 }
 #[cfg(any(feature = "diagnostics", test))]
@@ -339,4 +364,34 @@ mod tests {
         let empty = render(&source, source.bounds(), &Editor::default(), 0).unwrap();
         assert_eq!(empty.pixels(), source.pixels());
     }
+}
+
+#[cfg(test)]
+#[test]
+fn long_bands_preserve_seams_and_round_only_document_corners() {
+    use crate::core::{annotation::Tool, long_image::fixture, selection::PixelPoint};
+    let source = fixture(72, 0, 5000);
+    let mut editor = Editor::default();
+    editor.tool = Tool::Rectangle;
+    for y in [1000, 2024, 4930] {
+        editor.begin_at(PixelPoint { x: 10, y }, None).unwrap();
+        editor.finish(PixelPoint { x: 60, y: y + 55 });
+    }
+    editor.tool = Tool::Mosaic;
+    editor
+        .begin_at(PixelPoint { x: 22, y: 1015 }, None)
+        .unwrap();
+    editor.finish(PixelPoint { x: 42, y: 1045 });
+    let bounds = source.bounds();
+    let actual = render(&source, bounds, &editor, 12).unwrap();
+    let _apartment = Apartment::enter().unwrap();
+    let mut reference = render_band(&source, bounds, &editor).unwrap();
+    reference.round_corners(12);
+    assert_eq!(actual.pixels(), reference.pixels());
+    assert_eq!(actual.rgb_at(PixelPoint { x: 0, y: 0 }), None);
+    assert_eq!(actual.rgb_at(PixelPoint { x: 0, y: 4999 }), None);
+    assert_eq!(
+        actual.rgb_at(PixelPoint { x: 10, y: 4940 }),
+        Some([255, 59, 64])
+    );
 }

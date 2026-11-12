@@ -62,7 +62,7 @@ impl SaveTarget {
 }
 pub enum Completed {
     Done,
-    Pinned(Arc<Image>),
+    Pinned(Arc<Image>, Option<Image>),
 }
 pub struct Job {
     pub receiver: mpsc::Receiver<Result<Completed>>,
@@ -139,12 +139,28 @@ fn launch(
         match destination {
             Destination::Clipboard => clipboard(&image, owner, cancel)?,
             Destination::File(target) => save_atomic(&image, &target, cancel)?,
-            Destination::Pin => return Ok(Completed::Pinned(image)),
+            Destination::Pin => {
+                let preview = pin_preview(&image)?;
+                return Ok(Completed::Pinned(image, preview));
+            }
         }
         Ok(Completed::Done)
     })
 }
 
+fn pin_preview(image: &Image) -> Result<Option<Image>> {
+    let (width, height) = image.bounds().size().ok_or_else(|| fail("无效贴图尺寸"))?;
+    let scale = 1f64
+        .min(8192. / f64::from(width))
+        .min(8192. / f64::from(height))
+        .min((16_777_216. / (f64::from(width) * f64::from(height))).sqrt());
+    if scale >= 1. {
+        return Ok(None);
+    }
+    let w = (f64::from(width) * scale).floor().max(1.) as u32;
+    let h = (f64::from(height) * scale).floor().max(1.) as u32;
+    image.downsample(w, h).map(Some).map_err(|e| fail(&e))
+}
 fn start_job(
     name: &str,
     work: impl FnOnce(&AtomicBool) -> Result<Completed> + Send + std::panic::UnwindSafe + 'static,

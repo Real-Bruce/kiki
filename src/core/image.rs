@@ -30,6 +30,61 @@ impl Image {
         self.stride
     }
 
+    pub fn append_rows(&mut self, rows: &[u8], capacity_limit: usize) -> Result<(), String> {
+        let stride = self.stride as usize;
+        if rows.len() % stride != 0 {
+            return Err("追加像素未对齐".into());
+        }
+        let length = self
+            .pixels
+            .len()
+            .checked_add(rows.len())
+            .ok_or("长图大小溢出")?;
+        if length > capacity_limit {
+            return Err("长图超出像素上限".into());
+        }
+        let height = i32::try_from(rows.len() / stride).map_err(|_| "长图高度溢出")?;
+        let bottom = self
+            .bounds
+            .bottom
+            .checked_add(height)
+            .ok_or("长图坐标溢出")?;
+        if length > self.pixels.capacity() {
+            let capacity = self
+                .pixels
+                .capacity()
+                .saturating_mul(2)
+                .max(length)
+                .min(capacity_limit);
+            self.pixels
+                .try_reserve_exact(capacity - self.pixels.len())
+                .map_err(|_| "没有足够内存追加长截图")?;
+        }
+        self.pixels.extend_from_slice(rows);
+        self.bounds.bottom = bottom;
+        Ok(())
+    }
+
+    pub fn downsample(&self, width: u32, height: u32) -> Result<Self, String> {
+        let (source_width, source_height) = self.bounds.size().ok_or("无效原图尺寸")?;
+        if width > source_width || height > source_height {
+            return Err("预览尺寸超过原图".into());
+        }
+        let mut image = Self::new(PixelRect {
+            left: 0,
+            top: 0,
+            right: i32::try_from(width).map_err(|_| "预览过宽")?,
+            bottom: i32::try_from(height).map_err(|_| "预览过高")?,
+        })?;
+        let stride = self.stride as usize;
+        for (i, pixel) in image.pixels.chunks_exact_mut(4).enumerate() {
+            let x = i % width as usize * source_width as usize / width as usize;
+            let y = i / width as usize * source_height as usize / height as usize;
+            let offset = y * stride + x * 4;
+            pixel.copy_from_slice(&self.pixels[offset..offset + 4]);
+        }
+        Ok(image)
+    }
     pub fn rgb_at(&self, point: PixelPoint) -> Option<[u8; 3]> {
         if !contains(self.bounds, point) {
             return None;

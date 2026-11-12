@@ -1,6 +1,7 @@
 param(
     [string]$Executable = 'target/x86_64-pc-windows-msvc/release/kiki.exe',
-    [string]$OutputDirectory = ('artifacts/performance/startup-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    [string]$OutputDirectory = ('artifacts/performance/startup-' + (Get-Date -Format 'yyyyMMdd-HHmmss')),
+    [string]$Hotkey = 'Ctrl+Alt+A'
 )
 $ErrorActionPreference = 'Stop'
 $resolvedExecutable = (Resolve-Path -LiteralPath $Executable).Path
@@ -20,7 +21,7 @@ for ($index = 1; $index -le 30; $index++) {
     $sampleDirectory = Join-Path $resolvedOutput ('sample-{0:D2}' -f $index)
     $configDirectory = Join-Path $sampleDirectory 'config'
     New-Item -ItemType Directory -Force -Path $configDirectory | Out-Null
-    "version=1`nfirst_tip_seen=true`n" | Set-Content -LiteralPath (Join-Path $configDirectory 'settings.ini') -Encoding utf8NoBOM
+    "version=1`nfirst_tip_seen=true`nhotkey=$Hotkey`n" | Set-Content -LiteralPath (Join-Path $configDirectory 'settings.ini') -Encoding utf8NoBOM
     # A new process for every sample. No cache flush, forced WS trimming, or excluded preheat run.
     $trial = Start-Process -FilePath $resolvedExecutable -ArgumentList '--startup-probe',('"' + $sampleDirectory + '"'),'--config-dir',('"' + $configDirectory + '"') -WindowStyle Hidden -PassThru
     if (-not $trial.WaitForExit(5000)) {
@@ -44,5 +45,6 @@ $ordered = @($samples.ReadyMs | Sort-Object)
     P95Ms=$ordered[28]
     MaxMs=$ordered[-1]
     MeanMs=($ordered | Measure-Object -Average).Average
+    Hotkey=$Hotkey
     Method='30 independent process starts; OS creation time to registered hotkey and tray readiness; normal OS cache; diagnostics Release'
 } | ConvertTo-Json | Tee-Object -FilePath (Join-Path $resolvedOutput 'summary.json')

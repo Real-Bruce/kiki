@@ -109,7 +109,7 @@ pub const DEFAULT_MOSAIC_SIZE: u16 = 12;
 pub const DEFAULT_SEQUENCE_SIZE: u16 = 28;
 pub const CAPTURE_TOOL_COUNT: usize = CAPTURE_TOOL_KEYS.len();
 pub const DEFAULT_CAPTURE_TOOLS: [bool; CAPTURE_TOOL_COUNT] =
-    [true, true, true, true, false, false, false];
+    [true, true, true, true, false, false, false, false];
 pub const MAX_CORNER_RADIUS: u16 = 256;
 const STROKE_KEYS: [&str; 3] = ["rectangle_width", "arrow_width", "pen_width"];
 
@@ -394,13 +394,14 @@ impl Config {
     }
 }
 
-const CAPTURE_TOOL_KEYS: [&str; 7] = [
+const CAPTURE_TOOL_KEYS: [&str; 8] = [
     "rectangle_enabled",
     "arrow_enabled",
     "pen_enabled",
     "text_enabled",
     "mosaic_enabled",
     "sequence_enabled",
+    "long_capture_enabled",
     "picker_enabled",
 ];
 #[cfg(test)]
@@ -415,13 +416,13 @@ mod tests {
             assert_eq!(config.sequence_size, DEFAULT_SEQUENCE_SIZE);
         }
         let mut config = Config::decode(
-            "version=2\ntheme=dark\nrectangle_enabled=false\npen_enabled=false\nmosaic_enabled=true\nmosaic_size=29\nsequence_enabled=true\nsequence_size=42\npicker_enabled=true\nfuture_tool_enabled=true",
+            "version=2\ntheme=dark\nrectangle_enabled=false\npen_enabled=false\nmosaic_enabled=true\nmosaic_size=29\nsequence_enabled=true\nsequence_size=42\nlong_capture_enabled=true\npicker_enabled=true\nfuture_tool_enabled=true",
         )
         .unwrap()
         .0;
         assert_eq!(
             config.capture_tools,
-            [false, true, false, true, true, true, true]
+            [false, true, false, true, true, true, true, true]
         );
         assert_eq!(config.mosaic_size, 29);
         assert_eq!(config.sequence_size, 42);

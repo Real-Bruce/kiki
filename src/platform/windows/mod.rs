@@ -8,6 +8,7 @@ mod diagnostics;
 mod display;
 mod icon;
 mod image_encode;
+mod long_capture;
 mod menu;
 mod output;
 #[cfg(feature = "diagnostics")]

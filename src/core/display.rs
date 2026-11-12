@@ -8,7 +8,7 @@ pub enum ColorMode {
 }
 
 /// A physical desktop snapshot descriptor; UI scaling never resizes capture pixels.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DisplayInfo {
     pub bounds: PixelRect,
     pub name: String,

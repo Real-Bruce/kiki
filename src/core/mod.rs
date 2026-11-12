@@ -3,6 +3,7 @@ pub mod config;
 pub mod display;
 pub mod geometry;
 pub mod image;
+pub mod long_image;
 pub mod pinned;
 pub mod selection;
 pub mod session;

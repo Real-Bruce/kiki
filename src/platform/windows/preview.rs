@@ -3,6 +3,7 @@ use super::{
     capture::CaptureResult,
     capture_toolbar::{self, Layout, MORE, tool_button, tool_visible, toolbar_tool},
     color_picker::{Format as PickerFormat, Notice as PickerNotice, Readout as PickerReadout},
+    long_capture::{self, Capture as LongCapture, Document as LongDocument},
     parameter_control::{self, Wheel},
     selection_render::{Canvas, PaintInput, system_dark},
     text_input::{TextHit, TextInput, TextStart},
@@ -113,6 +114,10 @@ impl Preview {
                 editor,
                 capture_tools: cfg.capture_tools,
                 corner_radius: cfg.corner_radius,
+                long_capture: None,
+                long_document: None,
+                start_long: false,
+                long_reselect: false,
                 parameter_down: false,
                 parameter_slider: false,
                 parameter_edit: None,
@@ -120,6 +125,7 @@ impl Preview {
                 parameter_error: None,
                 parameter_modified: false,
                 text_input: None,
+                draft_anchor: None,
                 output: None,
                 busy: false,
                 pending_output: None,
@@ -185,6 +191,10 @@ struct State {
     editor: Editor,
     capture_tools: [bool; Tool::TOOLBAR.len()],
     corner_radius: u16,
+    long_capture: Option<LongCapture>,
+    long_document: Option<LongDocument>,
+    start_long: bool,
+    long_reselect: bool,
     parameter_down: bool,
     parameter_slider: bool,
     parameter_edit: Option<ParameterEdit>,
@@ -192,6 +202,7 @@ struct State {
     parameter_error: Option<&'static str>,
     parameter_modified: bool,
     text_input: Option<TextInput>,
+    draft_anchor: Option<(PixelPoint, PixelPoint)>,
     output: Option<super::output::Job>,
     busy: bool,
     pending_output: Option<usize>,
@@ -238,6 +249,10 @@ impl State {
         if !tool_visible(self.capture_tools, index)
             || !capture_toolbar::enabled(&self.editor, index)
         {
+            return false;
+        }
+        if index == capture_toolbar::LONG_CAPTURE {
+            self.start_long = self.long_document.is_none();
             return false;
         }
         if let Some(mut tool) = toolbar_tool(index) {
@@ -302,6 +317,27 @@ impl State {
         self.canvas.parameter_at(&self.layout()?, p)
     }
     fn layout(&self) -> Option<Layout> {
+        if let Some(document) = &self.long_document {
+            let screen = self.screens.first()?;
+            let bounds = PixelRect {
+                right: document.panel.bounds.left,
+                ..screen.bounds
+            };
+            let mut tools = self.capture_tools;
+            if let Some(index) = Tool::LongCapture.index() {
+                tools[index] = false;
+            }
+            return Some(Layout::new(
+                document.view.canvas,
+                bounds,
+                screen.scale_percent as f32 / 100.,
+                self.editor.tool,
+                tools,
+            ));
+        }
+        if self.long_reselect {
+            return None;
+        }
         let rect = self.selection.rect.filter(|_| !self.selection.active())?;
         Some(
             self.canvas
@@ -346,7 +382,7 @@ impl State {
             CaptureParameter::SequenceSize => self.editor.current_sequence_size(),
             CaptureParameter::TextSize => {
                 if let Some(input) = &self.text_input {
-                    input.requested_size() as u16
+                    (input.requested_size() / self.document_scale()).round() as u16
                 } else if let Some(index) = self.editor.selected
                     && let Shape::Text { size, .. } = self.editor.objects()[index].shape
                 {
@@ -385,6 +421,24 @@ impl State {
     fn button_at(&self, p: PixelPoint) -> Option<usize> {
         self.layout()?.button_at(p)
     }
+    fn document_scale(&self) -> f32 {
+        self.long_document.as_ref().map_or(1., |d| d.view.scale)
+    }
+    fn document_point(&self, point: PixelPoint) -> PixelPoint {
+        self.long_document
+            .as_ref()
+            .map_or(point, |d| d.view.to_document(point))
+    }
+    fn image_at(&self, point: PixelPoint) -> bool {
+        self.long_document
+            .as_ref()
+            .is_none_or(|d| contains(d.view.canvas, point))
+            && self
+                .selection
+                .rect
+                .is_some_and(|r| contains(r, self.document_point(point)))
+    }
+
     fn scale(&self) -> f32 {
         self.screens
             .iter()
@@ -392,6 +446,9 @@ impl State {
             .map_or(1., |s| s.scale_percent as f32 / 100.)
     }
     fn hit_scale(&self) -> f32 {
+        if self.long_document.is_some() {
+            return self.layout().map_or(1., |l| l.scale);
+        }
         self.selection.rect.map_or_else(
             || self.scale(),
             |rect| {
@@ -402,6 +459,20 @@ impl State {
         )
     }
     fn canvas_at(&self, p: PixelPoint, space: bool, scale: f32) -> CanvasHit {
+        if self.long_document.is_some() {
+            if self.picker_at(p) {
+                return CanvasHit::PickColor;
+            }
+            let scale = scale / self.document_scale();
+            return self
+                .image_at(p)
+                .then(|| {
+                    self.editor
+                        .hit_at(self.document_point(p), hit_radius(scale), scale, true)
+                })
+                .flatten()
+                .map_or(CanvasHit::Blank, CanvasHit::Object);
+        }
         let radius = hit_radius(scale);
         let inside = self.selection.rect.is_some_and(|r| contains(r, p));
         let resize = if self.editor.tool == Tool::Picker && inside && !space {
@@ -433,10 +504,7 @@ impl State {
         self.editor.tool == Tool::Picker
             && !self.busy
             && !self.selection.active()
-            && self
-                .selection
-                .rect
-                .is_some_and(|rect| contains(rect, point))
+            && self.image_at(point)
             && self
                 .layout()
                 .is_none_or(|layout| !contains(layout.toolbar, point))
@@ -445,7 +513,7 @@ impl State {
     fn picker_readout(&self) -> Option<PickerReadout> {
         self.picker_at(self.pointer).then(|| PickerReadout {
             format: self.picker_format,
-            rgb: self.canvas.rgb_at(self.pointer),
+            rgb: self.canvas.rgb_at(self.document_point(self.pointer)),
             notice: self.picker_notice,
         })
     }
@@ -470,7 +538,7 @@ fn set_parameter_value(pointer: *mut State, value: u16) {
             CaptureParameter::TextSize => {
                 let size = f32::from(value);
                 let result = if let Some(mut input) = (*pointer).text_input.take() {
-                    let result = input.set_size(size);
+                    let result = input.set_size(size * (*pointer).document_scale());
                     (*pointer).text_input = Some(input);
                     result
                 } else {
@@ -553,7 +621,7 @@ fn open_parameter_edit(hwnd: HWND, pointer: *mut State) -> Result<()> {
         let Some(bounds) = layout.parameter_edit() else {
             return Ok(());
         };
-        let desktop = state.canvas.bounds();
+        let desktop = state.canvas.window_bounds();
         let Some((_, value)) = state.parameter() else {
             return Ok(());
         };
@@ -719,7 +787,16 @@ fn show_more_if_pending(hwnd: HWND, pointer: *mut State) {
                 .layout()
                 .is_some_and(|layout| layout.overflow().any(|item| item == id))
         {
+            if id != capture_toolbar::LONG_CAPTURE
+                && let Err(error) = finish_text(hwnd, pointer)
+            {
+                super::show_error(&error.to_string());
+                return;
+            }
             (*pointer).activate(id);
+            if start_long_if_requested(hwnd, pointer) {
+                return;
+            }
             let _ = InvalidateRect(Some(hwnd), None, false);
         }
     }
@@ -822,6 +899,16 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         {
             return LRESULT(0);
         }
+        if (*pointer).long_capture.is_some()
+            && let Some(result) = dispatch_long_capture(hwnd, pointer, msg, wp, lp)
+        {
+            return result;
+        }
+        if (*pointer).long_document.is_some()
+            && let Some(result) = dispatch_long_navigation(hwnd, pointer, msg, wp, lp)
+        {
+            return result;
+        }
         if let Some(result) = dispatch_text(hwnd, pointer, msg, wp, lp) {
             return result;
         }
@@ -871,17 +958,22 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                         Ok(completed) => {
                             let opened = match completed {
                                 super::output::Completed::Done => Ok(()),
-                                super::output::Completed::Pinned(image) => super::pinned::open(
-                                    image,
-                                    (*pointer)
-                                        .selection
-                                        .rect
-                                        .map(|r| PixelPoint {
-                                            x: r.left,
-                                            y: r.top,
-                                        })
-                                        .unwrap_or((*pointer).pointer),
-                                ),
+                                super::output::Completed::Pinned(image, preview) => {
+                                    super::pinned::open_output(
+                                        image,
+                                        preview,
+                                        (*pointer)
+                                            .long_document
+                                            .as_ref()
+                                            .map(|d| d.view.canvas)
+                                            .or((*pointer).selection.rect)
+                                            .map(|r| PixelPoint {
+                                                x: r.left,
+                                                y: r.top,
+                                            })
+                                            .unwrap_or((*pointer).pointer),
+                                    )
+                                }
                             };
                             if let Err(e) = opened {
                                 super::show_error(&format!("贴图创建失败，编辑已保留：{e}"));
@@ -942,7 +1034,8 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     } else {
                         state.parameter_message()
                     };
-                    state.canvas.paint(PaintInput {
+                    let layout = state.layout();
+                    let input = PaintInput {
                         selection: &state.selection,
                         editor: &state.editor,
                         corner_radius: state.corner_radius,
@@ -960,9 +1053,22 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                         pressed: state.down_button,
                         editing_parameter: state.parameter_edit.is_some(),
                         parameter,
-                        message,
+                        message: if state.long_reselect {
+                            Some("请重新框选单个显示器内的正文区域。")
+                        } else {
+                            message
+                        },
                         picker,
-                    })
+                    };
+                    if let Some(capture) = state.long_capture.as_ref() {
+                        state.canvas.paint_capture(capture)
+                    } else if let Some((document, layout)) =
+                        state.long_document.as_ref().zip(layout.as_ref())
+                    {
+                        state.canvas.paint_document(input, document, layout)
+                    } else {
+                        state.canvas.paint(input)
+                    }
                 };
                 let _ = EndPaint(hwnd, &ps);
                 if let Err(error) = result {
@@ -974,9 +1080,9 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             WM_MOUSEMOVE => {
                 let slider = {
                     let state = &mut *pointer;
-                    state.pointer = mouse_position(lp, state.canvas.bounds());
+                    state.pointer = mouse_position(lp, state.canvas.window_bounds());
                     state.selection.update(state.pointer);
-                    state.editor.update(state.pointer);
+                    state.editor.update(state.document_point(state.pointer));
                     state.hover = state.window_at(state.pointer);
                     state
                         .parameter_slider
@@ -1013,7 +1119,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 if (*pointer).selection.active() || (*pointer).editor.active() {
                     return LRESULT(0);
                 }
-                let point = mouse_position(lp, (*pointer).canvas.bounds());
+                let point = mouse_position(lp, (*pointer).canvas.window_bounds());
                 let _ = KillTimer(Some(hwnd), PARAMETER_TIMER);
                 (*pointer).editor.finish_parameter_adjustment();
                 close_parameter_edit(hwnd, pointer, true, true);
@@ -1035,8 +1141,10 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     return LRESULT(0);
                 }
                 let space = (*pointer).text_input.is_none() && GetKeyState(VK_SPACE.0 as i32) < 0;
-                if (*pointer).button_at(point) != Some(8)
-                    && let Err(error) = finish_text(hwnd, pointer)
+                if !matches!(
+                    (*pointer).button_at(point),
+                    Some(8 | MORE | capture_toolbar::LONG_CAPTURE)
+                ) && let Err(error) = finish_text(hwnd, pointer)
                 {
                     super::show_error(&error.to_string());
                     return LRESULT(0);
@@ -1088,12 +1196,15 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                                     && state.editor.tool == Tool::Select
                                     && tool_visible(state.capture_tools, tool_button(Tool::Text))
                                     && matches!(hit, ObjectHit::Move(_));
+                                let document_point = state.document_point(p);
                                 if let Some(index) = double_clicked_text
-                                    .then(|| state.editor.text_at(p))
+                                    .then(|| state.editor.text_at(document_point))
                                     .flatten()
                                 {
                                     request_text = Some(Some(index));
-                                } else if let Err(message) = state.editor.begin_at(p, Some(hit)) {
+                                } else if let Err(message) =
+                                    state.editor.begin_at(document_point, Some(hit))
+                                {
                                     error = Some(message);
                                 }
                             }
@@ -1105,11 +1216,15 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                                     || state.selection.rect.is_none()
                                 {
                                     state.editor.selected = None;
-                                    state.selection.begin(p, hit_radius(scale));
-                                } else if state.selection.rect.is_some_and(|r| contains(r, p)) {
+                                    if state.long_document.is_none() {
+                                        state.selection.begin(p, hit_radius(scale));
+                                    }
+                                } else if state.image_at(p) {
                                     if state.editor.tool == Tool::Text {
                                         request_text = Some(None);
-                                    } else if let Err(message) = state.editor.begin_at(p, None) {
+                                    } else if let Err(message) =
+                                        state.editor.begin_at(state.document_point(p), None)
+                                    {
                                         error = Some(message);
                                     }
                                 }
@@ -1133,7 +1248,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 LRESULT(0)
             }
             WM_LBUTTONUP => {
-                (*pointer).pointer = mouse_position(lp, (*pointer).canvas.bounds());
+                (*pointer).pointer = mouse_position(lp, (*pointer).canvas.window_bounds());
                 if (*pointer).parameter_slider
                     && let Some(value) = (*pointer).slider_value()
                 {
@@ -1155,7 +1270,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                             state.editor.finish_parameter_adjustment();
                             state.parameter_slider = false;
                         } else if state.editor.active() {
-                            state.editor.finish(state.pointer);
+                            state.editor.finish(state.document_point(state.pointer));
                         } else if let Some(start) = state.picker_down.take() {
                             let point = state.pointer;
                             let radius = hit_radius(state.hit_scale()) as u32;
@@ -1165,17 +1280,22 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                             {
                                 picked = state
                                     .canvas
-                                    .rgb_at(point)
+                                    .rgb_at(state.document_point(point))
                                     .map(|rgb| state.picker_format.encode(rgb));
                             }
-                        } else if !state.parameter_down {
+                        } else if !state.parameter_down && state.long_document.is_none() {
                             state.selection.finish(state.pointer, state.pressed_window);
+                            state.start_long =
+                                state.long_reselect && state.selection.rect.is_some();
                         }
                         state.parameter_down = false;
                         false
                     }
                 };
                 let _ = ReleaseCapture();
+                if start_long_if_requested(hwnd, pointer) {
+                    return LRESULT(0);
+                }
                 if let Some(text) = picked {
                     begin_color_copy(hwnd, pointer, text);
                 }
@@ -1245,7 +1365,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                                 !state.editor.cancel() && !state.selection.cancel_drag()
                             }
                         }
-                        70 => {
+                        70 if state.long_document.is_none() && !state.long_reselect => {
                             release = true;
                             state.down_button = None;
                             state.editor.cancel();
@@ -1322,6 +1442,9 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 if release {
                     let _ = ReleaseCapture();
                 }
+                if start_long_if_requested(hwnd, pointer) {
+                    return LRESULT(0);
+                }
                 if let Some(message) = (*pointer).editor.take_warning() {
                     super::show_error(message);
                 }
@@ -1395,6 +1518,194 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     }
 }
 
+fn start_long_if_requested(hwnd: HWND, pointer: *mut State) -> bool {
+    // SAFETY: this dispatcher owns the live state. End borrows before dropping the
+    // native text host or changing the HWND region, which can dispatch messages.
+    unsafe {
+        if !std::mem::take(&mut (*pointer).start_long) {
+            return false;
+        }
+        let state = &mut *pointer;
+        let area = state.selection.rect;
+        let text = state.text_input.take();
+        state.editor.clear_document();
+        state.pending_output = None;
+        state.picker_notice = None;
+        state.focus = usize::MAX;
+        let target = area.and_then(|area| {
+            state
+                .screens
+                .iter()
+                .find(|s| s.bounds.intersection(area) == Some(area))
+                .cloned()
+                .map(|s| (area, s))
+        });
+        drop(text);
+        let _ = ReleaseCapture();
+        let _ = KillTimer(Some(hwnd), PARAMETER_TIMER);
+        let Some((area, screen)) = target else {
+            let state = &mut *pointer;
+            state.selection = Selection::new(state.canvas.window_bounds());
+            state.long_reselect = true;
+            let _ = InvalidateRect(Some(hwnd), None, false);
+            return true;
+        };
+        match LongCapture::start(hwnd, area, screen) {
+            Ok(capture) if SetTimer(Some(hwnd), long_capture::TIMER, 40, None) != 0 => {
+                (*pointer).long_capture = Some(capture);
+                (*pointer).long_reselect = false;
+                let _ = InvalidateRect(Some(hwnd), None, false);
+            }
+            result => {
+                let error = result
+                    .err()
+                    .map_or_else(|| "无法启动长截图计时器".into(), |e| e.to_string());
+                let _ = DestroyWindow(hwnd);
+                super::show_error(&error);
+            }
+        }
+        true
+    }
+}
+
+fn dispatch_long_capture(
+    hwnd: HWND,
+    pointer: *mut State,
+    msg: u32,
+    wp: WPARAM,
+    lp: LPARAM,
+) -> Option<LRESULT> {
+    // SAFETY: capture belongs to this UI-thread preview. Native calls that can
+    // reenter occur after releasing the mutable capture reference.
+    unsafe {
+        let capture = (*pointer).long_capture.as_mut()?;
+        match msg {
+            long_capture::SCROLLED => capture.scrolled(wp.0),
+            WM_TIMER if wp.0 == long_capture::TIMER => match capture.tick() {
+                Some(long_capture::Reply::Update(update)) => capture.update(update),
+                Some(long_capture::Reply::Paused(error)) => capture.message = error.message(),
+                Some(long_capture::Reply::Stopped(error)) => capture.stop(&error.message()),
+                Some(long_capture::Reply::Finished(image, thumbnail)) => {
+                    if let Some(document) = LongDocument::new(&capture.screen, &image, thumbnail) {
+                        let screen = capture.screen.clone();
+                        let state = &mut *pointer;
+                        state.long_capture = None;
+                        state.screens = vec![screen];
+                        state.windows.clear();
+                        state.selection = Selection::new(image.bounds());
+                        state.selection.rect = Some(image.bounds());
+                        state.canvas.set_document(image);
+                        state.long_document = Some(document);
+                        let _ = KillTimer(Some(hwnd), long_capture::TIMER);
+                        LongCapture::reset_window(hwnd);
+                    } else {
+                        let _ = DestroyWindow(hwnd);
+                        super::show_error("当前屏幕空间不足，无法打开长图编辑。");
+                        return Some(LRESULT(0));
+                    }
+                }
+                None => return Some(LRESULT(0)),
+            },
+            WM_LBUTTONDOWN | WM_LBUTTONDBLCLK | WM_MOUSEMOVE => return Some(LRESULT(0)),
+            WM_LBUTTONUP => {
+                let point = mouse_position(lp, (*pointer).canvas.window_bounds());
+                if contains(capture.panel.cancel, point) {
+                    let _ = DestroyWindow(hwnd);
+                    return Some(LRESULT(0));
+                }
+                if contains(capture.panel.finish, point) && capture.update.is_some() {
+                    capture.request_finish();
+                }
+            }
+            WM_KEYDOWN if wp.0 == 27 => {
+                let _ = DestroyWindow(hwnd);
+                return Some(LRESULT(0));
+            }
+            WM_KEYDOWN if wp.0 == 13 && capture.update.is_some() => capture.request_finish(),
+            WM_MOUSEWHEEL => {
+                if contains(capture.panel.track, wheel_point(lp)) {
+                    let delta = (wp.0 >> 16) as u16 as i16;
+                    let current = capture.browse.unwrap_or(1.);
+                    capture.browse = Some((current - f32::from(delta) / 1200.).clamp(0., 1.));
+                }
+            }
+            WM_KEYDOWN | WM_KEYUP => return Some(LRESULT(0)),
+            WM_SETCURSOR => {
+                if let Ok(cursor) = LoadCursorW(None, IDC_ARROW) {
+                    SetCursor(Some(cursor));
+                }
+                return Some(LRESULT(1));
+            }
+            _ => return None,
+        }
+        let _ = InvalidateRect(Some(hwnd), None, false);
+        Some(LRESULT(0))
+    }
+}
+
+fn wheel_point(lp: LPARAM) -> PixelPoint {
+    PixelPoint {
+        x: i32::from(lp.0 as u16 as i16),
+        y: i32::from((lp.0 >> 16) as u16 as i16),
+    }
+}
+
+fn dispatch_long_navigation(
+    hwnd: HWND,
+    pointer: *mut State,
+    msg: u32,
+    wp: WPARAM,
+    lp: LPARAM,
+) -> Option<LRESULT> {
+    // SAFETY: the preview owns all gesture state. Release the mutable borrow before
+    // Rich Edit, SetCapture or ReleaseCapture can reenter the window procedure.
+    unsafe {
+        let document = (*pointer).long_document.as_ref()?;
+        let p = if msg == WM_MOUSEWHEEL {
+            wheel_point(lp)
+        } else {
+            mouse_position(lp, (*pointer).canvas.window_bounds())
+        };
+        let over_panel = contains(document.panel.bounds, p);
+        let dragging = document.dragging;
+        let begin = matches!(msg, WM_LBUTTONDOWN | WM_LBUTTONDBLCLK) && over_panel;
+        match msg {
+            WM_CAPTURECHANGED if dragging => {
+                (*pointer).long_document.as_mut()?.dragging = false;
+                return Some(LRESULT(0));
+            }
+            WM_MOUSEWHEEL if over_panel && !(*pointer).busy => {}
+            WM_MOUSEMOVE | WM_LBUTTONUP if dragging => {}
+            WM_LBUTTONDOWN | WM_LBUTTONDBLCLK if begin && !(*pointer).busy => {}
+            _ => return None,
+        }
+        if (*pointer).editor.active() || (*pointer).parameter_slider {
+            return Some(LRESULT(0));
+        }
+        if let Err(error) = finish_text(hwnd, pointer) {
+            super::show_error(&error.to_string());
+            return Some(LRESULT(0));
+        }
+        let document = (*pointer).long_document.as_mut()?;
+        match msg {
+            WM_MOUSEWHEEL => document.scroll((wp.0 >> 16) as u16 as i16),
+            WM_LBUTTONUP => {
+                document.locate(p);
+                document.dragging = false;
+                let _ = ReleaseCapture();
+            }
+            _ => {
+                document.locate(p);
+                if begin {
+                    document.dragging = true;
+                    SetCapture(hwnd);
+                }
+            }
+        }
+        let _ = InvalidateRect(Some(hwnd), None, false);
+        Some(LRESULT(0))
+    }
+}
 fn dispatch_text(
     hwnd: HWND,
     pointer: *mut State,
@@ -1451,7 +1762,7 @@ fn dispatch_text(
             let p = if msg == WM_SETCURSOR {
                 position().unwrap_or(state.pointer)
             } else {
-                mouse_position(lp, state.canvas.bounds())
+                mouse_position(lp, state.canvas.window_bounds())
             };
             if !input.mouse_captured()
                 && (state.button_at(p).is_some() || state.parameter_at(p).is_some())
@@ -1536,7 +1847,7 @@ fn start_text_rotation(hwnd: HWND, pointer: *mut State, p: PixelPoint) -> Result
             if let Some(index) = state.editor.selected {
                 state
                     .editor
-                    .begin_at(p, Some(ObjectHit::Rotate(index)))
+                    .begin_at(state.document_point(p), Some(ObjectHit::Rotate(index)))
                     .map_err(|message| Error::new(E_FAIL, message))?
             } else {
                 false
@@ -1561,7 +1872,7 @@ fn start_text(hwnd: HWND, pointer: *mut State, index: Option<usize>) -> Result<(
             .selection
             .rect
             .ok_or_else(|| Error::new(E_FAIL, "请先选择截图范围"))?;
-        let desktop = state.canvas.bounds();
+        let desktop = state.canvas.window_bounds();
         let (origin, content, size, style, wrap_width, angle) = if let Some(index) = index {
             let object = &state.editor.objects()[index];
             let Shape::Text {
@@ -1587,12 +1898,12 @@ fn start_text(hwnd: HWND, pointer: *mut State, index: Option<usize>) -> Result<(
             )
         } else {
             let size = f32::from(state.editor.text_size);
+            let point = state.document_point(state.pointer);
             let origin = PixelPoint {
-                x: state
-                    .pointer
+                x: point
                     .x
                     .clamp(area.left, area.right.saturating_sub(8).max(area.left)),
-                y: state.pointer.y.clamp(
+                y: point.y.clamp(
                     area.top,
                     area.bottom
                         .saturating_sub((size * 1.3).ceil() as i32)
@@ -1608,9 +1919,25 @@ fn start_text(hwnd: HWND, pointer: *mut State, index: Option<usize>) -> Result<(
                 0.,
             )
         };
-        (
-            index, origin, content, size, style, wrap_width, angle, desktop, area,
-        )
+        if let Some(document) = &state.long_document {
+            let view = document.view;
+            state.draft_anchor = Some((view.to_screen(origin), origin));
+            (
+                index,
+                view.to_screen(origin),
+                content,
+                size * view.scale,
+                style,
+                wrap_width * view.scale,
+                angle,
+                desktop,
+                view.canvas,
+            )
+        } else {
+            (
+                index, origin, content, size, style, wrap_width, angle, desktop, area,
+            )
+        }
     };
     let input = TextInput::open(
         hwnd,
@@ -1676,6 +2003,14 @@ fn prepare_text_annotation(
     let content = input.content()?;
     // SAFETY: callers own the live UI-thread state and temporarily took its TextInput.
     let state = unsafe { &*pointer };
+    let scale = state.document_scale();
+    let origin = state
+        .draft_anchor
+        .filter(|_| state.long_document.is_some())
+        .map_or(input.origin, |(screen, original)| PixelPoint {
+            x: original.x + ((input.origin.x - screen.x) as f32 / scale).round() as i32,
+            y: original.y + ((input.origin.y - screen.y) as f32 / scale).round() as i32,
+        });
     let center = if input.angle != 0. {
         input
             .index
@@ -1684,18 +2019,18 @@ fn prepare_text_annotation(
                 let old = object.bounds();
                 let (cx, cy) = text_center(old);
                 (
-                    cx + f64::from(input.origin.x) - f64::from(old.left),
-                    cy + f64::from(input.origin.y) - f64::from(old.top),
+                    cx + f64::from(origin.x) - f64::from(old.left),
+                    cy + f64::from(origin.y) - f64::from(old.top),
                 )
             })
     } else {
         None
     };
     state.canvas.text_object(
-        input.origin,
+        origin,
         content,
-        input.size,
-        input.wrap_width,
+        input.size / scale,
+        input.wrap_width / scale,
         input.style,
         (input.angle, center),
     )
@@ -1818,8 +2153,10 @@ fn begin_output(hwnd: HWND, pointer: *mut State) -> Result<()> {
             if state.selection.rect.is_none() {
                 return Err(Error::new(E_FAIL, "请先选择截图范围"));
             }
-            state.editor.finish(state.pointer);
-            state.selection.finish(state.pointer, state.pressed_window);
+            state.editor.finish(state.document_point(state.pointer));
+            if state.long_document.is_none() {
+                state.selection.finish(state.pointer, state.pressed_window);
+            }
             state.busy = true;
         }
         let _ = ReleaseCapture();
@@ -2384,7 +2721,7 @@ mod tests {
             let size = draft.size;
             let angle = draft.angle;
 
-            config.capture_tools = [false, true, true, false, false, false, false];
+            config.capture_tools = [false, true, true, false, false, false, false, false];
             super::super::preferences::update(config.clone()).unwrap();
             let mut message = MSG::default();
             let changed = super::super::preferences::CHANGED;

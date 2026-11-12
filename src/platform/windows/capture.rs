@@ -71,20 +71,32 @@ fn check_cancel(cancel: &AtomicBool) -> Result<()> {
 }
 
 pub fn desktop_with_cancel(cancel: &AtomicBool) -> Result<CaptureResult> {
-    desktop_inner(cancel, || {})
+    desktop_inner(cancel, || {}, None)
 }
 
 #[cfg(feature = "diagnostics")]
 pub fn cancel_after_start() -> Result<()> {
     let cancel = AtomicBool::new(false);
-    match desktop_inner(&cancel, || cancel.store(true, Ordering::Release)) {
+    match desktop_inner(&cancel, || cancel.store(true, Ordering::Release), None) {
         Err(error) if error.code() == E_ABORT => Ok(()),
         Err(error) => Err(error),
         Ok(_) => Err(fail("取消后仍返回了捕获结果")),
     }
 }
 
-fn desktop_inner(cancel: &AtomicBool, on_started: impl FnOnce()) -> Result<CaptureResult> {
+pub fn long_frame(
+    cancel: &AtomicBool,
+    area: PixelRect,
+    screen: &crate::core::display::DisplayInfo,
+) -> Result<Image> {
+    Ok(desktop_inner(cancel, || {}, Some((area, screen)))?.image)
+}
+
+fn desktop_inner(
+    cancel: &AtomicBool,
+    on_started: impl FnOnce(),
+    region: Option<(PixelRect, &crate::core::display::DisplayInfo)>,
+) -> Result<CaptureResult> {
     #[cfg(feature = "diagnostics")]
     let start = Instant::now();
     let mut on_started = Some(on_started);
@@ -95,7 +107,18 @@ fn desktop_inner(cancel: &AtomicBool, on_started: impl FnOnce()) -> Result<Captu
     }
     let _apartment = Apartment;
     let screens = display::enumerate()?;
-    let windows = super::window_targets::enumerate()?;
+    let windows = if region.is_some() {
+        Vec::new()
+    } else {
+        super::window_targets::enumerate()?
+    };
+    if let Some((area, expected)) = region
+        && !screens
+            .iter()
+            .any(|s| &s.info == expected && s.info.bounds.intersection(area) == Some(area))
+    {
+        return Err(fail("显示器配置已变化，请结束长截图"));
+    }
     for screen in &screens {
         if screen.info.color != crate::core::display::ColorMode::Sdr {
             return Err(fail(
@@ -120,6 +143,7 @@ fn desktop_inner(cancel: &AtomicBool, on_started: impl FnOnce()) -> Result<Captu
             bottom: r.bottom.max(s.bottom),
         }
     });
+    let bounds = region.map_or(bounds, |(area, _)| area);
     let mut image = Image::new(bounds).map_err(|e| fail(&e))?;
     let mut device = None;
     let mut context = None;
@@ -146,6 +170,9 @@ fn desktop_inner(cancel: &AtomicBool, on_started: impl FnOnce()) -> Result<Captu
         factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
     for screen in &screens {
         check_cancel(cancel)?;
+        let Some(overlap) = screen.info.bounds.intersection(bounds) else {
+            continue;
+        };
         let monitor = screen.monitor;
         let rect = &screen.info.bounds;
         // SAFETY: monitor handle came from current synchronous monitor enumeration.
@@ -229,24 +256,30 @@ fn desktop_inner(cancel: &AtomicBool, on_started: impl FnOnce()) -> Result<Captu
                     {
                         return Err(fail("无效的捕获纹理步长"));
                     }
-                    let dst_x = usize::try_from(i64::from(rect.left) - i64::from(bounds.left))
-                        .map_err(|_| fail("显示器横向范围无效"))?
-                        * 4;
-                    let dst_y = usize::try_from(i64::from(rect.top) - i64::from(bounds.top))
-                        .map_err(|_| fail("显示器纵向范围无效"))?;
+                    let distance = |a: i32, b: i32| (i64::from(a) - i64::from(b)) as usize;
+                    let (copy_width, copy_height) =
+                        overlap.size().ok_or_else(|| fail("无效捕获交集"))?;
+                    let copy_bytes = copy_width as usize * 4;
+                    let dst_x = distance(overlap.left, bounds.left) * 4;
+                    let dst_y = distance(overlap.top, bounds.top);
+                    let src_x = distance(overlap.left, rect.left) * 4;
+                    let src_y = distance(overlap.top, rect.top);
                     let dst_stride = image.stride() as usize;
-                    for y in 0..height as usize {
+                    for y in 0..copy_height as usize {
                         if y % 64 == 0 {
                             check_cancel(cancel)?;
                         }
                         let src = std::slice::from_raw_parts(
-                            mapped.pData.cast::<u8>().add(y * mapped.RowPitch as usize),
-                            row_bytes,
+                            mapped
+                                .pData
+                                .cast::<u8>()
+                                .add((src_y + y) * mapped.RowPitch as usize + src_x),
+                            copy_bytes,
                         );
                         let offset = (dst_y + y) * dst_stride + dst_x;
                         let row = image
                             .pixels_mut()
-                            .get_mut(offset..offset + row_bytes)
+                            .get_mut(offset..offset + copy_bytes)
                             .ok_or_else(|| fail("显示器范围超出桌面图像"))?;
                         row.copy_from_slice(src);
                         for pixel in row.chunks_exact_mut(4) {

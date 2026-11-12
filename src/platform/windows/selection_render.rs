@@ -1,6 +1,7 @@
 use super::{
     capture_toolbar::{self, Layout},
     color_picker::Readout,
+    long_capture::{self, Capture, Document, Panel},
     parameter_control,
     text_input::TextInput,
     toolbar_icons::{BarPaint, BarState, ToolbarIcons},
@@ -56,7 +57,10 @@ pub struct Canvas {
     gdi: ID2D1GdiInteropRenderTarget,
     context: ID2D1DeviceContext,
     swap: windows::Win32::Graphics::Dxgi::IDXGISwapChain1,
-    bitmap: ID2D1Bitmap,
+    bitmap: Option<ID2D1Bitmap>,
+    window_bounds: PixelRect,
+    band_bitmap: Option<(PixelRect, ID2D1Bitmap)>,
+    band_mosaics: Option<PixelRect>,
     mosaics: Vec<(PixelRect, u16)>,
     mosaic_bitmap: Option<(PixelRect, ID2D1Bitmap)>,
     brush: ID2D1SolidColorBrush,
@@ -91,6 +95,17 @@ impl Canvas {
     }
     pub fn bounds(&self) -> PixelRect {
         self.source.bounds()
+    }
+    pub fn window_bounds(&self) -> PixelRect {
+        self.window_bounds
+    }
+    pub fn set_document(&mut self, image: Image) {
+        self.source = std::sync::Arc::new(image);
+        self.bitmap = None;
+        self.band_bitmap = None;
+        self.mosaic_bitmap = None;
+        self.mosaics.clear();
+        self.band_mosaics = None;
     }
     pub fn rgb_at(&self, point: PixelPoint) -> Option<[u8; 3]> {
         self.source.rgb_at(point)
@@ -131,7 +146,10 @@ impl Canvas {
                 context,
                 swap,
                 _device: device,
-                bitmap,
+                bitmap: Some(bitmap),
+                window_bounds: image.bounds(),
+                band_bitmap: None,
+                band_mosaics: None,
                 mosaics: Vec::new(),
                 mosaic_bitmap: None,
                 brush,
@@ -156,15 +174,15 @@ impl Canvas {
         Layout::new(rect, screen, preferred, tool, capture_tools)
     }
 
-    fn prepare_mosaics(&mut self, editor: &Editor) -> Result<()> {
-        if editor.mosaics().eq(self.mosaics.iter().copied()) {
+    fn prepare_mosaics(&mut self, editor: &Editor, band: Option<PixelRect>) -> Result<()> {
+        if self.band_mosaics == band && editor.mosaics().eq(self.mosaics.iter().copied()) {
             return Ok(());
         }
         self.mosaic_bitmap = None;
         self.mosaics.clear();
         let coverage = editor
             .mosaics()
-            .filter_map(|(bounds, _)| bounds.intersection(self.bounds()))
+            .filter_map(|(bounds, _)| bounds.intersection(band.unwrap_or_else(|| self.bounds())))
             .reduce(|a, b| PixelRect {
                 left: a.left.min(b.left),
                 top: a.top.min(b.top),
@@ -201,6 +219,7 @@ impl Canvas {
             self.mosaic_bitmap = Some((bounds, bitmap));
         }
         self.mosaics.extend(editor.mosaics());
+        self.band_mosaics = band;
         Ok(())
     }
     fn display(&self, rect: PixelRect, screens: &[DisplayInfo]) -> (PixelRect, f32) {
@@ -271,7 +290,10 @@ impl Canvas {
         }
         let text_layouts = super::annotation_render::layouts(&self.dw, editor)?;
         let geometry = super::annotation_render::geometry(&self.factory, self.bounds(), editor)?;
-        self.prepare_mosaics(editor)?;
+        self.prepare_mosaics(editor, None)?;
+        let Some(bitmap) = self.bitmap.as_ref() else {
+            return Ok(());
+        };
         let selected = selection.rect.or(hover);
         let radius = selected.map_or(0., |rect| rect.corner_radius(corner_radius));
         let rounded = selected
@@ -287,7 +309,7 @@ impl Canvas {
             self.target.BeginDraw();
             self.target.Clear(Some(&color(0, 0, 0, 1.)));
             self.target.DrawBitmap(
-                &self.bitmap,
+                bitmap,
                 None,
                 1.,
                 D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
@@ -482,7 +504,7 @@ impl Canvas {
                     && layout.is_none_or(|layout| layout.bounds.intersection(*r).is_none())
             })
             .unwrap_or(positions[0]);
-        let panel = self.local(area);
+        let panel = self.screen_local(area);
         let dark = self.dark;
         self.panel(panel, 9. * s);
         let foreground = tone(palette::foreground(dark), 1.);
@@ -563,7 +585,7 @@ impl Canvas {
     ) {
         let s = layout.scale;
         let dark = self.dark;
-        let desktop = self.bounds();
+        let desktop = self.window_bounds;
         let hover = layout.button_at(pointer);
         BarPaint {
             target: &self.target,
@@ -595,7 +617,7 @@ impl Canvas {
             let name = capture_toolbar::name(button.id);
             let width = ((name.chars().count() as f32 * 14. + 16.).max(90.) * s).round() as i32;
             let center = ((i64::from(b.left) + i64::from(b.right)) / 2) as i32;
-            let t = self.local(fit_panel(
+            let t = self.screen_local(fit_panel(
                 PixelPoint {
                     x: center.saturating_sub(width / 2),
                     y: layout.toolbar.top.saturating_sub((34. * s).round() as i32),
@@ -688,7 +710,7 @@ impl Canvas {
         let Some(bounds) = layout.parameters else {
             return;
         };
-        let r = self.local(bounds);
+        let r = self.screen_local(bounds);
         let s = layout.parameter_scale;
         let dark = self.dark;
         self.panel(r, BAR_RADIUS * s);
@@ -760,8 +782,8 @@ impl Canvas {
         let Some((slider, edit)) = layout.parameter_slider().zip(layout.parameter_edit()) else {
             return;
         };
-        let slider = self.local(slider);
-        let edit = self.local(edit);
+        let slider = self.screen_local(slider);
+        let edit = self.screen_local(edit);
         let s = layout.parameter_scale;
         let text = if (s - layout.scale).abs() > 0.001 {
             self.parameter_text
@@ -999,7 +1021,9 @@ impl Canvas {
         }
     }
     fn paint_text_frame(&self, bounds: PixelRect, angle: f64) {
-        let origin = self.bounds();
+        self.paint_text_frame_in(bounds, angle, self.bounds());
+    }
+    fn paint_text_frame_in(&self, bounds: PixelRect, angle: f64, origin: PixelRect) {
         let frame = text_frame(bounds, self.scale);
         let (cx, _) = text_center(bounds);
         let (x, y) = rotate_point(bounds, angle, cx, f64::from(frame.top));
@@ -1024,8 +1048,17 @@ impl Canvas {
             self.target.SetTransform(
                 &(super::annotation_render::text_transform(bounds, origin, angle) * prior),
             );
-            self.target
-                .DrawRectangle(&self.local(frame), &self.brush, 1., None);
+            self.target.DrawRectangle(
+                &D2D_RECT_F {
+                    left: (frame.left - origin.left) as f32,
+                    top: (frame.top - origin.top) as f32,
+                    right: (frame.right - origin.left) as f32,
+                    bottom: (frame.bottom - origin.top) as f32,
+                },
+                &self.brush,
+                1.,
+                None,
+            );
             self.target.SetTransform(&prior);
             self.target
                 .DrawLine(local(x, y), handle, &self.brush, 1., None);
@@ -1034,6 +1067,369 @@ impl Canvas {
             self.target.FillEllipse(&circle, &self.brush);
             self.brush.SetColor(&accent);
             self.target.DrawEllipse(&circle, &self.brush, 1., None);
+        }
+    }
+    fn screen_local(&self, r: PixelRect) -> D2D_RECT_F {
+        let origin = self.window_bounds;
+        D2D_RECT_F {
+            left: (r.left - origin.left) as f32,
+            top: (r.top - origin.top) as f32,
+            right: (r.right - origin.left) as f32,
+            bottom: (r.bottom - origin.top) as f32,
+        }
+    }
+
+    fn image_bitmap(&self, image: &Image) -> Result<ID2D1Bitmap> {
+        let (width, height) = image
+            .bounds()
+            .size()
+            .ok_or_else(windows::core::Error::from_win32)?;
+        // SAFETY: the UI-thread target copies the validated, tightly packed pixels during this call.
+        unsafe {
+            self.target.CreateBitmap(
+                D2D_SIZE_U { width, height },
+                Some(image.pixels().as_ptr().cast()),
+                image.stride(),
+                &D2D1_BITMAP_PROPERTIES {
+                    pixelFormat: D2D1_PIXEL_FORMAT {
+                        format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                        alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+                    },
+                    dpiX: 96.,
+                    dpiY: 96.,
+                },
+            )
+        }
+    }
+
+    pub fn paint_capture(&mut self, capture: &Capture) -> Result<()> {
+        let scale = capture.screen.scale_percent as f32 / 100.;
+        self.update_font(scale)?;
+        let preview = capture
+            .update
+            .as_ref()
+            .map(|u| self.image_bitmap(&u.thumbnail))
+            .transpose()?;
+        // SAFETY: the window region exposes only the panel. All drawing stays on the UI thread.
+        unsafe {
+            self.target.BeginDraw();
+            self.target
+                .Clear(Some(&tone(palette::background(self.dark), 1.)));
+            let panel = &capture.panel;
+            self.outline(
+                self.screen_local(capture.area),
+                0.,
+                4.,
+                tone(palette::accent(self.dark), 1.),
+            );
+            self.long_panel(panel, "长截图预览");
+            let foreground = tone(palette::foreground(self.dark), 1.);
+            let status = PixelRect {
+                top: panel.track.bottom,
+                bottom: panel.finish.top - (22. * scale) as i32,
+                left: panel.track.left,
+                right: panel.track.right,
+            };
+            self.label(&capture.message, self.screen_local(status), foreground);
+            if let Some((update, bitmap)) = capture.update.as_ref().zip(preview.as_ref()) {
+                let area = self.screen_local(long_capture::thumbnail_bounds(
+                    panel.track,
+                    &update.thumbnail,
+                ));
+                let track = self.screen_local(panel.track);
+                let (w, h) = update.thumbnail.bounds().size().unwrap_or((1, 1));
+                let visible =
+                    (track.bottom - track.top) * w as f32 / (track.right - track.left).max(1.);
+                if let Some(offset) = capture.browse.filter(|_| visible < h as f32) {
+                    let top = offset * (h as f32 - visible);
+                    self.target.DrawBitmap(
+                        bitmap,
+                        Some(&track),
+                        1.,
+                        D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                        Some(&D2D_RECT_F {
+                            left: 0.,
+                            top,
+                            right: w as f32,
+                            bottom: top + visible,
+                        }),
+                    );
+                } else {
+                    self.paint_thumbnail(bitmap, area, update.height, update.viewport);
+                }
+                let mut dimensions = self.screen_local(panel.finish);
+                dimensions.right = self.screen_local(panel.cancel).right;
+                dimensions.bottom = dimensions.top;
+                dimensions.top -= 24. * scale;
+                self.label(
+                    &format!("{} × {} px", update.width, update.height),
+                    dimensions,
+                    foreground,
+                );
+            }
+            let footer = self.screen_local(panel.finish);
+            self.round(
+                footer,
+                5. * scale,
+                tone(
+                    palette::accent(self.dark),
+                    if preview.is_some() { 1. } else { 0.35 },
+                ),
+            );
+            self.label(
+                if capture.requested {
+                    "处理中…"
+                } else {
+                    "完成"
+                },
+                footer,
+                tone(palette::on_accent(self.dark), 1.),
+            );
+            let cancel = self.screen_local(panel.cancel);
+            self.outline(
+                cancel,
+                5. * scale,
+                1.,
+                tone(palette::divider(self.dark), 1.),
+            );
+            self.label("取消", cancel, foreground);
+            self.target.EndDraw(None, None)?;
+            self.swap
+                .Present(0, windows::Win32::Graphics::Dxgi::DXGI_PRESENT(0))
+                .ok()
+        }
+    }
+
+    fn update_font(&mut self, scale: f32) -> Result<()> {
+        if (self.scale - scale).abs() > 0.001 {
+            self.text = format(&self.dw, scale)?;
+            self.scale = scale;
+        }
+        Ok(())
+    }
+
+    fn long_panel(&self, panel: &Panel, title: &str) {
+        self.panel(self.screen_local(panel.bounds), 9. * self.scale);
+        let label = PixelRect {
+            bottom: panel.track.top,
+            ..panel.bounds
+        };
+        self.label(
+            title,
+            self.screen_local(label),
+            tone(palette::foreground(self.dark), 1.),
+        );
+    }
+
+    fn paint_thumbnail(
+        &self,
+        bitmap: &ID2D1Bitmap,
+        area: D2D_RECT_F,
+        height: u32,
+        viewport: (usize, usize),
+    ) {
+        let extent = area.bottom - area.top;
+        let top = area.top + extent * viewport.0 as f32 / height as f32;
+        let bottom = area.top + extent * (viewport.0 + viewport.1) as f32 / height as f32;
+        // SAFETY: the thumbnail bitmap belongs to this drawing target.
+        unsafe {
+            self.target.DrawBitmap(
+                bitmap,
+                Some(&area),
+                1.,
+                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                None,
+            );
+        }
+        self.outline(
+            D2D_RECT_F {
+                top,
+                bottom: bottom.min(area.bottom).max(top + 1.),
+                ..area
+            },
+            0.,
+            1.5,
+            tone(palette::accent(self.dark), 1.),
+        );
+    }
+
+    pub fn paint_document(
+        &mut self,
+        input: PaintInput<'_>,
+        document: &Document,
+        layout: &Layout,
+    ) -> Result<()> {
+        let view = document.view;
+        let band = view.band();
+        let scale = layout.scale;
+        self.update_font(scale)?;
+        if layout.parameters.is_some() {
+            self.parameter_text = Some((
+                layout.parameter_scale,
+                format(&self.dw, layout.parameter_scale)?,
+            ));
+        }
+        if self
+            .band_bitmap
+            .as_ref()
+            .is_none_or(|(area, _)| *area != band)
+        {
+            let image = self
+                .source
+                .region(band)
+                .map_err(|e| windows::core::Error::new(windows::Win32::Foundation::E_FAIL, e))?;
+            self.band_bitmap = Some((band, self.image_bitmap(&image)?));
+        }
+        let thumbnail = self.image_bitmap(&document.thumbnail)?;
+        self.prepare_mosaics(input.editor, Some(band))?;
+        let layouts = super::annotation_render::layouts(&self.dw, input.editor)?;
+        let geometry =
+            super::annotation_render::geometry(&self.factory, self.bounds(), input.editor)?;
+        let radius = view.document.corner_radius(input.corner_radius);
+        let rounded = (radius > 0.)
+            .then(|| self.rounded_selection(view.document, radius))
+            .transpose()?;
+        let viewport = self.screen_local(view.canvas);
+        let (_, height) = view.document.size().unwrap_or((1, 1));
+        let editing = input.text_input.and_then(|draft| draft.index);
+        // SAFETY: all resources belong to this drawing target and thread. Transforms and clips
+        // are restored before drawing any controls in physical screen coordinates.
+        unsafe {
+            self.target.BeginDraw();
+            self.target
+                .Clear(Some(&tone(palette::background(self.dark), 1.)));
+            self.target
+                .PushAxisAlignedClip(&viewport, D2D1_ANTIALIAS_MODE_ALIASED);
+            self.target.SetTransform(&Matrix3x2 {
+                M11: view.scale,
+                M22: view.scale,
+                M12: 0.,
+                M21: 0.,
+                M31: viewport.left,
+                M32: viewport.top - view.offset as f32 * view.scale,
+            });
+            if let Some((_, bitmap)) = self.band_bitmap.as_ref() {
+                if let Some((mask, _)) = &rounded {
+                    let params = D2D1_LAYER_PARAMETERS1 {
+                        contentBounds: self.local(band),
+                        geometricMask: std::mem::ManuallyDrop::new(Some(mask.clone())),
+                        maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                        maskTransform: Matrix3x2::identity(),
+                        opacity: 1.,
+                        ..Default::default()
+                    };
+                    self.context.PushLayer(&params, None::<&ID2D1Layer>);
+                    drop(std::mem::ManuallyDrop::into_inner(params.geometricMask));
+                }
+                self.target.DrawBitmap(
+                    bitmap,
+                    Some(&self.local(band)),
+                    1.,
+                    D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                    None,
+                );
+                self.paint_annotations(
+                    input.editor,
+                    Some(band),
+                    None,
+                    editing,
+                    (&layouts, &geometry),
+                );
+                if rounded.is_some() {
+                    self.target.PopLayer();
+                }
+            }
+            self.target.SetTransform(&Matrix3x2::identity());
+            self.target.PopAxisAlignedClip();
+            let draft = input.text_input.map_or(Ok(()), |draft| {
+                let clip = RECT {
+                    left: viewport.left as i32,
+                    top: viewport.top as i32,
+                    right: viewport.right as i32,
+                    bottom: viewport.bottom as i32,
+                };
+                let result = draft.draw(&self.gdi, clip, 0);
+                self.paint_text_frame_in(draft.content_bounds(), 0., self.window_bounds);
+                result
+            });
+            let top = document.panel.bounds.top;
+            let caption = PixelRect {
+                bottom: view.canvas.top,
+                top,
+                ..view.canvas
+            };
+            let (width, height) = view.document.size().unwrap_or((1, height));
+            self.label(
+                &format!("长图编辑　{width} × {height} px"),
+                self.screen_local(caption),
+                tone(palette::foreground(self.dark), 1.),
+            );
+            self.long_panel(&document.panel, "长图导航");
+            self.paint_thumbnail(
+                &thumbnail,
+                self.screen_local(document.preview_bounds()),
+                height,
+                (
+                    view.offset as usize,
+                    view.visible_rows().min(height as i32) as usize,
+                ),
+            );
+            let track = self.screen_local(document.scrollbar());
+            let extent = track.bottom - track.top;
+            self.round(track, 4. * scale, tone(palette::divider(self.dark), 1.));
+            let top = track.top + extent * view.offset as f32 / height as f32;
+            let bottom =
+                (top + extent * view.visible_rows() as f32 / height as f32).min(track.bottom);
+            self.round(
+                D2D_RECT_F {
+                    top,
+                    bottom,
+                    ..track
+                },
+                4. * scale,
+                tone(palette::accent(self.dark), 1.),
+            );
+            if let Some(picker) = input.picker {
+                self.paint_picker(picker, input.pointer, input.screens, Some(layout));
+            }
+            self.paint_toolbar(
+                layout,
+                input.editor,
+                input.pointer,
+                input.focus,
+                input.pressed,
+                input.busy,
+            );
+            self.paint_parameters(layout, input.editor, input.focus);
+            if let Some(parameter) = input.parameter {
+                self.paint_parameter_slider(
+                    layout,
+                    parameter,
+                    input.focus,
+                    input.editing_parameter,
+                );
+            }
+            if input.busy || input.message.is_some() {
+                let panel = PixelRect {
+                    top: document.panel.track.bottom,
+                    ..document.panel.bounds
+                };
+                let message = if input.busy {
+                    "正在输出…"
+                } else {
+                    input.message.unwrap_or_default()
+                };
+                self.label(
+                    message,
+                    self.screen_local(panel),
+                    tone(palette::foreground(self.dark), 1.),
+                );
+            }
+            self.target.EndDraw(None, None)?;
+            draft?;
+            self.swap
+                .Present(0, windows::Win32::Graphics::Dxgi::DXGI_PRESENT(0))
+                .ok()
         }
     }
     fn local(&self, r: PixelRect) -> D2D_RECT_F {

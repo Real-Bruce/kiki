@@ -467,3 +467,139 @@ fn window_inventory(folder: &std::path::Path) -> Result<()> {
         std::fs::write(folder.join("windows.txt"), text).map_err(io)
     }
 }
+
+/// Deterministic long-image performance probe, independent of desktop input and clipboard.
+pub fn long_images(folder: &std::path::Path) -> Result<()> {
+    use crate::core::{
+        annotation::{Editor, Tool},
+        long_image::{Step, Stitcher, fixture, thumbnail},
+        selection::PixelPoint,
+    };
+    std::fs::create_dir_all(folder).map_err(io)?;
+    let mut timings = File::create(folder.join("long-latency.csv")).map_err(io)?;
+    let mut resources = File::create(folder.join("long-resources.csv")).map_err(io)?;
+    writeln!(
+        timings,
+        "iteration,phase,elapsed_ms,width,height,encoded_bytes"
+    )
+    .map_err(io)?;
+    writeln!(resources, "iteration,phase,private_working_set,private_bytes,total_working_set,handles,gdi,user,threads,gpu_local,gpu_nonlocal").map_err(io)?;
+    let mut timing = |i, phase, started: Instant, w, h, bytes| -> Result<()> {
+        writeln!(
+            timings,
+            "{i},{phase},{:.3},{w},{h},{bytes}",
+            started.elapsed().as_secs_f64() * 1000.
+        )
+        .map_err(io)?;
+        timings.flush().map_err(io)
+    };
+    let fixture_error = |message: String| fail(message);
+    sample(&mut resources, 0, "baseline")?;
+    for iteration in 1..=100 {
+        let output = iteration <= 30;
+        let width = if output { 640 } else { 160 };
+        let frame_height = if output { 720 } else { 256 };
+        let stride = if output { 360 } else { 128 };
+        let mut stitch = Stitcher::new(fixture(width, 0, frame_height)).map_err(fixture_error)?;
+        let frames = if output { 18 } else { 4 };
+        for step in 1..=frames {
+            let frame = fixture(width, step * stride, frame_height);
+            let started = Instant::now();
+            if stitch.accept(&frame, true).map_err(fixture_error)? != Step::Added {
+                return Err(fail("性能夹具未按预期拼接"));
+            }
+            let preview = thumbnail(stitch.image()).map_err(fixture_error)?;
+            std::hint::black_box(&preview);
+            timing(
+                iteration,
+                "stitch_to_thumbnail",
+                started,
+                width,
+                stitch.image().bounds().bottom,
+                0,
+            )?;
+        }
+        sample(&mut resources, iteration, "stitched")?;
+        if output {
+            let source = stitch.into_image();
+            let bounds = source.bounds();
+            let mut editor = Editor::default();
+            editor.tool = Tool::Rectangle;
+            for y in [32, bounds.bottom / 2, bounds.bottom - 90] {
+                editor
+                    .begin_at(PixelPoint { x: 20, y }, None)
+                    .map_err(fail)?;
+                editor.finish(PixelPoint { x: 180, y: y + 56 });
+            }
+            let started = Instant::now();
+            let image = super::composition::render(&source, bounds, &editor, 24)?;
+            let encoded = super::image_encode::encode_png(&image)?;
+            timing(
+                iteration,
+                "compose_and_png",
+                started,
+                width,
+                bounds.bottom,
+                encoded.len(),
+            )?;
+            sample(&mut resources, iteration, "output_buffers")?;
+        } else {
+            if iteration % 2 == 0 {
+                let disjoint = fixture(width, 10_000, frame_height);
+                if stitch.accept(&disjoint, true).map_err(fixture_error)? != Step::Unmatched {
+                    return Err(fail("性能夹具未按预期暂停"));
+                }
+            }
+            drop(stitch);
+        }
+        sample(&mut resources, iteration, "released")?;
+    }
+    for (iteration, width, frame_height, shift, steps) in
+        [(101, 8, 1024, 512, 62), (102, 4096, 1024, 512, 30)]
+    {
+        let mut stitch = Stitcher::new(fixture(width, 0, frame_height)).map_err(fixture_error)?;
+        let started = Instant::now();
+        for n in 1..=steps {
+            if stitch
+                .accept(&fixture(width, n * shift, frame_height), true)
+                .map_err(fixture_error)?
+                != Step::Added
+            {
+                return Err(fail("边界性能夹具提前停止"));
+            }
+        }
+        let next = fixture(width, steps * shift + 1, frame_height);
+        if stitch.accept(&next, true).map_err(fixture_error)? != Step::Limit {
+            return Err(fail("边界性能夹具未触发上限"));
+        }
+        timing(
+            iteration,
+            "limit",
+            started,
+            width,
+            stitch.image().bounds().bottom,
+            stitch.image().pixels().len(),
+        )?;
+        sample(&mut resources, iteration, "limit_reached")?;
+        drop(stitch);
+        sample(&mut resources, iteration, "released")?;
+    }
+    let wall = Instant::now();
+    let before = cpu_ticks()?;
+    for second in 1..=60 {
+        std::thread::sleep(Duration::from_secs(1));
+        sample(&mut resources, second, "idle")?;
+    }
+    let cpu = cpu_ticks()?.saturating_sub(before);
+    std::fs::write(
+        folder.join("long-idle.txt"),
+        format!(
+            "wall_s={:.3}\ncpu_s={:.6}\nlogical_processors={}\n",
+            wall.elapsed().as_secs_f64(),
+            cpu as f64 / 10_000_000.,
+            std::thread::available_parallelism().map_or(1, |n| n.get())
+        ),
+    )
+    .map_err(io)?;
+    std::fs::write(folder.join("long-complete.txt"), "ok\n").map_err(io)
+}

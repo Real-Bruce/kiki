@@ -1,6 +1,6 @@
 //! Outline shapes measured against the capture design, in toolbar DIPs.
 use super::{
-    capture_toolbar::{BUTTON_HEIGHT, Layout, MORE, MOSAIC, PICKER, SEQUENCE},
+    capture_toolbar::{BUTTON_HEIGHT, LONG_CAPTURE, Layout, MORE, MOSAIC, PICKER, SEQUENCE},
     ui_palette as palette,
 };
 use crate::core::{geometry::PixelRect, selection::PixelPoint};
@@ -306,6 +306,25 @@ impl ToolbarIcons {
                     (point(-2., -2.), point(0., -4.)),
                     (point(0., -4.), point(0., 4.)),
                     (point(-2., 4.), point(2., 4.)),
+                ] {
+                    target.DrawLine(a, b, brush, 1.4 * scale, &self.stroke);
+                }
+                return;
+            }
+            if index == LONG_CAPTURE {
+                let point = |x: f32, y: f32| Vector2 {
+                    X: center.X + x * scale,
+                    Y: center.Y + y * scale,
+                };
+                for (a, b) in [
+                    (point(-8., -8.), point(2., -8.)),
+                    (point(-8., -8.), point(-8., 8.)),
+                    (point(-8., 8.), point(2., 8.)),
+                    (point(5., -7.), point(5., 7.)),
+                    (point(2., -4.), point(5., -7.)),
+                    (point(8., -4.), point(5., -7.)),
+                    (point(2., 4.), point(5., 7.)),
+                    (point(8., 4.), point(5., 7.)),
                 ] {
                     target.DrawLine(a, b, brush, 1.4 * scale, &self.stroke);
                 }

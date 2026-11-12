@@ -1,7 +1,8 @@
 param(
     [string]$Executable = 'target/x86_64-pc-windows-msvc/release/kiki.exe',
     [string]$OutputDirectory = ('artifacts/performance/p7-' + (Get-Date -Format 'yyyyMMdd-HHmmss')),
-    [switch]$FirstOnly
+    [switch]$FirstOnly,
+    [string]$Hotkey = 'Ctrl+Alt+A'
 )
 $ErrorActionPreference = 'Stop'
 $executablePath = (Resolve-Path -LiteralPath $Executable).Path
@@ -20,6 +21,7 @@ $environmentInfo = [ordered]@{
     CapturedAt = (Get-Date -Format o)
     Executable = $executablePath
     Sha256 = (Get-FileHash -LiteralPath $executablePath -Algorithm SHA256).Hash
+    Hotkey = $Hotkey
     Cpu = @(Get-CimInstance Win32_Processor | Select-Object Name,NumberOfCores,NumberOfLogicalProcessors)
     Computer = (Get-CimInstance Win32_ComputerSystem | Select-Object TotalPhysicalMemory)
     Windows = (Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber)
@@ -32,7 +34,7 @@ for ($index = 1; $index -le $count; $index++) {
     $configPath = Join-Path $samplePath 'config'
     New-Item -ItemType Directory -Force -Path $configPath | Out-Null
     # Isolate actual user configuration. No startup-registry writes; no excluded warm-up samples.
-    "version=1`nfirst_tip_seen=true`n" | Set-Content -LiteralPath (Join-Path $configPath 'settings.ini') -Encoding utf8NoBOM
+    "version=1`nfirst_tip_seen=true`nhotkey=$Hotkey`n" | Set-Content -LiteralPath (Join-Path $configPath 'settings.ini') -Encoding utf8NoBOM
     $arguments = @('--performance-probe',('"' + $samplePath + '"'),'--config-dir',('"' + $configPath + '"'))
     if ($FirstOnly) {$arguments += '--first-only'}
     $trial = Start-Process -FilePath $executablePath -ArgumentList $arguments -WindowStyle Hidden -PassThru
