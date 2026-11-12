@@ -296,6 +296,7 @@ impl State {
             7..=9 => {
                 self.pending_output = Some(index);
             }
+            capture_toolbar::UNDO => self.editor.undo(),
             10 => return true,
             _ => {}
         }
@@ -2744,7 +2745,7 @@ mod tests {
             assert_eq!(state.editor.tool, Tool::Select);
             // End the existing draft before exercising toolbar keyboard navigation.
             (*pointer).text_input = None;
-            for expected in [3, 7, 8, capture_toolbar::COPY, 10, 2] {
+            for expected in [3, capture_toolbar::UNDO, 7, 8, capture_toolbar::COPY, 10, 2] {
                 SendMessageW(hwnd, WM_KEYDOWN, Some(WPARAM(9)), None);
                 assert_eq!((*pointer).focus, expected);
             }

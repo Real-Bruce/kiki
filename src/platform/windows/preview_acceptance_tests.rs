@@ -673,6 +673,55 @@ fn long_edit_fixture(scale_percent: i32) -> (Preview, *mut State, PixelPoint) {
     (preview, state, sample)
 }
 
+#[test]
+fn undo_button_is_visible_and_uses_history_in_both_editors() {
+    let _com = prepare_windows();
+    for long in [false, true] {
+        let (preview, state) = if long {
+            let (preview, state, _) = long_edit_fixture(150);
+            (preview, state)
+        } else {
+            capture_fixture(Image::new(rect(0, 0, 900, 660)).unwrap(), Vec::new())
+        };
+        let hwnd = preview.hwnd().unwrap();
+        // SAFETY: the test owns this hidden preview and sends messages only to its HWND.
+        unsafe {
+            (*state).editor.clear_document();
+            (*state).editor.tool = Tool::Select;
+            let desktop = (*state).canvas.window_bounds();
+            let layout = (*state).layout().unwrap();
+            let undo = layout
+                .buttons()
+                .find(|b| b.id == capture_toolbar::UNDO)
+                .unwrap()
+                .bounds;
+            let undo_center = point((undo.left + undo.right) / 2, (undo.top + undo.bottom) / 2);
+            assert!(!(*state).can_focus(&layout, capture_toolbar::UNDO));
+            click(hwnd, desktop, undo_center);
+            assert!((*state).editor.objects().is_empty());
+
+            (*state).editor.tool = Tool::Rectangle;
+            (*state).editor.begin_at(point(60, 60), None).unwrap();
+            (*state).editor.finish(point(170, 100));
+            (*state).editor.tool = Tool::Select;
+            assert!((*state).can_focus(&layout, capture_toolbar::UNDO));
+            click(hwnd, desktop, undo_center);
+            assert!((*state).editor.objects().is_empty());
+            assert!(!(*state).can_focus(&layout, capture_toolbar::UNDO));
+
+            (*state).editor.redo();
+            assert_eq!((*state).editor.objects().len(), 1);
+            (*state).keyboard_focus = true;
+            (*state).focus = capture_toolbar::UNDO;
+            SendMessageW(hwnd, WM_KEYDOWN, Some(WPARAM(13)), None);
+            assert!((*state).editor.objects().is_empty());
+            assert!((*state).editor.can_redo());
+            assert!(preview.is_open());
+        }
+    }
+    assert!(take_ui_errors().is_empty());
+}
+
 fn navigate_long_to_bottom(preview: &Preview, state: *mut State) {
     // SAFETY: these coordinates and the live state belong to the test-owned Preview.
     unsafe {

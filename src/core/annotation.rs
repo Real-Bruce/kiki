@@ -527,7 +527,6 @@ impl Editor {
     pub fn active(&self) -> bool {
         self.drag.is_some()
     }
-    #[cfg(test)]
     pub fn can_undo(&self) -> bool {
         (!self.undo.is_empty() || self.parameter_before.is_some()) && !self.active()
     }

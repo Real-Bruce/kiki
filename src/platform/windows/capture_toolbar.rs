@@ -5,6 +5,7 @@ use crate::core::{
     selection::{PixelPoint, contains, toolbar},
 };
 
+pub const UNDO: usize = 5;
 pub const COPY: usize = 9;
 pub const MORE: usize = 21;
 pub const MOSAIC: usize = 22;
@@ -20,11 +21,12 @@ const BUTTON_GAP: f32 = 4.;
 const TOOLS: [usize; Tool::TOOLBAR.len()] = [1, 2, 3, 4, MOSAIC, SEQUENCE, LONG_CAPTURE, PICKER];
 const DRAWING: &[usize] = TOOLS.split_at(TOOLS.len() - 2).0;
 const PICKING: &[usize] = TOOLS.split_at(TOOLS.len() - 2).1;
+const HISTORY: &[usize] = &[UNDO];
 const OUTPUT: &[usize] = &[7, 8, COPY];
 const CANCEL: &[usize] = &[10];
-const FULL: &[&[usize]] = &[DRAWING, PICKING, OUTPUT, CANCEL];
-const COLLAPSED: &[&[usize]] = &[&[MORE], OUTPUT, CANCEL];
-const MAX_BUTTONS: usize = TOOLS.len() + OUTPUT.len() + CANCEL.len();
+const FULL: &[&[usize]] = &[DRAWING, PICKING, HISTORY, OUTPUT, CANCEL];
+const COLLAPSED: &[&[usize]] = &[&[MORE], HISTORY, OUTPUT, CANCEL];
+const MAX_BUTTONS: usize = TOOLS.len() + HISTORY.len() + OUTPUT.len() + CANCEL.len();
 
 pub fn tool_button(tool: Tool) -> usize {
     tool.index().map_or(0, |index| TOOLS[index])
@@ -46,6 +48,7 @@ pub fn tool_visible(capture_tools: [bool; Tool::TOOLBAR.len()], id: usize) -> bo
 
 pub fn enabled(editor: &Editor, id: usize) -> bool {
     match id {
+        UNDO => editor.can_undo(),
         11..=18 => editor.tool.has_color(),
         19..=20 => editor.tool.parameter().is_some(),
         7..=10 | MORE => true,
@@ -55,6 +58,7 @@ pub fn enabled(editor: &Editor, id: usize) -> bool {
 
 pub fn name(id: usize) -> &'static str {
     match id {
+        UNDO => "撤销（Ctrl+Z）",
         7 => "贴图",
         8 => "保存（Ctrl+S）",
         COPY => "复制（Enter）",
@@ -312,6 +316,7 @@ mod tests {
                     SEQUENCE,
                     LONG_CAPTURE,
                     PICKER,
+                    UNDO,
                     7,
                     8,
                     COPY,
@@ -323,10 +328,10 @@ mod tests {
                 assert_eq!(layout.buttons().map(|b| b.id).collect::<Vec<_>>(), expected);
                 let groups = usize::from(tools[..6].iter().any(|&enabled| enabled))
                     + usize::from(tools[6..].iter().any(|&enabled| enabled));
-                assert_eq!(layout.dividers().count(), 1 + groups);
+                assert_eq!(layout.dividers().count(), 2 + groups);
                 assert_eq!(layout.overflow().count(), 0);
                 assert_eq!(layout.toolbar.intersection(display), Some(layout.toolbar));
-                let width = ((230 + mask.count_ones() * 46 + groups as u32 * 14) as f32 * scale)
+                let width = ((290 + mask.count_ones() * 46 + groups as u32 * 14) as f32 * scale)
                     .round() as i32;
                 assert_eq!(layout.toolbar.right - layout.toolbar.left, width);
                 for button in layout.buttons() {
@@ -340,12 +345,12 @@ mod tests {
                         Some(button.id),
                     );
                 }
-                let preview = Layout::preview(rect(0, 0, 660, 48), tools);
+                let preview = Layout::preview(rect(0, 0, 720, 48), tools);
                 assert_eq!(
                     preview.buttons().map(|b| b.id).collect::<Vec<_>>(),
                     expected
                 );
-                assert_eq!(preview.dividers().count(), 1 + groups);
+                assert_eq!(preview.dividers().count(), 2 + groups);
             }
         }
     }
@@ -367,17 +372,17 @@ mod tests {
         );
         assert_eq!(
             medium.buttons().map(|b| b.id).collect::<Vec<_>>(),
-            [MORE, 7, 8, COPY, 10]
+            [MORE, UNDO, 7, 8, COPY, 10]
         );
 
-        let display = rect(-660, 0, 640, 900);
-        let narrow = Layout::new(selection, display, 2., Tool::Mosaic, tools);
+        let display = rect(-740, 0, 720, 900);
+        let narrow = Layout::new(selection, display, 2., Tool::Rectangle, tools);
         assert_eq!(narrow.overflow().collect::<Vec<_>>(), [1, 3, 4, MOSAIC]);
         assert_eq!(
             narrow.buttons().map(|b| b.id).collect::<Vec<_>>(),
-            [MORE, 7, 8, COPY, 10]
+            [MORE, UNDO, 7, 8, COPY, 10]
         );
-        assert_eq!(narrow.dividers().count(), 2);
+        assert_eq!(narrow.dividers().count(), 3);
         assert_eq!(narrow.bounds.intersection(display), Some(narrow.bounds));
         assert!(narrow.bounds.bottom <= selection.top);
         assert!(narrow.parameter_scale < narrow.scale);
@@ -390,7 +395,7 @@ mod tests {
         let settings = Layout::preview(rect(0, 0, 390, 48), tools);
         assert_eq!(
             settings.buttons().map(|b| b.id).collect::<Vec<_>>(),
-            [1, 3, 4, MOSAIC, 7, 8, COPY, 10]
+            [1, 3, 4, MOSAIC, UNDO, 7, 8, COPY, 10]
         );
         assert_eq!(settings.overflow().count(), 0);
         assert!(settings.scale < 1.);
@@ -405,7 +410,7 @@ mod tests {
         );
         assert_eq!(
             no_tools.buttons().map(|b| b.id).collect::<Vec<_>>(),
-            [7, 8, COPY, 10]
+            [UNDO, 7, 8, COPY, 10]
         );
         assert_eq!(no_tools.overflow().count(), 0);
         assert_eq!(no_tools.toolbar.intersection(tiny), Some(no_tools.toolbar));

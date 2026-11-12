@@ -26,21 +26,25 @@ function icon(name,x,y,color=c.text){
  if(name==='mosaic'){for(let i=0;i<3;i++)for(let j=0;j<3;j++)rect(3+i*8,3+j*8,6,6,(i+j)%2?color:'none',color,0,1);}
  else if(name==='number'){circle(14,14,12,'none',color,2);txt(14,20,'1',18,color,500,'middle');}
  else if(name==='more'){[5,14,23].forEach(a=>circle(a,14,2,color));}
+ else if(name==='undo'){pathD('M9 4L3 10L9 16M3 10H16C27 10 27 24 16 24H10',color,1.8);}
  else pathD(ds[name]||ds.rect,color,1.8);
  add('</g>');
 }
 const baseTools=['rect','arrow','pen','text'];
 const allTools=['rect','arrow','pen','text','mosaic','number','long','picker'];
-function toolbar(x,y,tools=baseTools,selected='rect'){
- const items=[...tools,'pin','save','copy','close'];
- const sep=tools.length>6?3:2;
- const w=items.length*48+24+sep*12;
+function toolbar(x,y,tools=baseTools,selected='rect',undo=null){
+ const groups=tools.length>6?[tools.slice(0,6),tools.slice(6)]:[tools];
+ if(undo!==null)groups.push(['undo']);
+ groups.push(['pin','save','copy'],['close']);
+ const w=groups.flat().length*48+24+(groups.length-1)*12;
  rect(x,y,w,58,c.panel,c.border,12);
  let px=x+12;
- items.forEach((it,i)=>{
-   if(i===tools.length||i===items.length-1||(tools.length>6&&i===6)){line(px+4,y+15,px+4,y+43);px+=12;}
-   if(it===selected)rect(px,y+7,42,44,c.active,'none',7);
-   icon(it,px+7,y+15,it===selected?c.accent:c.text);px+=48;
+ groups.forEach((group,i)=>{
+   if(i>0){line(px+4,y+15,px+4,y+43);px+=12;}
+   group.forEach(it=>{
+     if(it===selected)rect(px,y+7,42,44,c.active,'none',7);
+     icon(it,px+7,y+15,it===selected?c.accent:it==='undo'&&!undo?c.muted:c.text);px+=48;
+   });
  });
  return w;
 }
@@ -124,10 +128,10 @@ const scenes=[
   rect(970,218,225,426,c.paper,c.border,5);content(990,244,180,9);rect(981,318,202,95,'none',c.accent,3,2);txt(980,680,'拖动视口框定位',16,c.muted);toolbar(170,672,allTools.filter(x=>x!=='long'),'number');
   txt(65,809,'右侧可点击 / 拖动 / 滚轮浏览；输出完整长图。新一轮长截图需重新开始截图。',18,c.muted);
  }],
- ['s09-toolbar','S09  最终工具条与显示策略','F07 / F12 · 移除选择与撤销/重做按钮；保留绘制箭头及 Ctrl+Z / Ctrl+Y',()=>{
-  rect(45,140,1190,610,c.panel,c.border,14);txt(80,190,'默认：新增工具关闭',23,c.text,600);toolbar(80,219,baseTools,'rect');txt(80,310,'矩形　箭头　画笔　文字　│　贴图　保存　复制　│　取消',16,c.muted);
-  line(80,348,1197,348);txt(80,393,'全部开启：按固定顺序出现',23,c.text,600);toolbar(80,420,allTools,'mosaic');txt(80,512,'矩形　箭头　画笔　文字　马赛克　编号　│　长截图　取色　│　贴图　保存　复制　│　取消',16,c.muted);
-  line(80,550,1197,550);txt(80,595,'小工作区：绘图工具收纳至“更多”，输出操作保持可达',21,c.text,600);toolbar(80,622,['more'],'');
+ ['s09-toolbar','S09  最终工具条与显示策略','F12 · 工具条保留撤销；Ctrl+Z 撤销，Ctrl+Y 重做',()=>{
+  rect(45,140,1190,610,c.panel,c.border,14);txt(80,190,'默认：新增工具关闭，暂无可撤销操作',23,c.text,600);toolbar(80,219,baseTools,'rect',false);txt(80,310,'矩形　箭头　画笔　文字　│　撤销　│　贴图　保存　复制　│　取消',16,c.muted);
+  line(80,348,1197,348);txt(80,393,'全部开启：按固定顺序出现',23,c.text,600);toolbar(80,420,allTools,'mosaic',true);txt(80,512,'矩形　箭头　画笔　文字　马赛克　编号　│　长截图　取色　│　撤销　│　贴图　保存　复制　│　取消',16,c.muted);
+  line(80,550,1197,550);txt(80,595,'小工作区：绘图工具收纳至“更多”',21,c.text,600);toolbar(80,622,['more'],'',true);
   icon('copy',790,631,c.text);txt(835,652,'复制仅图标，不使用深色按下底色',17,c.muted);txt(835,684,'悬停、键盘焦点和失败反馈仍保留',17,c.muted);
   txt(65,795,'参数条按工具出现；关闭工具即收拢间距。下方优先，上方次之，最后安全收纳到屏幕内。',18,c.muted);
  }]

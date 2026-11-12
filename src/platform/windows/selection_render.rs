@@ -604,6 +604,7 @@ impl Canvas {
                 hover,
                 pressed,
                 focus,
+                can_undo: editor.can_undo(),
                 busy,
             },
         );

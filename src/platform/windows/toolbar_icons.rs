@@ -1,6 +1,8 @@
 //! Outline shapes measured against the capture design, in toolbar DIPs.
 use super::{
-    capture_toolbar::{BUTTON_HEIGHT, COPY, LONG_CAPTURE, Layout, MORE, MOSAIC, PICKER, SEQUENCE},
+    capture_toolbar::{
+        BUTTON_HEIGHT, COPY, LONG_CAPTURE, Layout, MORE, MOSAIC, PICKER, SEQUENCE, UNDO,
+    },
     ui_palette as palette,
 };
 use crate::core::{geometry::PixelRect, selection::PixelPoint};
@@ -74,6 +76,18 @@ const TEXT: &[Figure] = &[
     ),
     Figure((0., -7.4), &[L((0., 7.4))], false),
     Figure((-2.7, 7.4), &[L((2.7, 7.4))], false),
+];
+const UNDO_ICON: &[Figure] = &[
+    Figure(
+        (-7.5, -3.8),
+        &[
+            L((0.8, -3.8)),
+            C((8.3, -3.8), (9.3, 7.3), (0.6, 7.3)),
+            L((-2.2, 7.3)),
+        ],
+        false,
+    ),
+    Figure((-3.4, -7.9), &[L((-7.5, -3.8)), L((-3.4, 0.3))], false),
 ];
 const PIN: &[Figure] = &[
     Figure(
@@ -209,7 +223,7 @@ impl ToolbarIcons {
                     Some(path(ARROW)?),
                     Some(path(PEN)?),
                     Some(path(TEXT)?),
-                    None,
+                    Some(path(UNDO_ICON)?),
                     None,
                     Some(path(PIN)?),
                     Some(path(SAVE)?),
@@ -347,6 +361,7 @@ pub(super) struct BarState {
     pub hover: Option<usize>,
     pub pressed: Option<usize>,
     pub focus: usize,
+    pub can_undo: bool,
     pub busy: bool,
 }
 
@@ -407,7 +422,7 @@ impl BarPaint<'_> {
                     radiusX: 7. * scale,
                     radiusY: 7. * scale,
                 };
-                let active = !state.busy;
+                let active = !state.busy && (id != UNDO || state.can_undo);
                 let over = state.hover == Some(id);
                 let selected = id == state.selected
                     || id == MORE && layout.overflow().any(|id| id == state.selected);
@@ -439,7 +454,7 @@ impl BarPaint<'_> {
                     Y: (b.top + b.bottom) / 2.,
                 };
                 self.icons.draw(self.target, self.brush, id, center, scale);
-                if state.focus == id {
+                if state.focus == id && (id != UNDO || active) {
                     self.brush.SetColor(&color(palette::accent(dark), 1.));
                     self.target.DrawRoundedRectangle(
                         &D2D1_ROUNDED_RECT {
