@@ -901,19 +901,147 @@ fn cross_screen_long_capture_requests_reselection_and_next_preview_is_ordinary()
     unsafe {
         (*state).start_long = true;
         assert!(start_long_if_requested(hwnd, state));
-        assert!((*state).long_reselect);
+        assert!((*state).long_reselect.is_some());
         assert!((*state).selection.rect.is_none());
         assert!((*state).long_capture.is_none());
         assert!((*state).long_document.is_none());
+        let bounds = (*state).canvas.window_bounds();
+        (*state).windows = vec![bounds];
+        click(hwnd, bounds, point(bounds.left + 10, bounds.top + 10));
+        assert!((*state).long_reselect.is_some());
+        assert!(
+            (*state).selection.rect.is_none(),
+            "a click selected a full window during reselection"
+        );
+        assert!((*state).long_capture.is_none());
+        SendMessageW(hwnd, WM_KEYDOWN, Some(WPARAM(VK_ESCAPE.0 as usize)), None);
+        assert!(!preview.is_open());
     }
     drop(preview);
     let (_next, next_state) = picker_fixture();
     // SAFETY: the fresh ordinary Preview is still live and belongs to this thread.
     unsafe {
-        assert!(!(*next_state).long_reselect);
+        assert!((*next_state).long_reselect.is_none());
         assert!((*next_state).long_document.is_none());
         assert!((*next_state).long_capture.is_none());
         assert!((*next_state).selection.rect.is_some());
+    }
+    assert!(take_ui_errors().is_empty());
+}
+
+#[test]
+#[ignore = "uses a visible native source and the real Windows preview"]
+fn long_capture_toolbar_preserves_viewport_and_leaves_a_recoverable_session() {
+    use long_capture::tests::{native_document, route_test_wheel};
+
+    let _com = prepare_windows();
+    let screen = super::super::display::enumerate()
+        .unwrap()
+        .into_iter()
+        .map(|screen| screen.info)
+        .find(|screen| {
+            screen.color == ColorMode::Sdr
+                && screen
+                    .bounds
+                    .size()
+                    .is_some_and(|(w, h)| w >= 800 && h >= 600)
+        })
+        .expect("requires a real SDR display");
+    println!("display={screen:?}");
+    let (source, _, area, _) = native_document(&screen);
+    let bounds = screen.bounds;
+    let (preview, state) = capture_fixture(Image::new(bounds).unwrap(), vec![screen]);
+    let hwnd = preview.hwnd().unwrap();
+    let center = POINT {
+        x: area.left + 250,
+        y: area.top + 100,
+    };
+    // SAFETY: the test owns these native windows and dispatches messages on their UI thread.
+    unsafe {
+        (*state).capture_tools[Tool::LongCapture.index().unwrap()] = true;
+        (*state).selection.rect = Some(area);
+        let button = (*state)
+            .layout()
+            .unwrap()
+            .buttons()
+            .find(|button| button.id == capture_toolbar::LONG_CAPTURE)
+            .unwrap()
+            .bounds;
+        let _ = ShowWindow(hwnd, SW_SHOW);
+        click(
+            hwnd,
+            bounds,
+            point((button.left + button.right) / 2, button.top + 5),
+        );
+        assert_eq!(
+            (*state).long_capture.as_ref().map(|capture| capture.area),
+            Some(area)
+        );
+        assert_eq!((*state).selection.rect, Some(area));
+        assert_eq!(GetAncestor(WindowFromPoint(center), GA_ROOT), source.0);
+
+        pump_until(|| {
+            (*state).long_reselect.is_some()
+                || (*state)
+                    .long_capture
+                    .as_ref()
+                    .is_some_and(|capture| capture.update.is_some())
+        });
+        if let Some(message) = (*state).long_reselect {
+            assert!(message.contains("无法获取长截图首帧"));
+            assert!((*state).selection.rect.is_none());
+            assert!((*state).long_capture.is_none());
+            assert_eq!(WindowFromPoint(center), hwnd);
+            println!("initial capture unavailable, drawing and cancellation restored");
+            SendMessageW(hwnd, WM_KEYDOWN, Some(WPARAM(VK_ESCAPE.0 as usize)), None);
+        } else {
+            let capture = (*state).long_capture.as_ref().unwrap();
+            let (width, height) = area.size().unwrap();
+            assert_eq!(capture.update.as_ref().unwrap().height, height);
+            let finish = capture.panel.finish;
+            let start = Instant::now();
+            route_test_wheel(point(center.x, center.y), -120);
+            pump_until(|| {
+                (*state)
+                    .long_capture
+                    .as_ref()
+                    .unwrap()
+                    .update
+                    .as_ref()
+                    .unwrap()
+                    .height
+                    > height
+            });
+            let grown = (*state)
+                .long_capture
+                .as_ref()
+                .unwrap()
+                .update
+                .as_ref()
+                .unwrap()
+                .height;
+            println!(
+                "preview_height={height}->{grown}, wheel_to_preview_ms={:.1}",
+                start.elapsed().as_secs_f64() * 1000.
+            );
+            click(hwnd, bounds, point(finish.left + 2, finish.top + 2));
+            pump_until(|| (*state).long_document.is_some());
+            let image = (*state).canvas.source();
+            let path =
+                std::env::temp_dir().join(format!("kiki-long-toolbar-{}.png", std::process::id()));
+            let target = output::SaveTarget::new(path.clone(), OutputFormat::Png).unwrap();
+            output::TEST_DIALOG.with_borrow_mut(|next| *next = Some(Some(target)));
+            (*state).corner_radius = 0;
+            (*state).pending_output = Some(8);
+            begin_output(hwnd, state).unwrap();
+            pump_until(|| !preview.is_open());
+            let (size, pixels) = super::super::image_encode::decode_file(&path);
+            std::fs::remove_file(path).unwrap();
+            assert_eq!(size, (width, grown));
+            assert_eq!(pixels, image.pixels());
+            println!("saved_png={width}x{grown}, decoded pixels match the stitched image");
+        }
+        assert!(!preview.is_open());
     }
     assert!(take_ui_errors().is_empty());
 }

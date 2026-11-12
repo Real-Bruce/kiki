@@ -23,6 +23,7 @@ pub const SCROLLED: u32 = WM_APP + 73;
 pub const TIMER: usize = 8;
 static WORKERS: AtomicUsize = AtomicUsize::new(0);
 const PAUSED: &str = "未找到可靠接缝，已保留已拼接部分。请缓慢滚回已捕获内容，或点击完成。";
+const WHEEL_RETRY: &str = "目标窗口暂时无法接收滚轮，请点击正文后重试。";
 const SCROLL_TAIL: Duration = Duration::from_millis(320);
 const SCROLL_MAX_TAIL: Duration = Duration::from_millis(700);
 const FRAME_QUIET: Duration = Duration::from_millis(100);
@@ -96,6 +97,11 @@ unsafe extern "system" fn wheel_hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESU
                 if route.ready {
                     let child = WindowFromPoint(mouse.pt);
                     let root = GetAncestor(child, GA_ROOT);
+                    // Floating windows and shell surfaces can temporarily cover the
+                    // selection. Only the source's movement or closure stops capture.
+                    if root.0 as usize != route.target.window {
+                        return LRESULT(1);
+                    }
                     let key_flags = |key, flag| {
                         if windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(key) < 0 {
                             flag
@@ -106,18 +112,15 @@ unsafe extern "system" fn wheel_hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESU
                     let keys = key_flags(0x10, 4) | key_flags(0x11, 8);
                     let delta = (mouse.mouseData >> 16) as u16 as i16;
                     let coordinates = u32::from(point.x as u16) | (u32::from(point.y as u16) << 16);
-                    let same_target =
-                        root.0 as usize == route.target.window && route.target.valid();
-                    let native = same_target && GetAncestor(GetForegroundWindow(), GA_ROOT) == root;
-                    let forwarded = same_target
-                        && (native
-                            || PostMessageW(
-                                Some(child),
-                                WM_MOUSEWHEEL,
-                                WPARAM(((mouse.mouseData & 0xffff0000) | keys) as usize),
-                                LPARAM(coordinates as isize),
-                            )
-                            .is_ok());
+                    let native = GetAncestor(GetForegroundWindow(), GA_ROOT) == root;
+                    let forwarded = native
+                        || PostMessageW(
+                            Some(child),
+                            WM_MOUSEWHEEL,
+                            WPARAM(((mouse.mouseData & 0xffff0000) | keys) as usize),
+                            LPARAM(coordinates as isize),
+                        )
+                        .is_ok();
                     let direction = if !forwarded {
                         0
                     } else if delta < 0 {
@@ -148,13 +151,19 @@ impl Drop for Hook {
     }
 }
 
-fn target_at(area: PixelRect) -> Option<Target> {
+fn target_at(owner: HWND, area: PixelRect) -> Option<Target> {
     let center = POINT {
         x: area.left + (area.right - area.left) / 2,
         y: area.top + (area.bottom - area.top) / 2,
     };
-    // SAFETY: the preview has been hidden before hit testing the source.
-    unsafe { Target::read(GetAncestor(WindowFromPoint(center), GA_ROOT)) }
+    // SAFETY: the preview's region is open at the selection center before hit testing.
+    unsafe {
+        let window = GetAncestor(WindowFromPoint(center), GA_ROOT);
+        if window == owner || window == GetDesktopWindow() || window == GetShellWindow() {
+            return None;
+        }
+        Target::read(window)
+    }
 }
 
 fn verify_exclusion(owner: usize) -> Result<()> {
@@ -451,19 +460,17 @@ impl Capture {
         // SAFETY: all calls operate on the preview's live top-level HWND. Region ownership
         // transfers to Windows only on success. Do not borrow preview state across these calls.
         unsafe {
-            let _ = ShowWindow(hwnd, SW_HIDE);
             let result = (|| {
-                let target = target_at(area).ok_or_else(|| fail("请框选可滚动的正文窗口"))?;
                 SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)?;
                 verify_exclusion(hwnd.0 as usize)?;
                 let panel = Panel::new(&screen, area, false);
                 let mut window = RECT::default();
                 GetWindowRect(hwnd, &mut window)?;
-                let region = capture_mask(window, screen.bounds, area, panel.bounds)?;
-                if SetWindowRgn(hwnd, Some(region), false) == 0 {
-                    let _ = DeleteObject(region.into());
-                    return Err(fail("无法隔离长截图预览窗口"));
-                }
+                // Leave the overlay active for Esc and open the source for hit testing
+                // before adding the panel, which may cover the center of a narrow selection.
+                set_capture_mask(hwnd, window, screen.bounds, area, None)?;
+                let target = target_at(hwnd, area).ok_or_else(|| fail("请框选可滚动的正文窗口"))?;
+                set_capture_mask(hwnd, window, screen.bounds, area, Some(panel.bounds))?;
                 let module = windows::Win32::System::LibraryLoader::GetModuleHandleW(None)?;
                 let hook = Hook(SetWindowsHookExW(
                     WH_MOUSE_LL,
@@ -478,7 +485,6 @@ impl Capture {
                     panel: panel.bounds,
                     ready: false,
                 }));
-                let _ = ShowWindow(hwnd, SW_SHOW);
                 let worker = Worker::start(hwnd.0 as usize, area, screen.clone(), target)?;
                 Ok(Self {
                     panel,
@@ -494,11 +500,8 @@ impl Capture {
                 })
             })();
             if result.is_err() {
-                let _ = SetWindowRgn(hwnd, None, false);
-                let _ = SetWindowDisplayAffinity(hwnd, WDA_NONE);
-                let _ = ShowWindow(hwnd, SW_SHOW);
+                Self::reset_window(hwnd);
             }
-            let _ = focus_preview(hwnd);
             result
         }
     }
@@ -508,8 +511,11 @@ impl Capture {
             return false;
         }
         if direction == 0 {
-            self.stop("目标窗口已移动、被遮挡或无法接收滚轮。");
-            return true;
+            let changed = self.message != WHEEL_RETRY;
+            if changed {
+                self.message = WHEEL_RETRY.into();
+            }
+            return changed;
         }
         self.worker.signal(|control| {
             control.scroll = Some(Scroll {
@@ -517,6 +523,12 @@ impl Capture {
                 at: Instant::now(),
             });
         });
+        if self.message == WHEEL_RETRY
+            && let Some(update) = self.update.as_ref()
+        {
+            self.message = update.message.into();
+            return true;
+        }
         false
     }
 
@@ -575,11 +587,29 @@ impl Capture {
     }
 }
 
+fn set_capture_mask(
+    hwnd: HWND,
+    window: RECT,
+    screen: PixelRect,
+    area: PixelRect,
+    panel: Option<PixelRect>,
+) -> Result<()> {
+    let region = capture_mask(window, screen, area, panel)?;
+    // SAFETY: hwnd belongs to the UI thread. Windows owns region after success only.
+    unsafe {
+        if SetWindowRgn(hwnd, Some(region), false) == 0 {
+            let _ = DeleteObject(region.into());
+            return Err(fail("无法隔离长截图预览窗口"));
+        }
+    }
+    Ok(())
+}
+
 fn capture_mask(
     window: RECT,
     screen: PixelRect,
     area: PixelRect,
-    panel: PixelRect,
+    panel: Option<PixelRect>,
 ) -> Result<HRGN> {
     // SAFETY: each temporary GDI region is deleted here. The caller owns the returned
     // region until it transfers ownership to Windows with SetWindowRgn.
@@ -594,26 +624,25 @@ fn capture_mask(
         };
         let region = create(screen);
         let hole = create(area);
-        let preview = create(panel);
-        let valid = !region.is_invalid() && !hole.is_invalid() && !preview.is_invalid();
+        let valid = !region.is_invalid() && !hole.is_invalid();
         let combined = valid
             && CombineRgn(Some(region), Some(region), Some(hole), RGN_DIFF) != RGN_ERROR
-            && CombineRgn(Some(region), Some(region), Some(preview), RGN_OR) != RGN_ERROR;
+            && panel.is_none_or(|panel| {
+                let preview = create(panel);
+                if preview.is_invalid() {
+                    return false;
+                }
+                let added =
+                    CombineRgn(Some(region), Some(region), Some(preview), RGN_OR) != RGN_ERROR;
+                let _ = DeleteObject(preview.into());
+                added
+            });
         let _ = DeleteObject(hole.into());
-        let _ = DeleteObject(preview.into());
         if !combined {
             let _ = DeleteObject(region.into());
             return Err(fail("无法建立长截图遮罩"));
         }
         Ok(region)
-    }
-}
-
-fn focus_preview(hwnd: HWND) -> HWND {
-    // SAFETY: this is the live HWND on its creating UI thread.
-    unsafe {
-        let _ = SetForegroundWindow(hwnd);
-        windows::Win32::UI::Input::KeyboardAndMouse::SetFocus(Some(hwnd)).unwrap_or_default()
     }
 }
 
@@ -860,7 +889,7 @@ fn make_update(stitch: &Stitcher, message: &'static str) -> Result<Update> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use crate::core::{display::ColorMode, long_image::fixture};
 
@@ -901,10 +930,13 @@ mod tests {
             right: -12,
             bottom: 780,
         };
-        let mask = capture_mask(window, screen, area, panel).unwrap();
+        let mask = capture_mask(window, screen, area, Some(panel)).unwrap();
+        let fullscreen = capture_mask(window, screen, screen, Some(panel)).unwrap();
         // SAFETY: the test owns the native region and deletes it before returning.
         unsafe {
             let includes = |x, y| PtInRegion(mask, x - window.left, y - window.top).as_bool();
+            let in_fullscreen =
+                |x, y| PtInRegion(fullscreen, x - window.left, y - window.top).as_bool();
             let results = [
                 includes(-1850, 500),
                 !includes(-1400, 500),
@@ -912,8 +944,12 @@ mod tests {
                 includes(-1701, 220),
                 !includes(-1700, 220),
                 !includes(500, 500),
+                !in_fullscreen(-1850, 500),
+                !in_fullscreen(-1400, 500),
+                in_fullscreen(-200, 500),
             ];
             let _ = DeleteObject(mask.into());
+            let _ = DeleteObject(fullscreen.into());
             assert!(results.into_iter().all(|valid| valid));
         }
     }
@@ -978,7 +1014,7 @@ mod tests {
         assert!(document.view.offset < document.view.max_offset());
     }
 
-    struct NativeTestWindow(HWND);
+    pub(in crate::platform::windows) struct NativeTestWindow(pub HWND);
 
     impl Drop for NativeTestWindow {
         fn drop(&mut self) {
@@ -989,7 +1025,9 @@ mod tests {
         }
     }
 
-    fn native_document(screen: &DisplayInfo) -> (NativeTestWindow, HWND, PixelRect, i32) {
+    pub(in crate::platform::windows) fn native_document(
+        screen: &DisplayInfo,
+    ) -> (NativeTestWindow, HWND, PixelRect, i32) {
         use windows::Win32::UI::Controls::{EM_GETRECT, EM_LINEINDEX, EM_POSFROMCHAR};
         use windows::core::{PCWSTR, w};
         let left = screen.bounds.left + 45;
@@ -1078,6 +1116,99 @@ mod tests {
                 bottom: top + first_y + rows * line_height,
             };
             (window, hwnd, area, line_height)
+        }
+    }
+
+    pub(in crate::platform::windows) fn route_test_wheel(point: PixelPoint, delta: i16) -> LRESULT {
+        let event = MSLLHOOKSTRUCT {
+            pt: POINT {
+                x: point.x,
+                y: point.y,
+            },
+            mouseData: u32::from(delta as u16) << 16,
+            ..Default::default()
+        };
+        // SAFETY: the test supplies the same call-scoped structure as WH_MOUSE_LL.
+        unsafe {
+            wheel_hook(
+                0,
+                WPARAM(WM_MOUSEWHEEL as usize),
+                LPARAM((&raw const event) as isize),
+            )
+        }
+    }
+
+    #[test]
+    #[ignore = "uses a visible native scrollable document and a temporary floating window"]
+    fn wheel_route_ignores_an_unrelated_window_then_forwards_to_the_document() {
+        use windows::Win32::UI::Controls::EM_GETFIRSTVISIBLELINE;
+        use windows::core::w;
+        super::super::tests::graphics_runtime();
+        let screen = super::super::display::enumerate().unwrap().remove(0).info;
+        let (source, edit, area, _) = native_document(&screen);
+        let center = PixelPoint {
+            x: area.left + 250,
+            y: area.top + 100,
+        };
+        // SAFETY: only the test's own native windows and thread-local route are used.
+        unsafe {
+            let cover = NativeTestWindow(
+                CreateWindowExW(
+                    WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                    w!("BUTTON"),
+                    w!("Temporary floating window"),
+                    WS_POPUP,
+                    center.x - 20,
+                    center.y - 20,
+                    80,
+                    40,
+                    None,
+                    None,
+                    Some(
+                        windows::Win32::System::LibraryLoader::GetModuleHandleW(None)
+                            .unwrap()
+                            .into(),
+                    ),
+                    None,
+                )
+                .unwrap(),
+            );
+            let _ = ShowWindow(cover.0, SW_SHOWNOACTIVATE);
+            ROUTE.set(Some(Route {
+                hwnd: source.0,
+                target: Target::read(source.0).unwrap(),
+                area,
+                panel: PixelRect {
+                    left: 0,
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                },
+                ready: true,
+            }));
+            let mut msg = MSG::default();
+            let scrolled = |msg: &mut MSG| {
+                PeekMessageW(msg, Some(source.0), SCROLLED, SCROLLED, PM_REMOVE).as_bool()
+            };
+            route_test_wheel(center, -120);
+            assert!(!scrolled(&mut msg), "unrelated window stopped the capture");
+            drop(cover);
+            route_test_wheel(center, -120);
+            assert!(scrolled(&mut msg));
+            assert_eq!(msg.wParam.0, 1);
+            assert!(
+                PeekMessageW(
+                    &mut msg,
+                    Some(edit),
+                    WM_MOUSEWHEEL,
+                    WM_MOUSEWHEEL,
+                    PM_REMOVE
+                )
+                .as_bool()
+            );
+            DispatchMessageW(&msg);
+            assert!(SendMessageW(edit, EM_GETFIRSTVISIBLELINE, None, None).0 > 0);
+            ROUTE.set(None);
         }
     }
 

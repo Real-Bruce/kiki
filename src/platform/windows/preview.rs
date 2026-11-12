@@ -117,7 +117,7 @@ impl Preview {
                 long_capture: None,
                 long_document: None,
                 start_long: false,
-                long_reselect: false,
+                long_reselect: None,
                 parameter_down: false,
                 parameter_slider: false,
                 parameter_edit: None,
@@ -194,7 +194,7 @@ struct State {
     long_capture: Option<LongCapture>,
     long_document: Option<LongDocument>,
     start_long: bool,
-    long_reselect: bool,
+    long_reselect: Option<&'static str>,
     parameter_down: bool,
     parameter_slider: bool,
     parameter_edit: Option<ParameterEdit>,
@@ -334,7 +334,7 @@ impl State {
                 tools,
             ));
         }
-        if self.long_reselect {
+        if self.long_reselect.is_some() {
             return None;
         }
         let rect = self.selection.rect.filter(|_| !self.selection.active())?;
@@ -1052,11 +1052,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                         pressed: state.down_button,
                         editing_parameter: state.parameter_edit.is_some(),
                         parameter,
-                        message: if state.long_reselect {
-                            Some("请重新框选单个显示器内的正文区域。")
-                        } else {
-                            message
-                        },
+                        message: state.long_reselect.or(message),
                         picker,
                     };
                     if let Some(capture) = state.long_capture.as_ref() {
@@ -1082,7 +1078,11 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     state.pointer = mouse_position(lp, state.canvas.window_bounds());
                     state.selection.update(state.pointer);
                     state.editor.update(state.document_point(state.pointer));
-                    state.hover = state.window_at(state.pointer);
+                    state.hover = if state.long_reselect.is_none() {
+                        state.window_at(state.pointer)
+                    } else {
+                        None
+                    };
                     state
                         .parameter_slider
                         .then(|| state.slider_value())
@@ -1153,7 +1153,11 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 {
                     let state = &mut *pointer;
                     state.pointer = point;
-                    state.pressed_window = state.window_at(state.pointer);
+                    state.pressed_window = if state.long_reselect.is_none() {
+                        state.window_at(state.pointer)
+                    } else {
+                        None
+                    };
                     state.parameter_down = false;
                     state.keyboard_focus = false;
                     if let Some(parameter @ 0..=7) = state.parameter_at(state.pointer) {
@@ -1285,7 +1289,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                         } else if !state.parameter_down && state.long_document.is_none() {
                             state.selection.finish(state.pointer, state.pressed_window);
                             state.start_long =
-                                state.long_reselect && state.selection.rect.is_some();
+                                state.long_reselect.is_some() && state.selection.rect.is_some();
                         }
                         state.parameter_down = false;
                         false
@@ -1364,7 +1368,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                                 !state.editor.cancel() && !state.selection.cancel_drag()
                             }
                         }
-                        70 if state.long_document.is_none() && !state.long_reselect => {
+                        70 if state.long_document.is_none() && state.long_reselect.is_none() => {
                             release = true;
                             state.down_button = None;
                             state.editor.cancel();
@@ -1543,27 +1547,38 @@ fn start_long_if_requested(hwnd: HWND, pointer: *mut State) -> bool {
         let _ = ReleaseCapture();
         let _ = KillTimer(Some(hwnd), PARAMETER_TIMER);
         let Some((area, screen)) = target else {
-            let state = &mut *pointer;
-            state.selection = Selection::new(state.canvas.window_bounds());
-            state.long_reselect = true;
-            let _ = InvalidateRect(Some(hwnd), None, false);
+            reselect_long(hwnd, pointer, "请重新框选单个显示器内的正文区域。");
             return true;
         };
         match LongCapture::start(hwnd, area, screen) {
             Ok(capture) if SetTimer(Some(hwnd), long_capture::TIMER, 40, None) != 0 => {
                 (*pointer).long_capture = Some(capture);
-                (*pointer).long_reselect = false;
+                (*pointer).long_reselect = None;
                 let _ = InvalidateRect(Some(hwnd), None, false);
             }
             result => {
-                let error = result
-                    .err()
-                    .map_or_else(|| "无法启动长截图计时器".into(), |e| e.to_string());
-                let _ = DestroyWindow(hwnd);
-                super::show_error(&error);
+                drop(result);
+                reselect_long(hwnd, pointer, "无法开始长截图。请拖动框选可滚动的正文。");
             }
         }
         true
+    }
+}
+
+fn reselect_long(hwnd: HWND, pointer: *mut State, message: &'static str) {
+    // SAFETY: the live preview belongs to this UI thread. Release the state borrow
+    // before restoring the native window region, which can dispatch messages.
+    unsafe {
+        let state = &mut *pointer;
+        let active = state.long_capture.take();
+        state.selection = Selection::new(state.canvas.window_bounds());
+        state.long_reselect = Some(message);
+        state.hover = None;
+        state.pressed_window = None;
+        drop(active);
+        let _ = KillTimer(Some(hwnd), long_capture::TIMER);
+        LongCapture::reset_window(hwnd);
+        let _ = InvalidateRect(Some(hwnd), None, false);
     }
 }
 
@@ -1586,6 +1601,14 @@ fn dispatch_long_capture(
             }
             WM_TIMER if wp.0 == long_capture::TIMER => match capture.tick() {
                 Some(long_capture::Reply::Update(update)) => capture.update(update),
+                Some(long_capture::Reply::Stopped(_)) if capture.update.is_none() => {
+                    reselect_long(
+                        hwnd,
+                        pointer,
+                        "无法获取长截图首帧。请重新框选可滚动的正文。",
+                    );
+                    return Some(LRESULT(0));
+                }
                 Some(long_capture::Reply::Stopped(error)) => capture.stop(&error.message()),
                 Some(long_capture::Reply::Finished(image, thumbnail)) => {
                     if let Some(document) = LongDocument::new(&capture.screen, &image, thumbnail) {
