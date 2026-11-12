@@ -228,7 +228,7 @@ impl Page {
             }
             _ => {
                 p.heading("应用信息");
-                p.row("版本", format!("kiki {}", env!("CARGO_PKG_VERSION")));
+                p.row("版本", concat!("kiki ", env!("KIKI_VERSION")));
                 p.row("平台", "Windows 11（64 位）");
                 p.divider();
                 p.heading("帮助与资源");

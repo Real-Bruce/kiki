@@ -22,11 +22,11 @@ jobs:
         shell: pwsh
         run: ./scripts/Package-Windows.ps1 -Tag $env:GITHUB_REF_NAME
 
-      - name: 发布 GitHub Release
+      - name: 发布 GitHub Release 和标签更新说明
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = $env:GITHUB_REF_NAME
           $zip = "dist/kiki-$tag-windows-x64.zip"
-          gh release create $tag $zip "$zip.sha256" --verify-tag --title $tag --generate-notes
+          gh release create $tag $zip "$zip.sha256" --verify-tag --title $tag --notes-from-tag

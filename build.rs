@@ -15,16 +15,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     let version_file = fs::read_to_string("VERSION")?;
     let version = version_file.trim();
-    let cargo_version = env::var("CARGO_PKG_VERSION")?;
-    if version != cargo_version {
-        return Err("VERSION 与 Cargo.toml 不一致，请运行 scripts/Sync-Version.ps1".into());
-    }
-    let major = env::var("CARGO_PKG_VERSION_MAJOR")?.parse::<u16>()?;
-    let minor = env::var("CARGO_PKG_VERSION_MINOR")?.parse::<u16>()?;
-    let patch = env::var("CARGO_PKG_VERSION_PATCH")?.parse::<u16>()?;
-    if version != format!("{major}.{minor}.{patch}") {
-        return Err("VERSION 必须是 X.Y.Z 格式，各段取值为 0 至 65535".into());
-    }
+    let [major, minor, patch] = parse_version(version)
+        .ok_or("VERSION 必须是 X.Y.Z 格式，各段取值为 0 至 65535，且没有多余的前导零")?;
+    println!("cargo:rustc-env=KIKI_VERSION={version}");
     if env::var("CARGO_CFG_TARGET_OS")? != "windows" {
         return Ok(());
     }
@@ -47,6 +40,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rustc-link-arg=/MANIFESTINPUT:{}", manifest.display());
     println!("cargo:rustc-link-arg={}", output.display());
     Ok(())
+}
+
+fn parse_version(version: &str) -> Option<[u16; 3]> {
+    let mut parts = version.splitn(3, '.').map(str::parse::<u16>);
+    let major = parts.next()?.ok()?;
+    let minor = parts.next()?.ok()?;
+    let patch = parts.next()?.ok()?;
+    (version == format!("{major}.{minor}.{patch}")).then_some([major, minor, patch])
 }
 
 fn resource_compiler() -> Result<PathBuf, Box<dyn Error>> {
