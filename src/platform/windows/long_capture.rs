@@ -977,4 +977,269 @@ mod tests {
         document.scroll(120);
         assert!(document.view.offset < document.view.max_offset());
     }
+
+    struct NativeTestWindow(HWND);
+
+    impl Drop for NativeTestWindow {
+        fn drop(&mut self) {
+            // SAFETY: this HWND was created on the current test thread.
+            unsafe {
+                let _ = DestroyWindow(self.0);
+            }
+        }
+    }
+
+    fn native_document(screen: &DisplayInfo) -> (NativeTestWindow, HWND, PixelRect, i32) {
+        use windows::Win32::UI::Controls::{EM_GETRECT, EM_LINEINDEX, EM_POSFROMCHAR};
+        use windows::core::{PCWSTR, w};
+        let left = screen.bounds.left + 45;
+        let top = screen.bounds.top + 85;
+        let text: Vec<_> = (1..=150)
+            .map(|n| {
+                format!(
+                    "{n:03}   F11 test {:06X}   {}\r\n",
+                    n * 17011,
+                    "#".repeat(3 + n % 23)
+                )
+            })
+            .collect::<String>()
+            .encode_utf16()
+            .chain(Some(0))
+            .collect();
+        // SAFETY: a non-activating, read-only test EDIT receives only test-generated content.
+        unsafe {
+            let instance = windows::Win32::System::LibraryLoader::GetModuleHandleW(None).unwrap();
+            let parent = CreateWindowExW(
+                WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                w!("STATIC"),
+                w!("kiki F11 numbered document fixture"),
+                WS_POPUP | WS_CLIPCHILDREN,
+                left,
+                top,
+                530,
+                290,
+                None,
+                None,
+                Some(instance.into()),
+                None,
+            )
+            .unwrap();
+            let window = NativeTestWindow(parent);
+            let hwnd = CreateWindowExW(
+                WINDOW_EX_STYLE::default(),
+                w!("EDIT"),
+                w!(""),
+                WS_CHILD
+                    | WS_VISIBLE
+                    | WS_VSCROLL
+                    | WINDOW_STYLE((ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL) as u32),
+                0,
+                0,
+                530,
+                290,
+                Some(parent),
+                None,
+                Some(instance.into()),
+                None,
+            )
+            .unwrap();
+            let font = GetStockObject(ANSI_FIXED_FONT);
+            SendMessageW(hwnd, WM_SETFONT, Some(WPARAM(font.0 as usize)), None);
+            SetWindowTextW(hwnd, PCWSTR(text.as_ptr())).unwrap();
+            let _ = ShowWindow(parent, SW_SHOWNOACTIVATE);
+            let _ = UpdateWindow(parent);
+            let _ = UpdateWindow(hwnd);
+            windows::Win32::Graphics::Dwm::DwmFlush().unwrap();
+
+            let mut text_area = RECT::default();
+            SendMessageW(
+                hwnd,
+                EM_GETRECT,
+                None,
+                Some(LPARAM((&raw mut text_area) as isize)),
+            );
+            let y_at_line = |line| {
+                let start = SendMessageW(hwnd, EM_LINEINDEX, Some(WPARAM(line)), None).0;
+                assert!(start >= 0);
+                let position =
+                    SendMessageW(hwnd, EM_POSFROMCHAR, Some(WPARAM(start as usize)), None).0;
+                assert_ne!(position, -1);
+                i32::from((position >> 16) as i16)
+            };
+            let first_y = y_at_line(0);
+            let line_height = y_at_line(1) - first_y;
+            assert!(line_height > 0);
+            let rows = (text_area.bottom - first_y) / line_height;
+            assert!(rows >= 10);
+            let area = PixelRect {
+                left: left + text_area.left,
+                top: top + first_y,
+                right: left + text_area.right,
+                bottom: top + first_y + rows * line_height,
+            };
+            (window, hwnd, area, line_height)
+        }
+    }
+
+    fn wait_worker(worker: &Worker, mut accepts: impl FnMut(Reply) -> Option<Reply>) -> Reply {
+        let deadline = Instant::now() + Duration::from_secs(6);
+        loop {
+            let reply = worker
+                .shared
+                .latest
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take();
+            if let Some(reply) = reply.and_then(&mut accepts) {
+                return reply;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "native document capture reply timed out"
+            );
+            std::thread::sleep(Duration::from_millis(8));
+        }
+    }
+
+    #[test]
+    #[ignore = "uses a visible non-activating Win32 EDIT and a real SDR capture stream"]
+    fn native_document_scroll_tracks_numbered_lines_then_stops_and_restarts() {
+        use windows::Win32::UI::Controls::{EM_GETFIRSTVISIBLELINE, EM_LINESCROLL};
+        use windows::core::w;
+        super::super::tests::graphics_runtime();
+        let screen = super::super::display::enumerate()
+            .unwrap()
+            .into_iter()
+            .map(|s| s.info)
+            .find(|s| {
+                s.color == ColorMode::Sdr
+                    && s.bounds.size().is_some_and(|(w, h)| w >= 700 && h >= 480)
+            })
+            .expect("native document test needs a real SDR display");
+        println!("display={screen:?}");
+        let (document, edit, area, line_height) = native_document(&screen);
+        let first_height = area.size().unwrap().1;
+        println!("native_edit_area={area:?}, line_height_px={line_height}");
+        // SAFETY: only our own hidden owner is marked excluded and destroyed by the test guard.
+        let owner = unsafe {
+            let instance = windows::Win32::System::LibraryLoader::GetModuleHandleW(None).unwrap();
+            let hwnd = CreateWindowExW(
+                WS_EX_TOOLWINDOW,
+                w!("STATIC"),
+                w!("kiki F11 test owner"),
+                WS_POPUP,
+                0,
+                0,
+                1,
+                1,
+                None,
+                None,
+                Some(instance.into()),
+                None,
+            )
+            .unwrap();
+            let owner = NativeTestWindow(hwnd);
+            SetWindowDisplayAffinity(owner.0, WDA_EXCLUDEFROMCAPTURE).unwrap();
+            owner
+        };
+        let start = |window: &NativeTestWindow, area| {
+            Worker::start(
+                owner.0.0 as usize,
+                area,
+                screen.clone(),
+                Target::read(window.0).unwrap(),
+            )
+            .unwrap()
+        };
+        let worker = start(&document, area);
+        let accept_update = |reply| match reply {
+            Reply::Update(update) => Some(Reply::Update(update)),
+            Reply::Stopped(error) => panic!("native source stopped: {error}"),
+            _ => None,
+        };
+        let Reply::Update(initial) = wait_worker(&worker, accept_update) else {
+            unreachable!()
+        };
+        assert_eq!(initial.height, first_height);
+        println!("initial_capture_height_px={first_height}");
+        let signal = |worker: &Worker, down| {
+            worker.signal(|control| {
+                control.scroll = Some(Scroll {
+                    down,
+                    at: Instant::now(),
+                });
+            })
+        };
+        let scroll = |lines: i32| {
+            // SAFETY: all messages target the test-owned read-only document HWND.
+            let line = unsafe {
+                let result = SendMessageW(edit, EM_LINESCROLL, None, Some(LPARAM(lines as isize)));
+                assert_ne!(result.0, 0, "native EDIT rejected scrolling");
+                let _ = UpdateWindow(edit);
+                windows::Win32::Graphics::Dwm::DwmFlush().unwrap();
+                SendMessageW(edit, EM_GETFIRSTVISIBLELINE, None, None).0
+            };
+            signal(&worker, lines > 0);
+            println!("requested_lines={lines}, edit_first_line={line}");
+            usize::try_from(line).unwrap() * line_height as usize
+        };
+        let mut full_height = first_height;
+        for lines in [4; 17].into_iter().chain([-4]) {
+            let position = scroll(lines);
+            full_height = full_height.max(first_height + position as u32);
+            let reply = wait_worker(&worker, |reply| match accept_update(reply) {
+                Some(Reply::Update(ref update)) if update.message == PAUSED => panic!(
+                    "native document seam rejected at {position}, last viewport {:?}",
+                    update.viewport
+                ),
+                Some(Reply::Update(update)) if update.viewport.0 == position => {
+                    Some(Reply::Update(update))
+                }
+                Some(Reply::Update(update)) => {
+                    println!(
+                        "intermediate_viewport={:?}, expected_top={position}",
+                        update.viewport
+                    );
+                    None
+                }
+                _ => None,
+            });
+            let Reply::Update(update) = reply else {
+                unreachable!()
+            };
+            assert_eq!(update.height, full_height);
+            println!("lines={lines}, viewport_top_px={position}, stitched_height_px={full_height}");
+        }
+        drop(document);
+        signal(&worker, true);
+        let stopped = wait_worker(&worker, |reply| {
+            matches!(reply, Reply::Stopped(_)).then_some(reply)
+        });
+        let Reply::Stopped(error) = stopped else {
+            unreachable!()
+        };
+        assert!(error.message().contains("移动或关闭"));
+        println!("source_closed={}", error.message());
+        worker.signal(|control| control.finish = true);
+        let finished = wait_worker(&worker, |reply| {
+            matches!(reply, Reply::Finished(..)).then_some(reply)
+        });
+        let Reply::Finished(partial, _) = finished else {
+            unreachable!()
+        };
+        assert_eq!(partial.bounds().size().unwrap().1, full_height);
+        drop(worker);
+
+        let (next, _, next_area, _) = native_document(&screen);
+        let worker = start(&next, next_area);
+        let Reply::Update(initial) = wait_worker(&worker, accept_update) else {
+            unreachable!()
+        };
+        assert_eq!(initial.height, first_height);
+        assert_eq!(initial.viewport.0, 0);
+        println!(
+            "restarted_height_px={}, viewport_top_px={}",
+            initial.height, initial.viewport.0
+        );
+    }
 }

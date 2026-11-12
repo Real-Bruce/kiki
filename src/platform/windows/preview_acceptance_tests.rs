@@ -629,3 +629,242 @@ fn clipboard_roundtrips_picker_text_and_numbered_image() {
     }
     assert!(take_ui_errors().is_empty());
 }
+
+fn long_edit_fixture(scale_percent: i32) -> (Preview, *mut State, PixelPoint) {
+    use crate::core::long_image::{fixture, thumbnail};
+    let desktop = rect(0, 0, 900, 660);
+    let screen = DisplayInfo {
+        bounds: desktop,
+        name: "long-document-fixture".into(),
+        scale_percent,
+        rotation_degrees: 0,
+        refresh_hz: 60,
+        color: ColorMode::Sdr,
+    };
+    let (preview, state) = capture_fixture(Image::new(desktop).unwrap(), vec![screen.clone()]);
+    let mut image = fixture(1000, 0, 4350);
+    let bounds = image.bounds();
+    let stride = image.stride() as usize;
+    let sample = point(440, 4280);
+    for y in 4260..4300 {
+        for pixel in
+            image.pixels_mut()[y * stride + 420 * 4..y * stride + 460 * 4].chunks_exact_mut(4)
+        {
+            pixel.copy_from_slice(&[229, 243, 222, 255]);
+        }
+    }
+    let thumbnail = thumbnail(&image).unwrap();
+    // SAFETY: the test exclusively owns the hidden Preview and installs a finished
+    // document before dispatching any input to its HWND.
+    unsafe {
+        (*state).long_document = LongDocument::new(&screen, &image, thumbnail);
+        assert!((*state).long_document.is_some());
+        (*state).canvas.set_document(image);
+        (*state).selection = Selection::new(bounds);
+        (*state).selection.rect = Some(bounds);
+        (*state).corner_radius = 24;
+        (*state).capture_tools[Tool::Picker.index().unwrap()] = true;
+        (*state).editor.tool = Tool::Rectangle;
+        for y in [60, 2100, 4290] {
+            (*state).editor.begin_at(point(60, y), None).unwrap();
+            (*state).editor.finish(point(170, y + 30));
+        }
+    }
+    (preview, state, sample)
+}
+
+fn navigate_long_to_bottom(preview: &Preview, state: *mut State) {
+    // SAFETY: these coordinates and the live state belong to the test-owned Preview.
+    unsafe {
+        let track = (*state).long_document.as_ref().unwrap().scrollbar();
+        click(
+            preview.hwnd().unwrap(),
+            (*state).canvas.window_bounds(),
+            point(track.left + 1, track.bottom - 1),
+        );
+        let view = (*state).long_document.as_ref().unwrap().view;
+        assert!(view.scale < 1.);
+        assert_eq!(view.offset, view.max_offset());
+        assert_eq!(view.band().bottom, 4350);
+    }
+}
+
+#[test]
+fn long_document_navigation_and_rgb_use_physical_document_pixels_at_two_scales() {
+    let _com = prepare_windows();
+    for scale_percent in [100, 150] {
+        let (preview, state, sample) = long_edit_fixture(scale_percent);
+        let hwnd = preview.hwnd().unwrap();
+        navigate_long_to_bottom(&preview, state);
+        // SAFETY: the test owns this hidden Preview and dispatches only to its own HWND.
+        unsafe {
+            let view = (*state).long_document.as_ref().unwrap().view;
+            let location = view.to_screen(sample);
+            let bounds = (*state).canvas.window_bounds();
+            (*state).activate(tool_button(Tool::Picker));
+            send_mouse(hwnd, bounds, WM_MOUSEMOVE, location);
+            let readout = || {
+                let readout = (*state).picker_readout().unwrap();
+                readout.format.encode(readout.rgb.unwrap())
+            };
+            assert_eq!(readout(), "#DEF3E5");
+            SendMessageW(
+                hwnd,
+                WM_KEYDOWN,
+                Some(WPARAM(usize::from(VK_SHIFT.0))),
+                Some(LPARAM(1)),
+            );
+            SendMessageW(
+                hwnd,
+                WM_KEYUP,
+                Some(WPARAM(usize::from(VK_SHIFT.0))),
+                Some(LPARAM(1 | (3 << 30))),
+            );
+            assert_eq!(readout(), "RGB(222, 243, 229)");
+            SendMessageW(
+                hwnd,
+                WM_KEYDOWN,
+                Some(WPARAM(usize::from(VK_SHIFT.0))),
+                Some(LPARAM(1)),
+            );
+            assert_eq!(readout(), "#DEF3E5");
+        }
+    }
+    assert!(take_ui_errors().is_empty());
+}
+
+#[test]
+#[ignore = "writes RGB text to a verified empty desktop clipboard; run serially"]
+fn long_document_rgb_copies_exact_text_and_keeps_editing() {
+    let _com = prepare_windows();
+    let (preview, state, sample) = long_edit_fixture(150);
+    let hwnd = preview.hwnd().unwrap();
+    require_empty_clipboard(hwnd);
+    let _cleanup = ClearTestClipboard(hwnd);
+    navigate_long_to_bottom(&preview, state);
+    // SAFETY: the test owns the Preview, clipboard guard and all synthetic input.
+    unsafe {
+        let location = (*state)
+            .long_document
+            .as_ref()
+            .unwrap()
+            .view
+            .to_screen(sample);
+        let bounds = (*state).canvas.window_bounds();
+        (*state).activate(tool_button(Tool::Picker));
+        send_mouse(hwnd, bounds, WM_MOUSEMOVE, location);
+        SendMessageW(
+            hwnd,
+            WM_KEYDOWN,
+            Some(WPARAM(usize::from(VK_SHIFT.0))),
+            Some(LPARAM(1)),
+        );
+        click(hwnd, bounds, location);
+        pump_until(|| (*state).output.is_none());
+        assert!(preview.is_open());
+        assert!((*state).picker_notice == Some(PickerNotice::Copied));
+        let clipboard = OpenTestClipboard::open(hwnd);
+        let units: Vec<_> = clipboard
+            .data(u32::from(CF_UNICODETEXT.0))
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .take_while(|&unit| unit != 0)
+            .collect();
+        assert_eq!(String::from_utf16(&units).unwrap(), "RGB(222, 243, 229)");
+    }
+    assert!(take_ui_errors().is_empty());
+}
+
+#[test]
+fn long_document_save_cancel_locked_target_and_retry_preserve_full_output() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let _com = prepare_windows();
+    let (preview, state, _) = long_edit_fixture(150);
+    let hwnd = preview.hwnd().unwrap();
+    navigate_long_to_bottom(&preview, state);
+    let dir = std::env::temp_dir().join(format!("kiki-f11-save-retry-{}", std::process::id()));
+    std::fs::create_dir(&dir).unwrap();
+    let path = dir.join("long.png");
+    std::fs::write(&path, b"original file").unwrap();
+    let target = output::SaveTarget::new(path.clone(), OutputFormat::Png).unwrap();
+    let save = |destination| {
+        output::TEST_DIALOG.with_borrow_mut(|next| *next = Some(destination));
+        // SAFETY: the test owns the hidden Preview, which only frees State on successful output.
+        unsafe {
+            (*state).pending_output = Some(8);
+            begin_output(hwnd, state).unwrap();
+            pump_until(|| !preview.is_open() || !(*state).busy);
+        }
+    };
+    // SAFETY: snapshot these values while the test-owned Preview is still live.
+    let (offset, annotations, expected) = unsafe {
+        let source = (*state).canvas.source();
+        (
+            (*state).long_document.as_ref().unwrap().view.offset,
+            (*state).editor.objects().to_vec(),
+            composition::render(
+                &source,
+                source.bounds(),
+                &(*state).editor,
+                (*state).corner_radius,
+            )
+            .unwrap(),
+        )
+    };
+    let assert_retained = || {
+        assert!(preview.is_open());
+        // SAFETY: the liveness check above confirms this test still owns the same State.
+        unsafe {
+            assert_eq!((*state).long_document.as_ref().unwrap().view.offset, offset);
+            assert_eq!((*state).editor.objects(), annotations);
+        }
+    };
+    save(None);
+    assert_retained();
+    assert!(take_ui_errors().is_empty());
+    let locked = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(&path)
+        .unwrap();
+    save(Some(target.clone()));
+    assert_retained();
+    assert_eq!(take_ui_errors().len(), 1);
+    drop(locked);
+    assert_eq!(std::fs::read(&path).unwrap(), b"original file");
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+    save(Some(target));
+    assert!(!preview.is_open());
+    assert!(take_ui_errors().is_empty());
+    let (size, pixels) = super::super::image_encode::decode_file(&path);
+    assert_eq!(size, (1000, 4350));
+    assert_eq!(pixels, expected.pixels());
+    std::fs::remove_file(path).unwrap();
+    std::fs::remove_dir(dir).unwrap();
+}
+
+#[test]
+fn cross_screen_long_capture_requests_reselection_and_next_preview_is_ordinary() {
+    let _com = prepare_windows();
+    let (preview, state) = picker_fixture();
+    let hwnd = preview.hwnd().unwrap();
+    // SAFETY: both fixture screens and the pending long-capture action belong to the test.
+    unsafe {
+        (*state).start_long = true;
+        assert!(start_long_if_requested(hwnd, state));
+        assert!((*state).long_reselect);
+        assert!((*state).selection.rect.is_none());
+        assert!((*state).long_capture.is_none());
+        assert!((*state).long_document.is_none());
+    }
+    drop(preview);
+    let (_next, next_state) = picker_fixture();
+    // SAFETY: the fresh ordinary Preview is still live and belongs to this thread.
+    unsafe {
+        assert!(!(*next_state).long_reselect);
+        assert!((*next_state).long_document.is_none());
+        assert!((*next_state).long_capture.is_none());
+        assert!((*next_state).selection.rect.is_some());
+    }
+    assert!(take_ui_errors().is_empty());
+}
