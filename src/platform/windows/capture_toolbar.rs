@@ -20,13 +20,13 @@ const BUTTON_WIDTH: f32 = 42.;
 const BUTTON_GAP: f32 = 4.;
 const TOOLS: [usize; Tool::TOOLBAR.len()] = [1, 2, 3, 4, MOSAIC, SEQUENCE, LONG_CAPTURE, PICKER];
 const DRAWING: &[usize] = TOOLS.split_at(TOOLS.len() - 2).0;
-const PICKING: &[usize] = TOOLS.split_at(TOOLS.len() - 2).1;
-const HISTORY: &[usize] = &[UNDO];
+const UTILITIES: &[usize] = &[LONG_CAPTURE, PICKER, UNDO];
+const UNDO_ONLY: &[usize] = &[UNDO];
 const OUTPUT: &[usize] = &[7, 8, COPY];
 const CANCEL: &[usize] = &[10];
-const FULL: &[&[usize]] = &[DRAWING, PICKING, HISTORY, OUTPUT, CANCEL];
-const COLLAPSED: &[&[usize]] = &[&[MORE], HISTORY, OUTPUT, CANCEL];
-const MAX_BUTTONS: usize = TOOLS.len() + HISTORY.len() + OUTPUT.len() + CANCEL.len();
+const FULL: &[&[usize]] = &[DRAWING, UTILITIES, OUTPUT, CANCEL];
+const COLLAPSED: &[&[usize]] = &[&[MORE], UNDO_ONLY, OUTPUT, CANCEL];
+const MAX_BUTTONS: usize = TOOLS.len() + UNDO_ONLY.len() + OUTPUT.len() + CANCEL.len();
 
 pub fn tool_button(tool: Tool) -> usize {
     tool.index().map_or(0, |index| TOOLS[index])
@@ -326,12 +326,12 @@ mod tests {
                 .filter(|&id| tool_visible(tools, id))
                 .collect();
                 assert_eq!(layout.buttons().map(|b| b.id).collect::<Vec<_>>(), expected);
-                let groups = usize::from(tools[..6].iter().any(|&enabled| enabled))
-                    + usize::from(tools[6..].iter().any(|&enabled| enabled));
-                assert_eq!(layout.dividers().count(), 2 + groups);
+                let drawing_group = usize::from(tools[..6].iter().any(|&enabled| enabled));
+                assert_eq!(layout.dividers().count(), 2 + drawing_group);
                 assert_eq!(layout.overflow().count(), 0);
                 assert_eq!(layout.toolbar.intersection(display), Some(layout.toolbar));
-                let width = ((290 + mask.count_ones() * 46 + groups as u32 * 14) as f32 * scale)
+                let width = ((290 + mask.count_ones() * 46 + drawing_group as u32 * 14) as f32
+                    * scale)
                     .round() as i32;
                 assert_eq!(layout.toolbar.right - layout.toolbar.left, width);
                 for button in layout.buttons() {
@@ -350,7 +350,19 @@ mod tests {
                     preview.buttons().map(|b| b.id).collect::<Vec<_>>(),
                     expected
                 );
-                assert_eq!(preview.dividers().count(), 2 + groups);
+                assert_eq!(preview.dividers().count(), 2 + drawing_group);
+
+                for bar in [&layout, &preview] {
+                    let utilities = bar
+                        .buttons()
+                        .filter(|button| matches!(button.id, LONG_CAPTURE | PICKER | UNDO))
+                        .collect::<Vec<_>>();
+                    for pair in utilities.windows(2) {
+                        let (left, right) = (pair[0].bounds.right, pair[1].bounds.left);
+                        assert!(((right - left) as f32 - BUTTON_GAP * bar.scale).abs() < 1.);
+                        assert!(!bar.dividers().any(|x| (left..=right).contains(&x)));
+                    }
+                }
             }
         }
     }

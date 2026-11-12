@@ -40,7 +40,7 @@
 <text x="80" y="310" font-size="16" fill="#B6BAB0" font-weight="400" text-anchor="start">矩形　箭头　画笔　文字　│　撤销　│　贴图　保存　复制　│　取消</text>
 <line x1="80" y1="348" x2="1197" y2="348" stroke="#484C43" stroke-width="1"  stroke-linecap="round"/>
 <text x="80" y="393" font-size="23" fill="#F3F1EA" font-weight="600" text-anchor="start">全部开启：按固定顺序出现</text>
-<rect x="80" y="420" width="696" height="58" rx="12" fill="#262824" stroke="#484C43" stroke-width="1"/>
+<rect x="80" y="420" width="684" height="58" rx="12" fill="#262824" stroke="#484C43" stroke-width="1"/>
 <g transform="translate(99 435)">
 <path d="M3 3H25V25H3Z" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
 </g>
@@ -76,25 +76,24 @@
 <g transform="translate(447 435)">
 <path d="M19 3L26 10L21 15L14 8ZM16 11L5 22V26H9L20 15M3 28L5 26" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
 </g>
-<line x1="492" y1="435" x2="492" y2="463" stroke="#484C43" stroke-width="1"  stroke-linecap="round"/>
-<g transform="translate(507 435)">
+<g transform="translate(495 435)">
 <path d="M9 4L3 10L9 16M3 10H16C27 10 27 24 16 24H10" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
 </g>
-<line x1="552" y1="435" x2="552" y2="463" stroke="#484C43" stroke-width="1"  stroke-linecap="round"/>
-<g transform="translate(567 435)">
+<line x1="540" y1="435" x2="540" y2="463" stroke="#484C43" stroke-width="1"  stroke-linecap="round"/>
+<g transform="translate(555 435)">
 <path d="M8 3L25 20M8 3L4 7L9 12L6 19L11 22L16 16L21 21L25 20M9 21L3 27" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
 </g>
-<g transform="translate(615 435)">
+<g transform="translate(603 435)">
 <path d="M4 3H22L26 7V26H3V3H4M8 3V12H21V3M8 26V17H21V26" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
 </g>
-<g transform="translate(663 435)">
+<g transform="translate(651 435)">
 <path d="M10 3H26V21H10ZM5 8H3V27H20V24" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
 </g>
-<line x1="708" y1="435" x2="708" y2="463" stroke="#484C43" stroke-width="1"  stroke-linecap="round"/>
-<g transform="translate(723 435)">
+<line x1="696" y1="435" x2="696" y2="463" stroke="#484C43" stroke-width="1"  stroke-linecap="round"/>
+<g transform="translate(711 435)">
 <path d="M5 5L23 23M23 5L5 23" fill="none" stroke="#F3F1EA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
 </g>
-<text x="80" y="512" font-size="16" fill="#B6BAB0" font-weight="400" text-anchor="start">矩形　箭头　画笔　文字　马赛克　编号　│　长截图　取色　│　撤销　│　贴图　保存　复制　│　取消</text>
+<text x="80" y="512" font-size="16" fill="#B6BAB0" font-weight="400" text-anchor="start">矩形　箭头　画笔　文字　马赛克　编号　│　长截图　取色　撤销　│　贴图　保存　复制　│　取消</text>
 <line x1="80" y1="550" x2="1197" y2="550" stroke="#484C43" stroke-width="1"  stroke-linecap="round"/>
 <text x="80" y="595" font-size="21" fill="#F3F1EA" font-weight="600" text-anchor="start">小工作区：绘图工具收纳至“更多”</text>
 <rect x="80" y="622" width="348" height="58" rx="12" fill="#262824" stroke="#484C43" stroke-width="1"/>

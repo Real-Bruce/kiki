@@ -34,7 +34,10 @@ const baseTools=['rect','arrow','pen','text'];
 const allTools=['rect','arrow','pen','text','mosaic','number','long','picker'];
 function toolbar(x,y,tools=baseTools,selected='rect',undo=null){
  const groups=tools.length>6?[tools.slice(0,6),tools.slice(6)]:[tools];
- if(undo!==null)groups.push(['undo']);
+ if(undo!==null){
+   if(tools.length>6)groups[1].push('undo');
+   else groups.push(['undo']);
+ }
  groups.push(['pin','save','copy'],['close']);
  const w=groups.flat().length*48+24+(groups.length-1)*12;
  rect(x,y,w,58,c.panel,c.border,12);
@@ -130,7 +133,7 @@ const scenes=[
  }],
  ['s09-toolbar','S09  最终工具条与显示策略','F12 · 工具条保留撤销；Ctrl+Z 撤销，Ctrl+Y 重做',()=>{
   rect(45,140,1190,610,c.panel,c.border,14);txt(80,190,'默认：新增工具关闭，暂无可撤销操作',23,c.text,600);toolbar(80,219,baseTools,'rect',false);txt(80,310,'矩形　箭头　画笔　文字　│　撤销　│　贴图　保存　复制　│　取消',16,c.muted);
-  line(80,348,1197,348);txt(80,393,'全部开启：按固定顺序出现',23,c.text,600);toolbar(80,420,allTools,'mosaic',true);txt(80,512,'矩形　箭头　画笔　文字　马赛克　编号　│　长截图　取色　│　撤销　│　贴图　保存　复制　│　取消',16,c.muted);
+  line(80,348,1197,348);txt(80,393,'全部开启：按固定顺序出现',23,c.text,600);toolbar(80,420,allTools,'mosaic',true);txt(80,512,'矩形　箭头　画笔　文字　马赛克　编号　│　长截图　取色　撤销　│　贴图　保存　复制　│　取消',16,c.muted);
   line(80,550,1197,550);txt(80,595,'小工作区：绘图工具收纳至“更多”',21,c.text,600);toolbar(80,622,['more'],'',true);
   icon('copy',790,631,c.text);txt(835,652,'复制仅图标，不使用深色按下底色',17,c.muted);txt(835,684,'悬停、键盘焦点和失败反馈仍保留',17,c.muted);
   txt(65,795,'参数条按工具出现；关闭工具即收拢间距。下方优先，上方次之，最后安全收纳到屏幕内。',18,c.muted);
