@@ -14,7 +14,16 @@ $tag = 'v' + (Get-Content -LiteralPath VERSION -Raw).Trim()
 git diff --check
 ```
 
-验收通过后，暂存本功能的代码、`VERSION`、进度和报告，检查 `git diff --cached` 并提交。在创建带说明标签时填写面向用户的更新介绍。可以运行 `git tag -a $tag` 在编辑器中填写，也可以先把 Markdown 写到本地 `artifacts/release-notes.md`，再执行下面的命令。文件使用 UTF-8，`--cleanup=whitespace` 保留 Markdown 标题。
+验收通过后，暂存本功能的代码、`VERSION`、进度和报告，检查 `git diff --cached` 并提交。带说明标签的标题和更新条目均使用英文，标签说明会直接成为 GitHub Release 正文。
+
+可运行 `git tag -a $tag` 在编辑器中填写英文说明。需要 Markdown 标题时，先将正文保存为 UTF-8 的 `artifacts/release-notes.md`，再用 `--cleanup=whitespace` 保留标题。以下是 `v1.0.1` 的英文正文示例。
+
+```markdown
+## What's New
+
+- The About page, Windows executable, and portable ZIP now use the same version number.
+- GitHub Releases now use the notes from the version tag and include the Windows x64 portable ZIP and its SHA-256 checksum file.
+```
 
 ```powershell
 git tag -a $tag --cleanup=whitespace -F ./artifacts/release-notes.md
@@ -27,3 +36,5 @@ git status --short --branch
 ```powershell
 git push origin "refs/tags/$tag"
 ```
+
+已发布版本的正文可在 GitHub Release 页面编辑。已推送的标签继续指向原有提交。
