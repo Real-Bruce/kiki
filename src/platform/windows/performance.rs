@@ -503,7 +503,28 @@ pub fn long_images(folder: &std::path::Path) -> Result<()> {
         let mut stitch = Stitcher::new(fixture(width, 0, frame_height)).map_err(fixture_error)?;
         let frames = if output { 18 } else { 4 };
         for step in 1..=frames {
-            let frame = fixture(width, step * stride, frame_height);
+            let mut frame = fixture(width, step * stride, frame_height);
+            let repainted = !output && iteration % 2 != 0;
+            if repainted {
+                for (y, row) in frame
+                    .pixels_mut()
+                    .chunks_exact_mut(width as usize * 4)
+                    .enumerate()
+                {
+                    let edge = if (step as usize * 15..step as usize * 15 + 20).contains(&y) {
+                        60
+                    } else {
+                        240
+                    };
+                    let len = row.len();
+                    for pixel in row[len - 16..].chunks_exact_mut(4) {
+                        pixel.copy_from_slice(&[edge, edge, edge, 255]);
+                    }
+                    if (35..39).contains(&y) {
+                        row[280..300].fill(64);
+                    }
+                }
+            }
             let started = Instant::now();
             if stitch.accept(&frame, true).map_err(fixture_error)? != Step::Added {
                 return Err(fail("性能夹具未按预期拼接"));
@@ -512,7 +533,11 @@ pub fn long_images(folder: &std::path::Path) -> Result<()> {
             std::hint::black_box(&preview);
             timing(
                 iteration,
-                "stitch_to_thumbnail",
+                if repainted {
+                    "stitch_with_repaint"
+                } else {
+                    "stitch_to_thumbnail"
+                },
                 started,
                 width,
                 stitch.image().bounds().bottom,

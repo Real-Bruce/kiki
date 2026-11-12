@@ -1110,11 +1110,25 @@ impl Canvas {
             .as_ref()
             .map(|u| self.image_bitmap(&u.thumbnail))
             .transpose()?;
-        // SAFETY: the window region exposes only the panel. All drawing stays on the UI thread.
+        // SAFETY: the native window region exposes the shaded surround and preview panel.
+        // The opening shows the real scrolling application. All drawing stays on the UI thread.
         unsafe {
             self.target.BeginDraw();
             self.target
                 .Clear(Some(&tone(palette::background(self.dark), 1.)));
+            if let Some(bitmap) = self.bitmap.as_ref() {
+                self.target.DrawBitmap(
+                    bitmap,
+                    None,
+                    1.,
+                    D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+                    None,
+                );
+            }
+            self.fill(
+                self.screen_local(capture.screen.bounds),
+                tone(palette::foreground(false), 0.50),
+            );
             let panel = &capture.panel;
             self.outline(
                 self.screen_local(capture.area),

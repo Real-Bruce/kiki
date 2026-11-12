@@ -24,6 +24,8 @@ pub const TIMER: usize = 8;
 static WORKERS: AtomicUsize = AtomicUsize::new(0);
 const FRAME_UNSTABLE: windows::core::HRESULT = windows::core::HRESULT(0x8000000a_u32 as i32);
 const PAUSED: &str = "未找到可靠接缝，已保留已拼接部分。请缓慢滚回已捕获内容，或点击完成。";
+const SCROLL_QUIET: Duration = Duration::from_millis(65);
+const SCROLL_MAX_WAIT: Duration = Duration::from_millis(160);
 
 fn fail(message: &str) -> Error {
     Error::new(E_FAIL, message)
@@ -102,15 +104,18 @@ unsafe extern "system" fn wheel_hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESU
                     let keys = key_flags(0x10, 4) | key_flags(0x11, 8);
                     let delta = (mouse.mouseData >> 16) as u16 as i16;
                     let coordinates = u32::from(point.x as u16) | (u32::from(point.y as u16) << 16);
-                    let forwarded = root.0 as usize == route.target.window
-                        && route.target.valid()
-                        && PostMessageW(
-                            Some(child),
-                            WM_MOUSEWHEEL,
-                            WPARAM(((mouse.mouseData & 0xffff0000) | keys) as usize),
-                            LPARAM(coordinates as isize),
-                        )
-                        .is_ok();
+                    let same_target =
+                        root.0 as usize == route.target.window && route.target.valid();
+                    let native = same_target && GetAncestor(GetForegroundWindow(), GA_ROOT) == root;
+                    let forwarded = same_target
+                        && (native
+                            || PostMessageW(
+                                Some(child),
+                                WM_MOUSEWHEEL,
+                                WPARAM(((mouse.mouseData & 0xffff0000) | keys) as usize),
+                                LPARAM(coordinates as isize),
+                            )
+                            .is_ok());
                     let direction = if !forwarded {
                         0
                     } else if delta < 0 {
@@ -119,6 +124,9 @@ unsafe extern "system" fn wheel_hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESU
                         2
                     };
                     let _ = PostMessageW(Some(route.hwnd), SCROLLED, WPARAM(direction), LPARAM(0));
+                    if native {
+                        return CallNextHookEx(None, code, wp, lp);
+                    }
                 }
                 return LRESULT(1);
             }
@@ -181,7 +189,7 @@ impl Panel {
         }
         .max(1);
         let right = s.right - margin;
-        let left = if !edit && selection.right + margin + width <= right {
+        let mut left = if !edit && selection.right + margin + width <= right {
             selection.right + margin
         } else {
             right - width
@@ -194,12 +202,20 @@ impl Panel {
                 (s.bottom - margin - height).max(s.top + margin),
             )
         };
-        let bounds = PixelRect {
+        let mut bounds = PixelRect {
             left,
             right: left + width,
             top,
             bottom: top + height,
         };
+        if !edit
+            && bounds.intersection(selection) == Some(selection)
+            && selection.left - margin - width >= s.left + margin
+        {
+            left = selection.left - margin - width;
+            bounds.left = left;
+            bounds.right = left + width;
+        }
         let inset = margin.min(width / 8);
         let bottom = bounds.bottom - inset;
         let middle = left + width / 2;
@@ -328,6 +344,20 @@ enum Command {
     Finish,
 }
 
+#[derive(Clone, Copy)]
+struct ScrollBatch {
+    down: bool,
+    first: Instant,
+    last: Instant,
+}
+
+impl ScrollBatch {
+    fn ready(self, now: Instant) -> bool {
+        now.duration_since(self.last) >= SCROLL_QUIET
+            || now.duration_since(self.first) >= SCROLL_MAX_WAIT
+    }
+}
+
 struct Permit;
 impl Permit {
     fn acquire() -> Result<Self> {
@@ -367,8 +397,7 @@ pub struct Capture {
     running: bool,
     finishing: bool,
     pub requested: bool,
-    pending: Option<bool>,
-    deadline: Instant,
+    pending: Option<ScrollBatch>,
     worker: Worker,
     hook: Option<Hook>,
 }
@@ -386,20 +415,7 @@ impl Capture {
                 let panel = Panel::new(&screen, area, false);
                 let mut window = RECT::default();
                 GetWindowRect(hwnd, &mut window)?;
-                let r = panel.bounds;
-                let region = CreateRectRgn(
-                    r.left - window.left,
-                    r.top - window.top,
-                    r.right - window.left,
-                    r.bottom - window.top,
-                );
-                if region.is_invalid() {
-                    return Err(fail("无法创建长截图预览窗口区域"));
-                }
-                if let Err(error) = add_capture_border(region, window, area) {
-                    let _ = DeleteObject(region.into());
-                    return Err(error);
-                }
+                let region = capture_mask(window, screen.bounds, area, panel.bounds)?;
                 if SetWindowRgn(hwnd, Some(region), false) == 0 {
                     let _ = DeleteObject(region.into());
                     return Err(fail("无法隔离长截图预览窗口"));
@@ -418,6 +434,7 @@ impl Capture {
                     panel: panel.bounds,
                     ready: false,
                 }));
+                let _ = ShowWindow(hwnd, SW_SHOW);
                 let worker = Worker::start(hwnd.0 as usize, area, screen.clone(), target)?;
                 Ok(Self {
                     panel,
@@ -431,7 +448,6 @@ impl Capture {
                     finishing: false,
                     requested: false,
                     pending: None,
-                    deadline: Instant::now(),
                     worker,
                     hook: Some(hook),
                 })
@@ -439,8 +455,8 @@ impl Capture {
             if result.is_err() {
                 let _ = SetWindowRgn(hwnd, None, false);
                 let _ = SetWindowDisplayAffinity(hwnd, WDA_NONE);
+                let _ = ShowWindow(hwnd, SW_SHOW);
             }
-            let _ = ShowWindow(hwnd, SW_SHOW);
             let _ = focus_preview(hwnd);
             result
         }
@@ -450,8 +466,12 @@ impl Capture {
         if direction == 0 {
             self.stop("目标窗口已移动、被遮挡或无法接收滚轮。");
         } else if self.hook.is_some() && !self.finishing {
-            self.pending = Some(direction == 1);
-            self.deadline = Instant::now() + Duration::from_millis(160);
+            let now = Instant::now();
+            self.pending = Some(ScrollBatch {
+                down: direction == 1,
+                first: self.pending.map_or(now, |batch| batch.first),
+                last: now,
+            });
         }
     }
 
@@ -490,11 +510,12 @@ impl Capture {
             Err(TryRecvError::Empty) => {}
         }
         if !self.running {
-            let command = if self.pending.is_some() {
-                if Instant::now() < self.deadline {
+            let command = if let Some(batch) = self.pending {
+                if !batch.ready(Instant::now()) {
                     return None;
                 }
-                self.pending.take().map(Command::Sample)
+                self.pending = None;
+                Some(Command::Sample(batch.down))
             } else if self.requested && !self.finishing {
                 self.finishing = true;
                 self.hook = None;
@@ -540,32 +561,38 @@ impl Capture {
     }
 }
 
-fn add_capture_border(region: HRGN, window: RECT, area: PixelRect) -> Result<()> {
-    // SAFETY: the caller owns the destination region; each temporary GDI region is deleted here.
+fn capture_mask(
+    window: RECT,
+    screen: PixelRect,
+    area: PixelRect,
+    panel: PixelRect,
+) -> Result<HRGN> {
+    // SAFETY: each temporary GDI region is deleted here. The caller owns the returned
+    // region until it transfers ownership to Windows with SetWindowRgn.
     unsafe {
-        for (l, t, r, b) in [
-            (area.left - 2, area.top - 2, area.right + 2, area.top),
-            (area.left - 2, area.bottom, area.right + 2, area.bottom + 2),
-            (area.left - 2, area.top, area.left, area.bottom),
-            (area.right, area.top, area.right + 2, area.bottom),
-        ] {
-            let strip = CreateRectRgn(
-                l - window.left,
-                t - window.top,
-                r - window.left,
-                b - window.top,
-            );
-            if strip.is_invalid() {
-                return Err(fail("无法创建长截图边框"));
-            }
-            let result = CombineRgn(Some(region), Some(region), Some(strip), RGN_OR);
-            let _ = DeleteObject(strip.into());
-            if result == RGN_ERROR {
-                return Err(fail("无法隔离长截图边框"));
-            }
+        let create = |r: PixelRect| {
+            CreateRectRgn(
+                r.left - window.left,
+                r.top - window.top,
+                r.right - window.left,
+                r.bottom - window.top,
+            )
+        };
+        let region = create(screen);
+        let hole = create(area);
+        let preview = create(panel);
+        let valid = !region.is_invalid() && !hole.is_invalid() && !preview.is_invalid();
+        let combined = valid
+            && CombineRgn(Some(region), Some(region), Some(hole), RGN_DIFF) != RGN_ERROR
+            && CombineRgn(Some(region), Some(region), Some(preview), RGN_OR) != RGN_ERROR;
+        let _ = DeleteObject(hole.into());
+        let _ = DeleteObject(preview.into());
+        if !combined {
+            let _ = DeleteObject(region.into());
+            return Err(fail("无法建立长截图遮罩"));
         }
+        Ok(region)
     }
-    Ok(())
 }
 
 fn focus_preview(hwnd: HWND) -> HWND {
@@ -712,7 +739,7 @@ fn stable_frame(
         }
         if previous
             .as_ref()
-            .is_some_and(|last| last.pixels() == frame.pixels())
+            .is_some_and(|last| long_image::same_view(last, &frame))
         {
             return Ok(frame);
         }
@@ -747,6 +774,58 @@ mod tests {
     }
 
     #[test]
+    fn mask_keeps_surround_and_panel_but_leaves_live_content_open() {
+        let screen = screen().bounds;
+        let window = RECT {
+            left: -2100,
+            top: -400,
+            right: 1920,
+            bottom: 1080,
+        };
+        let area = PixelRect {
+            left: -1700,
+            top: 220,
+            right: -100,
+            bottom: 700,
+        };
+        let panel = PixelRect {
+            left: -290,
+            top: 140,
+            right: -12,
+            bottom: 780,
+        };
+        let mask = capture_mask(window, screen, area, panel).unwrap();
+        // SAFETY: the test owns the native region and deletes it before returning.
+        unsafe {
+            let includes = |x, y| PtInRegion(mask, x - window.left, y - window.top).as_bool();
+            let results = [
+                includes(-1850, 500),
+                !includes(-1400, 500),
+                includes(-200, 500),
+                includes(-1701, 220),
+                !includes(-1700, 220),
+                !includes(500, 500),
+            ];
+            let _ = DeleteObject(mask.into());
+            assert!(results.into_iter().all(|valid| valid));
+        }
+    }
+
+    #[test]
+    fn continuous_wheel_input_does_not_keep_postponing_samples() {
+        let first = Instant::now();
+        let mut batch = ScrollBatch {
+            down: true,
+            first,
+            last: first,
+        };
+        assert!(batch.ready(first + SCROLL_QUIET));
+        batch.last = first + SCROLL_MAX_WAIT - Duration::from_millis(15);
+        assert!(!batch.ready(batch.last));
+        assert!(batch.ready(first + SCROLL_MAX_WAIT));
+    }
+
+    #[test]
     fn right_panel_fallback_keeps_source_area_and_navigates_to_end() {
         let screen = screen();
         let mut selection = screen.bounds;
@@ -755,6 +834,14 @@ mod tests {
         assert!(beside.bounds.left > selection.right);
         let fallback = Panel::new(&screen, screen.bounds, false);
         assert!(fallback.bounds.intersection(screen.bounds) == Some(fallback.bounds));
+        let narrow_right = PixelRect {
+            left: -115,
+            right: -20,
+            top: 300,
+            bottom: 540,
+        };
+        let narrow_panel = Panel::new(&screen, narrow_right, false);
+        assert!(narrow_panel.bounds.intersection(narrow_right).is_none());
 
         let image = fixture(1700, 0, 2000);
         let thumbnail = long_image::thumbnail(&image).unwrap();

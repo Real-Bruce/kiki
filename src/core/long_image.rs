@@ -13,21 +13,128 @@ pub enum Step {
 
 pub struct Stitcher {
     image: Image,
-    rows: Vec<u64>,
+    rows: Vec<RowKey>,
     frame_height: usize,
     viewed: usize,
 }
 
-fn fingerprint(row: &[u8]) -> u64 {
+type RowKey = [u64; 3];
+
+fn fingerprint(row: &[u8]) -> RowKey {
     let width = row.len() / 4;
-    let step = (width / 64).max(1);
-    (0..width)
-        .step_by(step)
-        .fold(0xcbf29ce484222325, |hash, x| {
-            let i = x * 4;
-            let rgb = u32::from_le_bytes([row[i], row[i + 1], row[i + 2], row[i + 3]]);
-            (hash ^ u64::from(rgb)).wrapping_mul(0x100000001b3)
+    let inset = (width / 16).min(48);
+    let body = width - 2 * inset;
+    std::array::from_fn(|lane| {
+        let start = inset + body * lane / 3;
+        let end = inset + body * (lane + 1) / 3;
+        (start..end)
+            .step_by(((end - start) / 32).max(1))
+            .fold(0xcbf29ce484222325, |hash, x| {
+                let i = x * 4;
+                let rgb = u32::from_le_bytes([row[i], row[i + 1], row[i + 2], row[i + 3]]);
+                (hash ^ u64::from(rgb)).wrapping_mul(0x100000001b3)
+            })
+    })
+}
+
+fn matching_lanes(a: RowKey, b: RowKey) -> usize {
+    a.into_iter().zip(b).filter(|(a, b)| a == b).count()
+}
+
+/// Compare consecutive samples at zero displacement. Scrollbar animation and very small
+/// repaints can settle independently from the document.
+pub fn same_view(previous: &Image, current: &Image) -> bool {
+    if previous.bounds() != current.bounds() {
+        return false;
+    }
+    if previous.pixels() == current.pixels() {
+        return true;
+    }
+    let stride = current.stride() as usize;
+    let mut budget = current.pixels().len() / stride * 3 / 100;
+    previous
+        .pixels()
+        .chunks_exact(stride)
+        .zip(current.pixels().chunks_exact(stride))
+        .all(|(a, b)| {
+            if a == b {
+                return true;
+            }
+            let different = 3 - matching_lanes(fingerprint(a), fingerprint(b));
+            if different > budget {
+                return false;
+            }
+            budget -= different;
+            true
         })
+}
+
+fn enough_detail(rows: impl IntoIterator<Item = RowKey>) -> bool {
+    let mut distinct = [None; 4];
+    for row in rows {
+        if distinct.contains(&Some(row)) {
+            continue;
+        }
+        if let Some(slot) = distinct.iter_mut().find(|slot| slot.is_none()) {
+            *slot = Some(row);
+            if distinct[3].is_some() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn coarse_match(old: &[RowKey], new: &[RowKey], changes: &[usize]) -> bool {
+    let changes = &changes[..changes.partition_point(|&y| y < old.len())];
+    let samples = changes.len().min(24);
+    if samples < 3 {
+        return false;
+    }
+    let mut checked = 0;
+    let mut matched = 0;
+    for n in 0..samples {
+        let y = changes[n * changes.len() / samples];
+        for lane in 0..3 {
+            if new[y - 1][lane] != new[y][lane] {
+                checked += 1;
+                matched += usize::from(
+                    new[y - 1][lane] == old[y - 1][lane] && new[y][lane] == old[y][lane],
+                );
+            }
+        }
+    }
+    matched * 100 >= checked * 68
+}
+
+fn reliable_overlap(old: &[RowKey], new: &[RowKey]) -> bool {
+    let mut matched = 0;
+    let mut transitions = 0;
+    let mut aligned_transitions = 0;
+    for (y, (a, b)) in old.iter().zip(new).enumerate() {
+        matched += matching_lanes(*a, *b);
+        if y == 0 {
+            continue;
+        }
+        for lane in 0..3 {
+            let previous = old[y - 1][lane];
+            let incoming = new[y - 1][lane];
+            if previous != a[lane] || incoming != b[lane] {
+                transitions += 1;
+                aligned_transitions += usize::from(previous == incoming && a[lane] == b[lane]);
+            }
+        }
+    }
+    // Flat background alone cannot establish a seam. Most changes between consecutive
+    // rows must align as well, and there must be several distinct matching rows.
+    matched * 100 >= old.len() * 3 * 94
+        && aligned_transitions >= 6
+        && aligned_transitions * 100 >= transitions * 80
+        && enough_detail(
+            old.iter()
+                .zip(new)
+                .filter_map(|(a, b)| (a == b).then_some(*a)),
+        )
 }
 
 impl Stitcher {
@@ -111,6 +218,40 @@ impl Stitcher {
             }
             found = Some((offset, overlap));
         }
+        if found.is_none() && frame.stride() >= 64 * 4 {
+            let mut changes = Vec::new();
+            changes
+                .try_reserve_exact(height)
+                .map_err(|_| "没有足够内存检查长截图接缝")?;
+            changes.extend((1..height).filter(|&y| hashes[y - 1] != hashes[y]));
+            let mut plausible = 0;
+            for offset in start..=end {
+                if !down && offset > self.viewed {
+                    break;
+                }
+                let overlap = (self.rows.len() - offset).min(height);
+                if overlap < min_overlap {
+                    continue;
+                }
+                let old = &self.rows[offset..offset + overlap];
+                let new = &hashes[..overlap];
+                if !coarse_match(old, new, &changes) {
+                    continue;
+                }
+                plausible += 1;
+                // Repeated or largely empty pages can generate many candidates. Keep
+                // the search bounded and pause if the alignment is ambiguous.
+                if plausible > 64 {
+                    return Ok(Step::Unmatched);
+                }
+                if reliable_overlap(old, new) {
+                    if found.is_some() {
+                        return Ok(Step::Unmatched);
+                    }
+                    found = Some((offset, overlap));
+                }
+            }
+        }
         let Some((offset, overlap)) = found else {
             return Ok(Step::Unmatched);
         };
@@ -118,18 +259,7 @@ impl Stitcher {
             self.viewed = offset;
             return Ok(Step::Known);
         }
-        let mut distinct = [None; 4];
-        for &value in &hashes[..overlap] {
-            if distinct.contains(&Some(value)) {
-                continue;
-            }
-            if let Some(slot) = distinct.iter_mut().find(|slot| slot.is_none()) {
-                *slot = Some(value);
-            } else {
-                break;
-            }
-        }
-        if distinct[3].is_none() {
+        if !enough_detail(hashes[..overlap].iter().copied()) {
             return Ok(Step::Unmatched);
         }
         let max_rows = MAX_HEIGHT.min(MAX_BYTES / stride);
@@ -237,6 +367,84 @@ pub fn fixture(width: i32, top: i32, height: i32) -> Image {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn document_view(top: usize, scrollbar: usize) -> Image {
+        let width = 480;
+        let mut image = fixture(width, 0, 280);
+        for (y, row) in image
+            .pixels_mut()
+            .chunks_exact_mut(width as usize * 4)
+            .enumerate()
+        {
+            let line = (top + y) / 19;
+            let within_line = (top + y) % 19;
+            for (x, px) in row.chunks_exact_mut(4).enumerate() {
+                let ink = within_line < 10
+                    && x > 30
+                    && x < 150 + (line * 97 % 270)
+                    && (x + line * 5 + within_line * 11) % 23 > 5;
+                let slider = x > 469 && (scrollbar..scrollbar + 28).contains(&y);
+                let gray = if ink || slider { 30 } else { 250 };
+                px.copy_from_slice(&[gray, gray, gray, 255]);
+            }
+        }
+        image
+    }
+
+    #[test]
+    fn scrolling_text_stitches_with_a_moving_scrollbar_and_a_small_repaint() {
+        let initial = document_view(0, 0);
+        let mut next = document_view(89, 23);
+        let stride = next.stride() as usize;
+        for y in 50..54 {
+            next.pixels_mut()[y * stride + 212 * 4..y * stride + 220 * 4].fill(80);
+        }
+        let mut stitch = Stitcher::new(initial).unwrap();
+        assert_eq!(stitch.accept(&next, true).unwrap(), Step::Added);
+        assert_eq!(stitch.viewport(), (89, 280));
+        assert_eq!(
+            &stitch.image().pixels()[280 * stride..],
+            &next.pixels()[191 * stride..]
+        );
+        assert_eq!(
+            stitch.accept(&document_view(89, 65), true).unwrap(),
+            Step::Known
+        );
+        assert_eq!(
+            stitch.accept(&document_view(41, 15), false).unwrap(),
+            Step::Known
+        );
+        assert_eq!(stitch.image().bounds().bottom, 369);
+        assert_eq!(
+            stitch.accept(&document_view(1500, 99), true).unwrap(),
+            Step::Unmatched
+        );
+    }
+
+    #[test]
+    fn stability_ignores_scrollbar_animation_but_detects_body_movement() {
+        let initial = document_view(0, 0);
+        assert!(same_view(&initial, &document_view(0, 55)));
+        assert!(!same_view(&initial, &document_view(1, 55)));
+    }
+
+    #[test]
+    fn dirty_gutters_do_not_turn_repeated_patterns_into_a_seam() {
+        let pattern = |shift: usize, gutter: u8| {
+            let mut image = fixture(256, 0, 200);
+            for (y, row) in image.pixels_mut().chunks_exact_mut(1024).enumerate() {
+                row.fill(((y + shift) % 8) as u8);
+                row[1000..].fill(gutter);
+            }
+            image
+        };
+        let mut stitch = Stitcher::new(pattern(0, 0)).unwrap();
+        assert_eq!(
+            stitch.accept(&pattern(3, 1), true).unwrap(),
+            Step::Unmatched
+        );
+        assert_eq!(stitch.image().bounds().bottom, 200);
+    }
 
     #[test]
     fn stitches_without_duplicates_on_reverse_and_repeated_frames() {
