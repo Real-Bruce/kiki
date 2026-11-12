@@ -1580,10 +1580,13 @@ fn dispatch_long_capture(
     unsafe {
         let capture = (*pointer).long_capture.as_mut()?;
         match msg {
-            long_capture::SCROLLED => capture.scrolled(wp.0),
+            long_capture::SCROLLED => {
+                if !capture.scrolled(wp.0) {
+                    return Some(LRESULT(0));
+                }
+            }
             WM_TIMER if wp.0 == long_capture::TIMER => match capture.tick() {
                 Some(long_capture::Reply::Update(update)) => capture.update(update),
-                Some(long_capture::Reply::Paused(error)) => capture.message = error.message(),
                 Some(long_capture::Reply::Stopped(error)) => capture.stop(&error.message()),
                 Some(long_capture::Reply::Finished(image, thumbnail)) => {
                     if let Some(document) = LongDocument::new(&capture.screen, &image, thumbnail) {

@@ -10,7 +10,10 @@ use std::{
 use windows::{
     Foundation::TypedEventHandler,
     Graphics::{
-        Capture::{Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession},
+        Capture::{
+            Direct3D11CaptureFrame, Direct3D11CaptureFramePool, GraphicsCaptureItem,
+            GraphicsCaptureSession,
+        },
         DirectX::{Direct3D11::IDirect3DDevice, DirectXPixelFormat},
     },
     Win32::{
@@ -71,32 +74,20 @@ fn check_cancel(cancel: &AtomicBool) -> Result<()> {
 }
 
 pub fn desktop_with_cancel(cancel: &AtomicBool) -> Result<CaptureResult> {
-    desktop_inner(cancel, || {}, None)
+    desktop_inner(cancel, || {})
 }
 
 #[cfg(feature = "diagnostics")]
 pub fn cancel_after_start() -> Result<()> {
     let cancel = AtomicBool::new(false);
-    match desktop_inner(&cancel, || cancel.store(true, Ordering::Release), None) {
+    match desktop_inner(&cancel, || cancel.store(true, Ordering::Release)) {
         Err(error) if error.code() == E_ABORT => Ok(()),
         Err(error) => Err(error),
         Ok(_) => Err(fail("取消后仍返回了捕获结果")),
     }
 }
 
-pub fn long_frame(
-    cancel: &AtomicBool,
-    area: PixelRect,
-    screen: &crate::core::display::DisplayInfo,
-) -> Result<Image> {
-    Ok(desktop_inner(cancel, || {}, Some((area, screen)))?.image)
-}
-
-fn desktop_inner(
-    cancel: &AtomicBool,
-    on_started: impl FnOnce(),
-    region: Option<(PixelRect, &crate::core::display::DisplayInfo)>,
-) -> Result<CaptureResult> {
+fn desktop_inner(cancel: &AtomicBool, on_started: impl FnOnce()) -> Result<CaptureResult> {
     #[cfg(feature = "diagnostics")]
     let start = Instant::now();
     let mut on_started = Some(on_started);
@@ -107,18 +98,7 @@ fn desktop_inner(
     }
     let _apartment = Apartment;
     let screens = display::enumerate()?;
-    let windows = if region.is_some() {
-        Vec::new()
-    } else {
-        super::window_targets::enumerate()?
-    };
-    if let Some((area, expected)) = region
-        && !screens
-            .iter()
-            .any(|s| &s.info == expected && s.info.bounds.intersection(area) == Some(area))
-    {
-        return Err(fail("显示器配置已变化，请结束长截图"));
-    }
+    let windows = super::window_targets::enumerate()?;
     for screen in &screens {
         if screen.info.color != crate::core::display::ColorMode::Sdr {
             return Err(fail(
@@ -143,29 +123,8 @@ fn desktop_inner(
             bottom: r.bottom.max(s.bottom),
         }
     });
-    let bounds = region.map_or(bounds, |(area, _)| area);
     let mut image = Image::new(bounds).map_err(|e| fail(&e))?;
-    let mut device = None;
-    let mut context = None;
-    // SAFETY: output COM pointers are initialized by D3D11; no borrowed GPU data escapes.
-    unsafe {
-        D3D11CreateDevice(
-            None,
-            D3D_DRIVER_TYPE_HARDWARE,
-            HMODULE::default(),
-            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-            None,
-            D3D11_SDK_VERSION,
-            Some(&mut device),
-            None,
-            Some(&mut context),
-        )?;
-    }
-    let device = device.ok_or_else(|| fail("无法创建设备"))?;
-    let context = context.ok_or_else(|| fail("无法创建设备上下文"))?;
-    let dxgi: IDXGIDevice = device.cast()?;
-    // SAFETY: DXGI interface is backed by this worker's live D3D11 device.
-    let rt: IDirect3DDevice = unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi)?.cast()? };
+    let (device, context, rt) = capture_device()?;
     let interop: IGraphicsCaptureItemInterop =
         factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
     for screen in &screens {
@@ -307,3 +266,251 @@ fn desktop_inner(
         windows,
     })
 }
+
+fn capture_device() -> Result<(ID3D11Device, ID3D11DeviceContext, IDirect3DDevice)> {
+    let mut device = None;
+    let mut context = None;
+    // SAFETY: output COM pointers are initialized by D3D11; no borrowed GPU data escapes.
+    unsafe {
+        D3D11CreateDevice(
+            None,
+            D3D_DRIVER_TYPE_HARDWARE,
+            HMODULE::default(),
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            None,
+            D3D11_SDK_VERSION,
+            Some(&mut device),
+            None,
+            Some(&mut context),
+        )?;
+    }
+    let device = device.ok_or_else(|| fail("无法创建设备"))?;
+    let context = context.ok_or_else(|| fail("无法创建设备上下文"))?;
+    let dxgi: IDXGIDevice = device.cast()?;
+    // SAFETY: DXGI interface is backed by this worker's live D3D11 device.
+    let rt: IDirect3DDevice = unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi)?.cast()? };
+    Ok((device, context, rt))
+}
+
+/// One WGC session for a fixed viewport. Only the selected pixels are read back,
+/// and the same staging texture and destination buffer are reused across frames.
+pub struct RegionStream {
+    guard: CaptureGuard,
+    ready: mpsc::Receiver<()>,
+    context: ID3D11DeviceContext,
+    staging: ID3D11Texture2D,
+    source: D3D11_BOX,
+    monitor_size: (u32, u32),
+    area: PixelRect,
+    _apartment: Apartment,
+}
+
+impl RegionStream {
+    pub fn validate_display(
+        area: PixelRect,
+        expected: &crate::core::display::DisplayInfo,
+    ) -> Result<()> {
+        if !display::enumerate()?
+            .into_iter()
+            .any(|s| &s.info == expected && s.info.bounds.intersection(area) == Some(area))
+        {
+            return Err(fail("显示器配置已变化，请结束长截图"));
+        }
+        Ok(())
+    }
+
+    pub fn open(area: PixelRect, expected: &crate::core::display::DisplayInfo) -> Result<Self> {
+        // SAFETY: this stream lives and drops entirely on its owning capture worker.
+        unsafe {
+            CoInitializeEx(None, COINIT_MULTITHREADED).ok()?;
+        }
+        let apartment = Apartment;
+        let screen = display::enumerate()?
+            .into_iter()
+            .find(|s| &s.info == expected && s.info.bounds.intersection(area) == Some(area))
+            .ok_or_else(|| fail("显示器配置已变化，请结束长截图"))?;
+        if screen.info.color != crate::core::display::ColorMode::Sdr
+            || !GraphicsCaptureSession::IsSupported()?
+        {
+            return Err(fail("当前显示器不支持 SDR 长截图"));
+        }
+        let monitor_size = screen
+            .info
+            .bounds
+            .size()
+            .ok_or_else(|| fail("显示器尺寸无效"))?;
+        let (width, height) = area.size().ok_or_else(|| fail("长截图选区无效"))?;
+        let left = (i64::from(area.left) - i64::from(screen.info.bounds.left)) as u32;
+        let top = (i64::from(area.top) - i64::from(screen.info.bounds.top)) as u32;
+        let source = D3D11_BOX {
+            left,
+            top,
+            front: 0,
+            right: left + width,
+            bottom: top + height,
+            back: 1,
+        };
+        let (device, context, rt) = capture_device()?;
+        let interop = factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
+        // SAFETY: this HMONITOR is from the current display configuration.
+        let item: GraphicsCaptureItem = unsafe { interop.CreateForMonitor(screen.monitor)? };
+        let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
+            &rt,
+            DirectXPixelFormat::B8G8R8A8UIntNormalized,
+            2,
+            item.Size()?,
+        )?;
+        let session = pool.CreateCaptureSession(&item)?;
+        let guard = CaptureGuard { pool, session };
+        guard.session.SetIsCursorCaptureEnabled(false)?;
+        let mut staging = None;
+        // SAFETY: these dimensions are the validated ROI, and staging is an initialized out-parameter.
+        unsafe {
+            device.CreateTexture2D(
+                &D3D11_TEXTURE2D_DESC {
+                    Width: width,
+                    Height: height,
+                    MipLevels: 1,
+                    ArraySize: 1,
+                    Format: Common::DXGI_FORMAT_B8G8R8A8_UNORM,
+                    SampleDesc: Common::DXGI_SAMPLE_DESC {
+                        Count: 1,
+                        Quality: 0,
+                    },
+                    Usage: D3D11_USAGE_STAGING,
+                    CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
+                    ..Default::default()
+                },
+                None,
+                Some(&mut staging),
+            )?;
+        }
+        let staging = staging.ok_or_else(|| fail("无法创建长截图读回纹理"))?;
+        let (tx, ready) = mpsc::sync_channel(1);
+        guard
+            .pool
+            .FrameArrived(&TypedEventHandler::new(move |_, _| {
+                let _ = tx.try_send(());
+                Ok(())
+            }))?;
+        guard.session.StartCapture()?;
+        Ok(Self {
+            guard,
+            ready,
+            context,
+            staging,
+            source,
+            monitor_size,
+            area,
+            _apartment: apartment,
+        })
+    }
+
+    fn next_frame(&self) -> Result<Option<Direct3D11CaptureFrame>> {
+        match self.guard.pool.TryGetNextFrame() {
+            Ok(frame) => Ok(Some(frame)),
+            // An empty WGC pool returns success with a null frame. windows-rs
+            // represents that null WinRT interface as an empty error.
+            Err(error) if error.code().is_ok() => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    pub fn read(&self, image: &mut Image, timeout: Duration, cancel: &AtomicBool) -> Result<bool> {
+        check_cancel(cancel)?;
+        let frame = match self.next_frame()? {
+            Some(frame) => frame,
+            None => {
+                if let Err(error) = self.ready.recv_timeout(timeout) {
+                    return match error {
+                        mpsc::RecvTimeoutError::Timeout => Ok(false),
+                        mpsc::RecvTimeoutError::Disconnected => Err(fail("长截图捕获通知已断开")),
+                    };
+                }
+                let Some(frame) = self.next_frame()? else {
+                    return Ok(false);
+                };
+                frame
+            }
+        };
+        let result = self.copy(&frame, image, cancel);
+        let close = frame.Close();
+        result.and(close)?;
+        Ok(true)
+    }
+
+    fn copy(
+        &self,
+        frame: &Direct3D11CaptureFrame,
+        image: &mut Image,
+        cancel: &AtomicBool,
+    ) -> Result<()> {
+        check_cancel(cancel)?;
+        let size = frame.ContentSize()?;
+        if (size.Width as u32, size.Height as u32) != self.monitor_size {
+            return Err(fail("长截图显示尺寸已变化，请重新框选"));
+        }
+        if image.bounds() != self.area {
+            return Err(fail("长截图像素缓冲尺寸不一致"));
+        }
+        let access: IDirect3DDxgiInterfaceAccess = frame.Surface()?.cast()?;
+        // SAFETY: the retained frame backs the source texture throughout the checked subregion copy.
+        // The staging texture is mapped only on this worker and is unmapped on every path.
+        unsafe {
+            let texture: ID3D11Texture2D = access.GetInterface()?;
+            let mut desc = D3D11_TEXTURE2D_DESC::default();
+            texture.GetDesc(&mut desc);
+            if desc.Width < self.source.right
+                || desc.Height < self.source.bottom
+                || desc.Format != Common::DXGI_FORMAT_B8G8R8A8_UNORM
+                || desc.SampleDesc.Count != 1
+            {
+                return Err(fail("长截图纹理尺寸或格式已变化"));
+            }
+            self.context.CopySubresourceRegion(
+                &self.staging,
+                0,
+                0,
+                0,
+                0,
+                &texture,
+                0,
+                Some(&self.source),
+            );
+            let mut map = D3D11_MAPPED_SUBRESOURCE::default();
+            self.context
+                .Map(&self.staging, 0, D3D11_MAP_READ, 0, Some(&mut map))?;
+            let result = (|| {
+                let stride = image.stride() as usize;
+                let pitch = map.RowPitch as usize;
+                let height = (self.source.bottom - self.source.top) as usize;
+                if map.pData.is_null()
+                    || pitch < stride
+                    || pitch
+                        .checked_mul(height)
+                        .is_none_or(|size| size > isize::MAX as usize)
+                {
+                    return Err(fail("长截图读回步长无效"));
+                }
+                for (y, dst) in image.pixels_mut().chunks_exact_mut(stride).enumerate() {
+                    if y % 64 == 0 {
+                        check_cancel(cancel)?;
+                    }
+                    let src =
+                        std::slice::from_raw_parts(map.pData.cast::<u8>().add(y * pitch), stride);
+                    dst.copy_from_slice(src);
+                    for pixel in dst.chunks_exact_mut(4) {
+                        pixel[3] = 255;
+                    }
+                }
+                Ok(())
+            })();
+            self.context.Unmap(&self.staging, 0);
+            result
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "capture_stream_tests.rs"]
+mod tests;

@@ -8,9 +8,9 @@ use crate::core::{
 use std::{
     cell::Cell,
     sync::{
-        Arc,
+        Arc, Mutex, PoisonError,
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        mpsc::{self, Receiver, SyncSender, TryRecvError},
+        mpsc::{self, Receiver, SyncSender},
     },
     time::{Duration, Instant},
 };
@@ -22,10 +22,12 @@ use windows::{
 pub const SCROLLED: u32 = WM_APP + 73;
 pub const TIMER: usize = 8;
 static WORKERS: AtomicUsize = AtomicUsize::new(0);
-const FRAME_UNSTABLE: windows::core::HRESULT = windows::core::HRESULT(0x8000000a_u32 as i32);
 const PAUSED: &str = "未找到可靠接缝，已保留已拼接部分。请缓慢滚回已捕获内容，或点击完成。";
-const SCROLL_QUIET: Duration = Duration::from_millis(65);
-const SCROLL_MAX_WAIT: Duration = Duration::from_millis(160);
+const SCROLL_TAIL: Duration = Duration::from_millis(320);
+const SCROLL_MAX_TAIL: Duration = Duration::from_millis(700);
+const FRAME_QUIET: Duration = Duration::from_millis(100);
+const FRAME_WAIT: Duration = Duration::from_millis(12);
+const PREVIEW_INTERVAL: Duration = Duration::from_millis(50);
 
 fn fail(message: &str) -> Error {
     Error::new(E_FAIL, message)
@@ -334,27 +336,71 @@ pub struct Update {
 
 pub enum Reply {
     Update(Update),
-    Paused(Error),
     Stopped(Error),
     Finished(Image, Image),
 }
 
-enum Command {
-    Sample(bool),
-    Finish,
-}
-
 #[derive(Clone, Copy)]
-struct ScrollBatch {
+struct Scroll {
     down: bool,
-    first: Instant,
-    last: Instant,
+    at: Instant,
 }
 
-impl ScrollBatch {
-    fn ready(self, now: Instant) -> bool {
-        now.duration_since(self.last) >= SCROLL_QUIET
-            || now.duration_since(self.first) >= SCROLL_MAX_WAIT
+struct ScrollBurst {
+    scroll: Scroll,
+    last: Option<Step>,
+    changed: bool,
+    previewed: bool,
+    last_progress: Instant,
+}
+
+impl ScrollBurst {
+    fn new(scroll: Scroll) -> Self {
+        Self {
+            scroll,
+            last: None,
+            changed: false,
+            previewed: false,
+            last_progress: scroll.at,
+        }
+    }
+
+    fn observe(&mut self, stitch: &mut Stitcher, frame: &Image) -> Result<Step> {
+        let previous = stitch.viewport();
+        let result = stitch
+            .accept(frame, self.scroll.down)
+            .map_err(|e| fail(&e))?;
+        self.last = Some(result);
+        if previous != stitch.viewport() {
+            self.changed = true;
+            self.last_progress = Instant::now();
+        }
+        Ok(result)
+    }
+
+    fn settled(&self, now: Instant) -> bool {
+        let since_wheel = now.duration_since(self.scroll.at);
+        since_wheel >= SCROLL_MAX_TAIL
+            || since_wheel >= SCROLL_TAIL && now.duration_since(self.last_progress) >= FRAME_QUIET
+    }
+}
+
+#[derive(Default)]
+struct Control {
+    scroll: Option<Scroll>,
+    finish: bool,
+    stop: bool,
+}
+
+#[derive(Default)]
+struct Shared {
+    control: Mutex<Control>,
+    latest: Mutex<Option<Reply>>,
+}
+
+impl Shared {
+    fn publish(&self, reply: Reply) {
+        *self.latest.lock().unwrap_or_else(PoisonError::into_inner) = Some(reply);
     }
 }
 
@@ -377,12 +423,13 @@ impl Drop for Permit {
 
 struct Worker {
     cancel: Arc<AtomicBool>,
-    commands: SyncSender<Command>,
-    replies: Receiver<Reply>,
+    shared: Arc<Shared>,
+    wake: SyncSender<()>,
 }
 impl Drop for Worker {
     fn drop(&mut self) {
         self.cancel.store(true, Ordering::Release);
+        let _ = self.wake.try_send(());
     }
 }
 
@@ -394,10 +441,7 @@ pub struct Capture {
     target: Target,
     pub update: Option<Update>,
     pub message: String,
-    running: bool,
-    finishing: bool,
     pub requested: bool,
-    pending: Option<ScrollBatch>,
     worker: Worker,
     hook: Option<Hook>,
 }
@@ -444,10 +488,7 @@ impl Capture {
                     target,
                     update: None,
                     message: "正在获取首帧…".into(),
-                    running: true,
-                    finishing: false,
                     requested: false,
-                    pending: None,
                     worker,
                     hook: Some(hook),
                 })
@@ -462,24 +503,27 @@ impl Capture {
         }
     }
 
-    pub fn scrolled(&mut self, direction: usize) {
+    pub fn scrolled(&mut self, direction: usize) -> bool {
+        if self.hook.is_none() || self.requested {
+            return false;
+        }
         if direction == 0 {
             self.stop("目标窗口已移动、被遮挡或无法接收滚轮。");
-        } else if self.hook.is_some() && !self.finishing {
-            let now = Instant::now();
-            self.pending = Some(ScrollBatch {
-                down: direction == 1,
-                first: self.pending.map_or(now, |batch| batch.first),
-                last: now,
-            });
+            return true;
         }
+        self.worker.signal(|control| {
+            control.scroll = Some(Scroll {
+                down: direction == 1,
+                at: Instant::now(),
+            });
+        });
+        false
     }
 
     pub fn stop(&mut self, reason: &str) {
-        self.pending = None;
         self.hook = None;
         self.requested = false;
-        self.finishing = false;
+        self.worker.signal(|control| control.stop = true);
         self.message = reason.to_owned();
     }
 
@@ -489,6 +533,7 @@ impl Capture {
             route.ready = false;
             ROUTE.set(Some(route));
         }
+        self.worker.signal(|control| control.finish = true);
     }
 
     pub fn tick(&mut self) -> Option<Reply> {
@@ -496,42 +541,12 @@ impl Capture {
             self.stop("目标窗口已移动或关闭。请结束长截图。");
             return Some(Reply::Stopped(fail("目标窗口已移动或关闭。请结束长截图。")));
         }
-        match self.worker.replies.try_recv() {
-            Ok(reply) => {
-                self.running = false;
-                return Some(reply);
-            }
-            Err(TryRecvError::Disconnected) => {
-                if self.running {
-                    self.running = false;
-                    return Some(Reply::Stopped(fail("长截图工作线程已退出")));
-                }
-            }
-            Err(TryRecvError::Empty) => {}
-        }
-        if !self.running {
-            let command = if let Some(batch) = self.pending {
-                if !batch.ready(Instant::now()) {
-                    return None;
-                }
-                self.pending = None;
-                Some(Command::Sample(batch.down))
-            } else if self.requested && !self.finishing {
-                self.finishing = true;
-                self.hook = None;
-                Some(Command::Finish)
-            } else {
-                None
-            };
-            if let Some(command) = command {
-                if self.worker.commands.try_send(command).is_ok() {
-                    self.running = true;
-                } else {
-                    return Some(Reply::Stopped(fail("无法继续长截图")));
-                }
-            }
-        }
-        None
+        self.worker
+            .shared
+            .latest
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
     }
 
     pub fn update(&mut self, update: Update) {
@@ -546,7 +561,6 @@ impl Capture {
             self.message = update.message.into();
             if update.full {
                 self.hook = None;
-                self.pending = None;
             }
         }
         self.update = Some(update);
@@ -606,100 +620,229 @@ fn focus_preview(hwnd: HWND) -> HWND {
 impl Worker {
     fn start(owner: usize, area: PixelRect, screen: DisplayInfo, target: Target) -> Result<Self> {
         let permit = Permit::acquire()?;
-        let (commands, rx) = mpsc::sync_channel(1);
-        let (tx, replies) = mpsc::sync_channel(1);
+        let (wake, input) = mpsc::sync_channel(1);
         let cancel = Arc::new(AtomicBool::new(false));
         let token = cancel.clone();
+        let shared = Arc::new(Shared::default());
+        let worker = shared.clone();
         std::thread::Builder::new()
             .name("kiki-long-capture".into())
             .spawn(move || {
                 let _permit = permit;
-                let result = (|| {
-                    let initial = stable_frame(owner, area, &screen, target, &token)?;
-                    let mut stitch = Stitcher::new(initial).map_err(|e| fail(&e))?;
-                    let mut terminal = false;
-                    let update = make_update(&stitch, "在正文区域慢慢滚动，避开固定页头和底栏。")?;
-                    if tx.send(Reply::Update(update)).is_err() {
-                        return Ok(());
-                    }
-                    while !token.load(Ordering::Acquire) {
-                        match rx.recv() {
-                            Ok(Command::Sample(down)) if !terminal => {
-                                let sampled = stable_frame(owner, area, &screen, target, &token);
-                                let response = match sampled {
-                                    Ok(frame) => match stitch.accept(&frame, down) {
-                                        Ok(step) => {
-                                            let message = match step {
-                                                Step::Added => {
-                                                    "已追加新内容。可继续滚动或点击完成。"
-                                                }
-                                                Step::Known => {
-                                                    "当前位置已捕获。可继续滚动或点击完成。"
-                                                }
-                                                Step::Unmatched => PAUSED,
-                                                Step::Limit => {
-                                                    terminal = true;
-                                                    "已达到长图上限。点击完成保留当前长图。"
-                                                }
-                                            };
-                                            match make_update(&stitch, message) {
-                                                Ok(mut update) => {
-                                                    update.full = terminal;
-                                                    Reply::Update(update)
-                                                }
-                                                Err(error) => {
-                                                    terminal = true;
-                                                    Reply::Stopped(error)
-                                                }
-                                            }
-                                        }
-                                        Err(error) => {
-                                            terminal = true;
-                                            Reply::Stopped(fail(&error))
-                                        }
-                                    },
-                                    Err(error) if error.code() == FRAME_UNSTABLE => {
-                                        Reply::Paused(error)
-                                    }
-                                    Err(error) => {
-                                        terminal = true;
-                                        Reply::Stopped(error)
-                                    }
-                                };
-                                if tx.send(response).is_err() {
-                                    return Ok(());
-                                }
-                            }
-                            Ok(Command::Sample(_)) => {
-                                if tx
-                                    .send(Reply::Stopped(fail("已停止追加，请点击完成")))
-                                    .is_err()
-                                {
-                                    return Ok(());
-                                }
-                            }
-                            Ok(Command::Finish) => {
-                                let thumbnail =
-                                    long_image::thumbnail(stitch.image()).map_err(|e| fail(&e))?;
-                                let _ = tx.send(Reply::Finished(stitch.into_image(), thumbnail));
-                                return Ok(());
-                            }
-                            Err(_) => return Ok(()),
-                        }
-                    }
-                    Ok(())
-                })();
-                if let Err(error) = result {
-                    let _ = tx.send(Reply::Stopped(error));
+                if let Err(error) =
+                    run_capture(owner, area, &screen, target, &token, &worker, &input)
+                    && !token.load(Ordering::Acquire)
+                {
+                    worker.publish(Reply::Stopped(error));
                 }
             })
             .map_err(|e| fail(&format!("无法启动长截图：{e}")))?;
         Ok(Self {
             cancel,
-            commands,
-            replies,
+            shared,
+            wake,
         })
     }
+
+    fn signal(&self, update: impl FnOnce(&mut Control)) {
+        {
+            let mut control = self
+                .shared
+                .control
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            update(&mut control);
+        }
+        let _ = self.wake.try_send(());
+    }
+}
+
+fn check_target(owner: usize, target: Target) -> Result<()> {
+    verify_exclusion(owner)?;
+    if !target.valid() {
+        return Err(fail("目标窗口已移动或关闭"));
+    }
+    Ok(())
+}
+
+fn run_capture(
+    owner: usize,
+    area: PixelRect,
+    screen: &DisplayInfo,
+    target: Target,
+    cancel: &AtomicBool,
+    shared: &Shared,
+    wake: &Receiver<()>,
+) -> Result<()> {
+    use super::capture::RegionStream;
+    let mut initial = Image::new(area).map_err(|e| fail(&e))?;
+    check_target(owner, target)?;
+    let first_stream = RegionStream::open(area, screen)?;
+    let start = Instant::now();
+    loop {
+        if first_stream.read(&mut initial, FRAME_WAIT, cancel)? {
+            break;
+        }
+        if start.elapsed() >= Duration::from_secs(3) {
+            return Err(fail("等待长截图首帧超时，请重新截图"));
+        }
+    }
+    check_target(owner, target)?;
+    let mut stitch = Stitcher::new(initial).map_err(|e| fail(&e))?;
+    let mut frame = Image::new(area).map_err(|e| fail(&e))?;
+    let mut stream = Some(first_stream);
+    shared.publish(Reply::Update(make_update(
+        &stitch,
+        "在正文区域滚动，避开固定页头和底栏。",
+    )?));
+    let mut last_preview = Instant::now();
+    let mut last_display_check = last_preview;
+    let mut burst: Option<ScrollBurst> = None;
+    let mut was_paused = false;
+    loop {
+        if cancel.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        let (scroll, finish, stop) = {
+            let mut control = shared
+                .control
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            (control.scroll.take(), control.finish, control.stop)
+        };
+        if stop {
+            stream = None;
+            burst = None;
+        }
+        if let Some(scroll) = scroll.filter(|_| stream.is_some()) {
+            match burst.as_mut() {
+                Some(active) => active.scroll = scroll,
+                None => burst = Some(ScrollBurst::new(scroll)),
+            }
+        }
+        let Some(active) = burst.as_mut() else {
+            if finish {
+                drop(stream);
+                match long_image::thumbnail(stitch.image()) {
+                    Ok(thumbnail) => {
+                        shared.publish(Reply::Finished(stitch.into_image(), thumbnail));
+                        return Ok(());
+                    }
+                    Err(error) => {
+                        stream = None;
+                        let mut control = shared
+                            .control
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner);
+                        control.finish = false;
+                        control.stop = true;
+                        drop(control);
+                        shared.publish(Reply::Stopped(fail(&error)));
+                    }
+                }
+            }
+            if wake.recv().is_err() {
+                return Ok(());
+            }
+            continue;
+        };
+        let Some(source) = stream.as_ref() else {
+            burst = None;
+            continue;
+        };
+        let sampled = if last_display_check.elapsed() >= Duration::from_secs(1) {
+            last_display_check = Instant::now();
+            RegionStream::validate_display(area, screen)
+        } else {
+            Ok(())
+        }
+        .and_then(|()| check_target(owner, target))
+        .and_then(|()| source.read(&mut frame, FRAME_WAIT, cancel))
+        .and_then(|read| {
+            if read {
+                check_target(owner, target).map(|()| true)
+            } else {
+                Ok(false)
+            }
+        });
+        let status = match sampled {
+            Ok(true) => active.observe(&mut stitch, &frame).map(Some),
+            Ok(false) => Ok(None),
+            Err(error) => Err(error),
+        };
+        match status {
+            Ok(Some(Step::Limit)) => {
+                stream = None;
+                burst = None;
+                let reply = match make_update(&stitch, "已达到长图上限。点击完成保留当前长图。")
+                {
+                    Ok(mut update) => {
+                        update.full = true;
+                        Reply::Update(update)
+                    }
+                    Err(error) => Reply::Stopped(error),
+                };
+                shared.publish(reply);
+                continue;
+            }
+            Err(error) => {
+                stream = None;
+                burst = None;
+                shared.publish(Reply::Stopped(error));
+                continue;
+            }
+            _ => {}
+        }
+        let now = Instant::now();
+        if active.changed && now.duration_since(last_preview) >= PREVIEW_INTERVAL {
+            if let Err(error) = publish_preview(shared, &stitch, "正在拼接长图，可继续滚动。")
+            {
+                stream = None;
+                burst = None;
+                shared.publish(Reply::Stopped(error));
+                continue;
+            }
+            last_preview = now;
+            active.changed = false;
+            active.previewed = true;
+            was_paused = false;
+        }
+        if active.settled(now) {
+            if shared
+                .control
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .scroll
+                .is_some()
+            {
+                continue;
+            }
+            // An animation can produce temporary mismatches. Only announce a
+            // gap if the last frame still cannot be aligned after scrolling.
+            let gap = active.last == Some(Step::Unmatched);
+            if gap || active.changed || active.previewed || was_paused && active.last.is_some() {
+                let message = if gap {
+                    PAUSED
+                } else {
+                    "当前位置已捕获。可继续滚动或点击完成。"
+                };
+                if let Err(error) = publish_preview(shared, &stitch, message) {
+                    stream = None;
+                    shared.publish(Reply::Stopped(error));
+                }
+                last_preview = now;
+            }
+            if active.last.is_some() {
+                was_paused = gap;
+            }
+            burst = None;
+        }
+    }
+}
+
+fn publish_preview(shared: &Shared, stitch: &Stitcher, message: &'static str) -> Result<()> {
+    shared.publish(Reply::Update(make_update(stitch, message)?));
+    Ok(())
 }
 
 fn make_update(stitch: &Stitcher, message: &'static str) -> Result<Update> {
@@ -714,42 +857,6 @@ fn make_update(stitch: &Stitcher, message: &'static str) -> Result<Update> {
         message,
         full: false,
     })
-}
-
-fn stable_frame(
-    owner: usize,
-    area: PixelRect,
-    screen: &DisplayInfo,
-    target: Target,
-    cancel: &AtomicBool,
-) -> Result<Image> {
-    let mut previous: Option<Image> = None;
-    for _ in 0..4 {
-        if cancel.load(Ordering::Acquire) {
-            return Err(Error::new(E_ABORT, "长截图已取消"));
-        }
-        verify_exclusion(owner)?;
-        if !target.valid() {
-            return Err(fail("目标窗口已移动或关闭"));
-        }
-        let frame = super::capture::long_frame(cancel, area, screen)?;
-        verify_exclusion(owner)?;
-        if !target.valid() {
-            return Err(fail("目标窗口已移动或关闭"));
-        }
-        if previous
-            .as_ref()
-            .is_some_and(|last| long_image::same_view(last, &frame))
-        {
-            return Ok(frame);
-        }
-        previous = Some(frame);
-        std::thread::sleep(Duration::from_millis(45));
-    }
-    Err(Error::new(
-        FRAME_UNSTABLE,
-        "画面尚未稳定，已保留当前内容。请减慢滚动或点击完成。",
-    ))
 }
 
 #[cfg(test)]
@@ -812,17 +919,30 @@ mod tests {
     }
 
     #[test]
-    fn continuous_wheel_input_does_not_keep_postponing_samples() {
-        let first = Instant::now();
-        let mut batch = ScrollBatch {
+    fn continuous_scroll_can_append_frames_even_without_a_stable_pair() {
+        let start = Instant::now();
+        let mut burst = ScrollBurst::new(Scroll {
             down: true,
-            first,
-            last: first,
-        };
-        assert!(batch.ready(first + SCROLL_QUIET));
-        batch.last = first + SCROLL_MAX_WAIT - Duration::from_millis(15);
-        assert!(!batch.ready(batch.last));
-        assert!(batch.ready(first + SCROLL_MAX_WAIT));
+            at: start,
+        });
+        let mut stitch = Stitcher::new(fixture(240, 0, 220)).unwrap();
+        let jump = fixture(240, 360, 220);
+        assert_eq!(stitch.accept(&jump, true).unwrap(), Step::Unmatched);
+        let bad = fixture(240, 10_000, 220);
+        assert_eq!(burst.observe(&mut stitch, &bad).unwrap(), Step::Unmatched);
+        for offset in [90, 180, 270, 360] {
+            assert_eq!(
+                burst
+                    .observe(&mut stitch, &fixture(240, offset, 220))
+                    .unwrap(),
+                Step::Added
+            );
+        }
+        burst.last_progress = start + Duration::from_millis(290);
+        assert!(!burst.settled(start + Duration::from_millis(100)));
+        assert!(!burst.settled(start + SCROLL_TAIL));
+        assert!(burst.settled(start + Duration::from_millis(390)));
+        assert_eq!(stitch.image().pixels(), fixture(240, 0, 580).pixels());
     }
 
     #[test]

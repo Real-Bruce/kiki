@@ -41,34 +41,6 @@ fn matching_lanes(a: RowKey, b: RowKey) -> usize {
     a.into_iter().zip(b).filter(|(a, b)| a == b).count()
 }
 
-/// Compare consecutive samples at zero displacement. Scrollbar animation and very small
-/// repaints can settle independently from the document.
-pub fn same_view(previous: &Image, current: &Image) -> bool {
-    if previous.bounds() != current.bounds() {
-        return false;
-    }
-    if previous.pixels() == current.pixels() {
-        return true;
-    }
-    let stride = current.stride() as usize;
-    let mut budget = current.pixels().len() / stride * 3 / 100;
-    previous
-        .pixels()
-        .chunks_exact(stride)
-        .zip(current.pixels().chunks_exact(stride))
-        .all(|(a, b)| {
-            if a == b {
-                return true;
-            }
-            let different = 3 - matching_lanes(fingerprint(a), fingerprint(b));
-            if different > budget {
-                return false;
-            }
-            budget -= different;
-            true
-        })
-}
-
 fn enough_detail(rows: impl IntoIterator<Item = RowKey>) -> bool {
     let mut distinct = [None; 4];
     for row in rows {
@@ -419,13 +391,6 @@ mod tests {
             stitch.accept(&document_view(1500, 99), true).unwrap(),
             Step::Unmatched
         );
-    }
-
-    #[test]
-    fn stability_ignores_scrollbar_animation_but_detects_body_movement() {
-        let initial = document_view(0, 0);
-        assert!(same_view(&initial, &document_view(0, 55)));
-        assert!(!same_view(&initial, &document_view(1, 55)));
     }
 
     #[test]
