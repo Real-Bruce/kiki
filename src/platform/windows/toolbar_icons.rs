@@ -1,20 +1,17 @@
 //! Outline shapes measured against the capture design, in toolbar DIPs.
 use super::{
-    capture_toolbar::{BUTTON_HEIGHT, LONG_CAPTURE, Layout, MORE, MOSAIC, PICKER, SEQUENCE},
+    capture_toolbar::{BUTTON_HEIGHT, COPY, LONG_CAPTURE, Layout, MORE, MOSAIC, PICKER, SEQUENCE},
     ui_palette as palette,
 };
 use crate::core::{geometry::PixelRect, selection::PixelPoint};
 use windows::{
-    Win32::Graphics::{
-        Direct2D::{Common::*, *},
-        DirectWrite::*,
-    },
+    Win32::Graphics::Direct2D::{Common::*, *},
     core::Result,
 };
 use windows_numerics::{Matrix3x2, Vector2};
 
 pub(super) struct ToolbarIcons {
-    paths: [ID2D1PathGeometry; 10],
+    paths: [Option<ID2D1PathGeometry>; 10],
     picker: ID2D1PathGeometry,
     stroke: ID2D1StrokeStyle,
 }
@@ -78,18 +75,6 @@ const TEXT: &[Figure] = &[
     Figure((0., -7.4), &[L((0., 7.4))], false),
     Figure((-2.7, 7.4), &[L((2.7, 7.4))], false),
 ];
-const UNDO: &[Figure] = &[
-    Figure(
-        (-7.5, -3.8),
-        &[
-            L((0.8, -3.8)),
-            C((8.3, -3.8), (9.3, 7.3), (0.6, 7.3)),
-            L((-2.2, 7.3)),
-        ],
-        false,
-    ),
-    Figure((-3.4, -7.9), &[L((-7.5, -3.8)), L((-3.4, 0.3))], false),
-];
 const PIN: &[Figure] = &[
     Figure(
         (-0.8, -5.8),
@@ -136,7 +121,7 @@ const SAVE: &[Figure] = &[
         false,
     ),
 ];
-const COPY: &[Figure] = &[
+const COPY_ICON: &[Figure] = &[
     Figure(
         (-4.1, -7.9),
         &[
@@ -193,13 +178,10 @@ impl ToolbarIcons {
                 },
                 None,
             )?;
-            let path = |figures: &[Figure], mirror: bool| -> Result<ID2D1PathGeometry> {
+            let path = |figures: &[Figure]| -> Result<ID2D1PathGeometry> {
                 let geometry = factory.CreatePathGeometry()?;
                 let sink = geometry.Open()?;
-                let point = |(x, y): Point| Vector2 {
-                    X: if mirror { -x } else { x },
-                    Y: y,
-                };
+                let point = |(x, y): Point| Vector2 { X: x, Y: y };
                 for Figure(start, segments, closed) in figures {
                     sink.BeginFigure(point(*start), D2D1_FIGURE_BEGIN_HOLLOW);
                     for segment in *segments {
@@ -223,18 +205,18 @@ impl ToolbarIcons {
             };
             Ok(Self {
                 paths: [
-                    path(RECTANGLE, false)?,
-                    path(ARROW, false)?,
-                    path(PEN, false)?,
-                    path(TEXT, false)?,
-                    path(UNDO, false)?,
-                    path(UNDO, true)?,
-                    path(PIN, false)?,
-                    path(SAVE, false)?,
-                    path(COPY, false)?,
-                    path(CLOSE, false)?,
+                    Some(path(RECTANGLE)?),
+                    Some(path(ARROW)?),
+                    Some(path(PEN)?),
+                    Some(path(TEXT)?),
+                    None,
+                    None,
+                    Some(path(PIN)?),
+                    Some(path(SAVE)?),
+                    Some(path(COPY_ICON)?),
+                    Some(path(CLOSE)?),
                 ],
-                picker: path(EYEDROPPER, false)?,
+                picker: path(EYEDROPPER)?,
                 stroke,
             })
         }
@@ -333,7 +315,10 @@ impl ToolbarIcons {
             let path = if index == PICKER {
                 Some(&self.picker)
             } else {
-                index.checked_sub(1).and_then(|i| self.paths.get(i))
+                index
+                    .checked_sub(1)
+                    .and_then(|i| self.paths.get(i))
+                    .and_then(Option::as_ref)
             };
             let Some(path) = path else {
                 return;
@@ -362,8 +347,6 @@ pub(super) struct BarState {
     pub hover: Option<usize>,
     pub pressed: Option<usize>,
     pub focus: usize,
-    pub undo: bool,
-    pub redo: bool,
     pub busy: bool,
 }
 
@@ -371,7 +354,6 @@ pub(super) struct BarPaint<'a> {
     pub target: &'a ID2D1RenderTarget,
     pub brush: &'a ID2D1SolidColorBrush,
     pub icons: &'a ToolbarIcons,
-    pub text: &'a IDWriteTextFormat,
     pub dark: bool,
 }
 
@@ -393,7 +375,7 @@ impl BarPaint<'_> {
             radiusY: radius,
         };
         // SAFETY: target and brush are owned by the current settings or preview
-        // paint pass. Text and geometry are consumed synchronously on this UI thread.
+        // paint pass. Geometry is consumed synchronously on this UI thread.
         unsafe {
             self.brush.SetColor(&color(palette::background(dark), 1.));
             self.target.FillRoundedRectangle(&panel, self.brush);
@@ -425,25 +407,20 @@ impl BarPaint<'_> {
                     radiusX: 7. * scale,
                     radiusY: 7. * scale,
                 };
-                let active = !state.busy
-                    && match id {
-                        5 => state.undo,
-                        6 => state.redo,
-                        _ => true,
-                    };
+                let active = !state.busy;
                 let over = state.hover == Some(id);
                 let selected = id == state.selected
                     || id == MORE && layout.overflow().any(|id| id == state.selected);
                 let down = over && active && state.pressed == Some(id);
-                let background = match (id == 9, active) {
-                    (true, false) => Some(palette::selected(dark)),
-                    (true, true) if down => Some(palette::accent_pressed(dark)),
-                    (true, true) if over => Some(palette::accent_hover(dark)),
-                    (true, true) => Some(palette::accent(dark)),
-                    _ if down => Some(palette::pressed(dark)),
-                    _ if over && active => Some(palette::hover(dark)),
-                    _ if selected => Some(palette::selected(dark)),
-                    _ => None,
+                // Copy keeps the hover treatment throughout the click.
+                let background = if down && id != COPY {
+                    Some(palette::pressed(dark))
+                } else if over && active {
+                    Some(palette::hover(dark))
+                } else if selected {
+                    Some(palette::selected(dark))
+                } else {
+                    None
                 };
                 if let Some(background) = background {
                     self.brush.SetColor(&color(background, 1.));
@@ -451,8 +428,6 @@ impl BarPaint<'_> {
                 }
                 let foreground = if !active {
                     color(palette::muted(dark), 0.58)
-                } else if id == 9 {
-                    color(palette::on_accent(dark), 1.)
                 } else if selected {
                     color(palette::accent(dark), 1.)
                 } else {
@@ -463,31 +438,7 @@ impl BarPaint<'_> {
                     X: (b.left + b.right) / 2.,
                     Y: (b.top + b.bottom) / 2.,
                 };
-                if id == 9 {
-                    self.icons.draw(
-                        self.target,
-                        self.brush,
-                        id,
-                        Vector2 {
-                            X: center.X - 18. * scale,
-                            ..center
-                        },
-                        scale,
-                    );
-                    self.target.DrawText(
-                        &['复' as u16, '制' as u16],
-                        self.text,
-                        &D2D_RECT_F {
-                            left: center.X - 14. * scale,
-                            ..b
-                        },
-                        self.brush,
-                        D2D1_DRAW_TEXT_OPTIONS_NONE,
-                        DWRITE_MEASURING_MODE_NATURAL,
-                    );
-                } else {
-                    self.icons.draw(self.target, self.brush, id, center, scale);
-                }
+                self.icons.draw(self.target, self.brush, id, center, scale);
                 if state.focus == id {
                     self.brush.SetColor(&color(palette::accent(dark), 1.));
                     self.target.DrawRoundedRectangle(

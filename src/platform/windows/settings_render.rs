@@ -219,7 +219,6 @@ pub struct Canvas {
     brush: ID2D1SolidColorBrush,
     factory: IDWriteFactory,
     toolbar_icons: ToolbarIcons,
-    toolbar_text: IDWriteTextFormat,
     _device: std::rc::Rc<super::pinned_device::Device>,
 }
 impl Canvas {
@@ -232,7 +231,6 @@ impl Canvas {
             let target: ID2D1RenderTarget = context.cast()?;
             let brush = target.CreateSolidColorBrush(&color(0), None)?;
             let factory = DWriteCreateFactory::<IDWriteFactory>(DWRITE_FACTORY_TYPE_SHARED)?;
-            let toolbar_text = super::selection_render::format(&factory, 1.)?;
             let toolbar_icons = ToolbarIcons::new(&target.GetFactory()?)?;
             Ok(Self {
                 target,
@@ -242,7 +240,6 @@ impl Canvas {
                 brush,
                 factory,
                 toolbar_icons,
-                toolbar_text,
             })
         }
     }
@@ -300,14 +297,10 @@ impl Canvas {
         dark: bool,
     ) {
         let layout = Layout::preview(bounds, capture_tools);
-        let compact_text = (layout.scale < 1.)
-            .then(|| super::selection_render::format(&self.factory, layout.scale).ok())
-            .flatten();
         BarPaint {
             target: &self.target,
             brush: &self.brush,
             icons: &self.toolbar_icons,
-            text: compact_text.as_ref().unwrap_or(&self.toolbar_text),
             dark,
         }
         .draw(&layout, PixelPoint { x: 0, y: 0 }, BarState::default());

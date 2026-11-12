@@ -69,7 +69,7 @@ pub(super) fn pump_until(mut done: impl FnMut() -> bool) {
     }
 }
 
-fn click(hwnd: HWND, bounds: PixelRect, point: PixelPoint) {
+pub(super) fn click(hwnd: HWND, bounds: PixelRect, point: PixelPoint) {
     send_mouse(hwnd, bounds, WM_LBUTTONDOWN, point);
     send_mouse(hwnd, bounds, WM_LBUTTONUP, point);
 }

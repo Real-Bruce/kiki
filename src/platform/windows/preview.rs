@@ -296,8 +296,6 @@ impl State {
             7..=9 => {
                 self.pending_output = Some(index);
             }
-            5 => self.editor.undo(),
-            6 => self.editor.redo(),
             10 => return true,
             _ => {}
         }
@@ -1413,7 +1411,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                             false
                         }
                         13 => {
-                            state.pending_output = Some(9);
+                            state.pending_output = Some(capture_toolbar::COPY);
                             false
                         }
                         80 if GetKeyState(VK_CONTROL.0 as i32) < 0 => {
@@ -2746,7 +2744,7 @@ mod tests {
             assert_eq!(state.editor.tool, Tool::Select);
             // End the existing draft before exercising toolbar keyboard navigation.
             (*pointer).text_input = None;
-            for expected in [3, 5, 7, 8, 9, 10, 2] {
+            for expected in [3, 7, 8, capture_toolbar::COPY, 10, 2] {
                 SendMessageW(hwnd, WM_KEYDOWN, Some(WPARAM(9)), None);
                 assert_eq!((*pointer).focus, expected);
             }
@@ -3002,8 +3000,31 @@ mod tests {
             assert!(preview.is_open());
             assert_eq!((*p).editor.objects(), objects);
             assert_eq!(GetClipboardSequenceNumber(), sequence);
-            (*p).pending_output = Some(9);
-            begin_output(hwnd, p).unwrap();
+            let copy = (*p)
+                .layout()
+                .unwrap()
+                .buttons()
+                .find(|button| button.id == capture_toolbar::COPY)
+                .unwrap()
+                .bounds;
+            acceptance_tests::click(
+                hwnd,
+                bounds,
+                PixelPoint {
+                    x: (copy.left + copy.right) / 2,
+                    y: (copy.top + copy.bottom) / 2,
+                },
+            );
+            assert!((*p).busy);
+            pump_until_done(&preview);
+            assert!(preview.is_open());
+            assert_eq!((*p).editor.objects(), objects);
+            assert!(take_ui_errors()[0].contains("占用"));
+
+            (*p).focus = capture_toolbar::COPY;
+            (*p).keyboard_focus = true;
+            SendMessageW(hwnd, WM_KEYDOWN, Some(WPARAM(13)), None);
+            assert!((*p).busy);
             pump_until_done(&preview);
             CloseClipboard().unwrap();
             DestroyWindow(locker).unwrap();

@@ -5,6 +5,7 @@ use crate::core::{
     selection::{PixelPoint, contains, toolbar},
 };
 
+pub const COPY: usize = 9;
 pub const MORE: usize = 21;
 pub const MOSAIC: usize = 22;
 pub const SEQUENCE: usize = 23;
@@ -14,16 +15,16 @@ pub const BUTTON_HEIGHT: f32 = 36.;
 pub const BAR_HEIGHT: f32 = 48.;
 const PARAM_HEIGHT: f32 = 42.;
 const PARAM_WIDTH: f32 = 506.;
+const BUTTON_WIDTH: f32 = 42.;
 const BUTTON_GAP: f32 = 4.;
 const TOOLS: [usize; Tool::TOOLBAR.len()] = [1, 2, 3, 4, MOSAIC, SEQUENCE, LONG_CAPTURE, PICKER];
 const DRAWING: &[usize] = TOOLS.split_at(TOOLS.len() - 2).0;
 const PICKING: &[usize] = TOOLS.split_at(TOOLS.len() - 2).1;
-const HISTORY: &[usize] = &[5, 6];
-const OUTPUT: &[usize] = &[7, 8, 9];
+const OUTPUT: &[usize] = &[7, 8, COPY];
 const CANCEL: &[usize] = &[10];
-const FULL: &[&[usize]] = &[DRAWING, PICKING, HISTORY, OUTPUT, CANCEL];
-const COLLAPSED_TOOLS: &[&[usize]] = &[&[MORE], HISTORY, OUTPUT, CANCEL];
-const COLLAPSED_ALL: &[&[usize]] = &[&[MORE], OUTPUT, CANCEL];
+const FULL: &[&[usize]] = &[DRAWING, PICKING, OUTPUT, CANCEL];
+const COLLAPSED: &[&[usize]] = &[&[MORE], OUTPUT, CANCEL];
+const MAX_BUTTONS: usize = TOOLS.len() + OUTPUT.len() + CANCEL.len();
 
 pub fn tool_button(tool: Tool) -> usize {
     tool.index().map_or(0, |index| TOOLS[index])
@@ -45,8 +46,6 @@ pub fn tool_visible(capture_tools: [bool; Tool::TOOLBAR.len()], id: usize) -> bo
 
 pub fn enabled(editor: &Editor, id: usize) -> bool {
     match id {
-        5 => editor.can_undo(),
-        6 => editor.can_redo(),
         11..=18 => editor.tool.has_color(),
         19..=20 => editor.tool.parameter().is_some(),
         7..=10 | MORE => true,
@@ -56,19 +55,13 @@ pub fn enabled(editor: &Editor, id: usize) -> bool {
 
 pub fn name(id: usize) -> &'static str {
     match id {
-        5 => "撤销（Ctrl+Z）",
-        6 => "重做（Ctrl+Y）",
         7 => "贴图",
         8 => "保存（Ctrl+S）",
-        9 => "复制",
+        COPY => "复制（Enter）",
         10 => "取消（Esc）",
         MORE => "更多",
         _ => toolbar_tool(id).map_or("", Tool::label),
     }
-}
-
-fn width(id: usize) -> f32 {
-    if id == 9 { 83. } else { 42. }
 }
 
 fn bar_width(
@@ -80,12 +73,8 @@ fn bar_width(
     let mut groups = groups
         .iter()
         .map(|group| {
-            group
-                .iter()
-                .copied()
-                .filter(|&id| visible(id))
-                .map(|id| width(id) + BUTTON_GAP)
-                .sum::<f32>()
+            group.iter().copied().filter(|&id| visible(id)).count() as f32
+                * (BUTTON_WIDTH + BUTTON_GAP)
         })
         .filter(|&width| width > 0.);
     let first = groups.next().unwrap_or(0.) - BUTTON_GAP;
@@ -107,9 +96,9 @@ pub struct Layout {
     pub toolbar: PixelRect,
     pub parameters: Option<PixelRect>,
     pub screen: PixelRect,
-    buttons: [Option<Button>; TOOLS.len() + HISTORY.len() + OUTPUT.len() + CANCEL.len()],
+    buttons: [Option<Button>; MAX_BUTTONS],
     dividers: [Option<i32>; FULL.len() - 1],
-    overflow: [Option<usize>; TOOLS.len() + HISTORY.len()],
+    overflow: [Option<usize>; TOOLS.len()],
     pub scale: f32,
     pub parameter_scale: f32,
     parameter_tool: Tool,
@@ -142,33 +131,19 @@ impl Layout {
         let available = (i64::from(screen.right) - i64::from(screen.left)) as f32;
         let available_height = (i64::from(screen.bottom) - i64::from(screen.top)) as f32;
         let mut groups = FULL;
-        let mut padding = 18.;
-        let mut group_gap = 18.;
-        let mut overflow = [None; TOOLS.len() + HISTORY.len()];
-        if allow_overflow && bar_width(FULL, visible, padding, group_gap) * preferred > available {
-            if capture_tools.into_iter().any(|enabled| enabled) {
-                groups = COLLAPSED_TOOLS;
-                for (slot, id) in overflow
-                    .iter_mut()
-                    .zip(TOOLS.iter().copied().filter(|&id| visible(id)))
-                {
-                    *slot = Some(id);
-                }
-            }
-            if bar_width(groups, visible, padding, group_gap) * preferred > available {
-                groups = COLLAPSED_ALL;
-                padding = 12.;
-                group_gap = 14.;
-                overflow.fill(None);
-                for (slot, id) in overflow.iter_mut().zip(
-                    TOOLS
-                        .iter()
-                        .chain(HISTORY)
-                        .copied()
-                        .filter(|&id| visible(id)),
-                ) {
-                    *slot = Some(id);
-                }
+        let padding = 18.;
+        let group_gap = 18.;
+        let mut overflow = [None; TOOLS.len()];
+        if allow_overflow
+            && capture_tools.into_iter().any(|enabled| enabled)
+            && bar_width(FULL, visible, padding, group_gap) * preferred > available
+        {
+            groups = COLLAPSED;
+            for (slot, id) in overflow
+                .iter_mut()
+                .zip(TOOLS.iter().copied().filter(|&id| visible(id)))
+            {
+                *slot = Some(id);
             }
         }
         let bar_dip = bar_width(groups, visible, padding, group_gap);
@@ -205,7 +180,7 @@ impl Layout {
         let x = |offset: f32| left + (offset * scale).round() as i32;
         let y = |offset: f32| area.top + (offset * scale).round() as i32;
         let mut offset = padding;
-        let mut buttons = [None; TOOLS.len() + HISTORY.len() + OUTPUT.len() + CANCEL.len()];
+        let mut buttons = [None; MAX_BUTTONS];
         let mut button_count = 0;
         let mut dividers = [None; FULL.len() - 1];
         let present = groups
@@ -217,18 +192,17 @@ impl Layout {
                 offset += group_gap - BUTTON_GAP;
             }
             for id in group.iter().copied().filter(|&id| visible(id)) {
-                let button_width = width(id);
                 buttons[button_count] = Some(Button {
                     id,
                     bounds: PixelRect {
                         left: x(offset),
-                        right: x(offset + button_width),
+                        right: x(offset + BUTTON_WIDTH),
                         top: y((BAR_HEIGHT - BUTTON_HEIGHT) / 2.),
                         bottom: y((BAR_HEIGHT + BUTTON_HEIGHT) / 2.),
                     },
                 });
                 button_count += 1;
-                offset += button_width + BUTTON_GAP;
+                offset += BUTTON_WIDTH + BUTTON_GAP;
             }
         }
         let param_left = center(parameter_px);
@@ -338,11 +312,9 @@ mod tests {
                     SEQUENCE,
                     LONG_CAPTURE,
                     PICKER,
-                    5,
-                    6,
                     7,
                     8,
-                    9,
+                    COPY,
                     10,
                 ]
                 .into_iter()
@@ -351,14 +323,15 @@ mod tests {
                 assert_eq!(layout.buttons().map(|b| b.id).collect::<Vec<_>>(), expected);
                 let groups = usize::from(tools[..6].iter().any(|&enabled| enabled))
                     + usize::from(tools[6..].iter().any(|&enabled| enabled));
-                assert_eq!(layout.dividers().count(), 2 + groups);
+                assert_eq!(layout.dividers().count(), 1 + groups);
                 assert_eq!(layout.overflow().count(), 0);
                 assert_eq!(layout.toolbar.intersection(display), Some(layout.toolbar));
-                let width = ((377 + mask.count_ones() * 46 + groups as u32 * 14) as f32 * scale)
+                let width = ((230 + mask.count_ones() * 46 + groups as u32 * 14) as f32 * scale)
                     .round() as i32;
                 assert_eq!(layout.toolbar.right - layout.toolbar.left, width);
                 for button in layout.buttons() {
                     let b = button.bounds;
+                    assert!(((b.right - b.left) as f32 - BUTTON_WIDTH * scale).abs() < 1.);
                     assert_eq!(
                         layout.button_at(PixelPoint {
                             x: (b.left + b.right) / 2,
@@ -367,6 +340,12 @@ mod tests {
                         Some(button.id),
                     );
                 }
+                let preview = Layout::preview(rect(0, 0, 660, 48), tools);
+                assert_eq!(
+                    preview.buttons().map(|b| b.id).collect::<Vec<_>>(),
+                    expected
+                );
+                assert_eq!(preview.dividers().count(), 1 + groups);
             }
         }
     }
@@ -388,18 +367,15 @@ mod tests {
         );
         assert_eq!(
             medium.buttons().map(|b| b.id).collect::<Vec<_>>(),
-            [MORE, 5, 6, 7, 8, 9, 10]
+            [MORE, 7, 8, COPY, 10]
         );
 
         let display = rect(-660, 0, 640, 900);
         let narrow = Layout::new(selection, display, 2., Tool::Mosaic, tools);
-        assert_eq!(
-            narrow.overflow().collect::<Vec<_>>(),
-            [1, 3, 4, MOSAIC, 5, 6]
-        );
+        assert_eq!(narrow.overflow().collect::<Vec<_>>(), [1, 3, 4, MOSAIC]);
         assert_eq!(
             narrow.buttons().map(|b| b.id).collect::<Vec<_>>(),
-            [MORE, 7, 8, 9, 10]
+            [MORE, 7, 8, COPY, 10]
         );
         assert_eq!(narrow.dividers().count(), 2);
         assert_eq!(narrow.bounds.intersection(display), Some(narrow.bounds));
@@ -407,16 +383,31 @@ mod tests {
         assert!(narrow.parameter_scale < narrow.scale);
         for button in narrow.buttons() {
             let b = button.bounds;
-            assert_eq!(b.right - b.left, if button.id == 9 { 166 } else { 84 });
+            assert_eq!(b.right - b.left, 84);
             assert_eq!(b.bottom - b.top, 72);
         }
 
-        let settings = Layout::preview(rect(0, 0, 440, 48), tools);
+        let settings = Layout::preview(rect(0, 0, 390, 48), tools);
         assert_eq!(
             settings.buttons().map(|b| b.id).collect::<Vec<_>>(),
-            [1, 3, 4, MOSAIC, 5, 6, 7, 8, 9, 10]
+            [1, 3, 4, MOSAIC, 7, 8, COPY, 10]
         );
         assert_eq!(settings.overflow().count(), 0);
         assert!(settings.scale < 1.);
+
+        let tiny = rect(-160, 0, 160, 200);
+        let no_tools = Layout::new(
+            selection,
+            tiny,
+            2.,
+            Tool::Select,
+            [false; Tool::TOOLBAR.len()],
+        );
+        assert_eq!(
+            no_tools.buttons().map(|b| b.id).collect::<Vec<_>>(),
+            [7, 8, COPY, 10]
+        );
+        assert_eq!(no_tools.overflow().count(), 0);
+        assert_eq!(no_tools.toolbar.intersection(tiny), Some(no_tools.toolbar));
     }
 }

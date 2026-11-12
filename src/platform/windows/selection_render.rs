@@ -591,7 +591,6 @@ impl Canvas {
             target: &self.target,
             brush: &self.brush,
             icons: &self.icons,
-            text: &self.text,
             dark,
         }
         .draw(
@@ -605,8 +604,6 @@ impl Canvas {
                 hover,
                 pressed,
                 focus,
-                undo: editor.can_undo(),
-                redo: editor.can_redo(),
                 busy,
             },
         );
