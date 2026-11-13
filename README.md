@@ -2,9 +2,9 @@
 
 A lightweight, native screenshot and annotation tool for **Windows 11 x64**. Capture a region, mark what matters, and copy, save, or pin the result above other windows. Built with Rust and Windows graphics APIs; just extract the ZIP and run.
 
-**English** · [简体中文](docs/README.zh-CN.md)
+**English** · [简体中文](README.zh-CN.md)
 
-[Download](https://github.com/Real-Bruce/kiki/releases) · [Screenshots](docs/screenshots/README.md) · [Documentation](docs/README.md) · [Changelog](docs/CHANGELOG.md)
+[Download](https://github.com/Real-Bruce/kiki/releases) · [Screenshots](#screenshots) · [Documentation](docs/README.md) · [Changelog](docs/CHANGELOG.md)
 
 ![kiki capture selection and toolbar, with all tools enabled](docs/screenshots/capture/toolbar-light.png)
 
@@ -35,19 +35,37 @@ Settings are stored in `%LOCALAPPDATA%\kiki`, independently of the extracted app
 
 Scrolling capture is limited to one screen and manual vertical scrolling. Entering it discards the current annotations, text draft, and undo/redo history, including if capture fails or is canceled. A known stitching issue remains on the Codex in-app browser Daily page. HDR-to-SDR conversion is unfinished; real multi-monitor and mixed-DPI validation remains incomplete. See [current limitations and validation status (中文)](docs/PROGRESS.md).
 
-## Interface
+## Screenshots
 
-Latest user-supplied screenshots, received on November 13, 2026. They show a customized light-theme configuration, including **Ctrl+1** and all eight tools enabled; these are not the factory defaults. Source details and version/environment limits are recorded in the [screenshot gallery](docs/screenshots/README.md).
+### General
+
+Start a capture and manage startup behavior.
+
+![General settings](docs/screenshots/settings/general-light.png)
+
+### Shortcuts
+
+Customize the capture hotkey and find shortcuts for pinned images.
+
+![Shortcut settings](docs/screenshots/settings/shortcuts-light.png)
+
+### Capture
+
+Choose toolbar tools and adjust default annotation styles.
 
 ![Capture settings: tool switches, toolbar preview, and annotation defaults](docs/screenshots/settings/capture-light.png)
 
-| Settings panel | Preview |
-| --- | --- |
-| General — capture and background behavior | [View](docs/screenshots/settings/general-light.png) |
-| Shortcuts — capture hotkey and pinned-image shortcuts | [View](docs/screenshots/settings/shortcuts-light.png) |
-| Capture — tools and annotation defaults | [View](docs/screenshots/settings/capture-light.png) |
-| Pinned images — movement, zoom, and closing | [View](docs/screenshots/settings/pinned-light.png) |
-| Appearance — system, light, and dark themes | [View](docs/screenshots/settings/appearance-light.png) |
+### Pinned images
+
+Keep captures above other windows, move and zoom them, or close them all at once.
+
+![Pinned image settings](docs/screenshots/settings/pinned-light.png)
+
+### Appearance
+
+Follow the system theme or choose light or dark mode.
+
+![Appearance settings](docs/screenshots/settings/appearance-light.png)
 
 ## Development
 

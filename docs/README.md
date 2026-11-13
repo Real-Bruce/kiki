@@ -1,6 +1,6 @@
 # 文档索引
 
-使用者从[中文介绍](README.zh-CN.md)或[使用说明](USAGE.md)开始；维护者从对应功能模块进入设计、源码与验证记录。当前版本、放行情况和下一步统一见 [PROGRESS.md](PROGRESS.md)，旧阶段记录见[实施历史](IMPLEMENTATION_HISTORY.md)。
+使用者从[中文介绍](../README.zh-CN.md)或[使用说明](USAGE.md)开始；维护者从对应功能模块进入设计、源码与验证记录。当前版本、放行情况和下一步统一见 [PROGRESS.md](PROGRESS.md)，旧阶段记录见[实施历史](IMPLEMENTATION_HISTORY.md)。
 
 ## 按功能模块
 
