@@ -80,6 +80,7 @@
 - [STARTUP.md](engineering/STARTUP.md)
 - [docs-organization-2026-11-13.md](engineering/docs-organization-2026-11-13.md)
 - [open-source-audit-2026-11-13.md](engineering/open-source-audit-2026-11-13.md)
+- [release-v1.0.10.md](engineering/release-v1.0.10.md)
 
 ## 维护约定
 
