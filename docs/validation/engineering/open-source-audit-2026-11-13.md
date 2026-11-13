@@ -62,3 +62,7 @@ README 中的 GitHub 地址、协议中的公开账号署名属于有意公开�
 保留 `main` 和当前 `codex/docs-module-guide`：后者包含尚未合入 `main` 的文档及本次开源准备工作。对比清理前后引用，所有标签及远端跟踪引用保持不变；没有推送、远端分支删除或 Release 发布。
 
 本地提交主题：`chore: prepare MIT licensing and record open-source audit`。提交前检查 `git diff --check`、明确暂存的 diff、文档链接、Cargo 许可元数据、隔离打包结果及忽略规则。
+
+## 后续确认
+
+2026-11-13，用户了解姓名和个人 Gmail 的公开影响后明确表示接受，并要求合入 `main`、创建发布标签。保留既有 Git 身份和历史；本节补充用户决定，不改变上面的检查发现、范围或当时打包状态。
