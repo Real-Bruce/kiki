@@ -949,6 +949,15 @@ fn long_capture_toolbar_preserves_viewport_and_leaves_a_recoverable_session() {
         .expect("requires a real SDR display");
     println!("display={screen:?}");
     let (source, _, area, _) = native_document(&screen);
+    #[cfg(feature = "diagnostics")]
+    let desktop_capture = || {
+        std::thread::spawn(super::super::capture::desktop)
+            .join()
+            .unwrap()
+            .unwrap()
+    };
+    #[cfg(feature = "diagnostics")]
+    let source_pixels = desktop_capture().image.region(area).unwrap();
     let bounds = screen.bounds;
     let (preview, state) = capture_fixture(Image::new(bounds).unwrap(), vec![screen]);
     let hwnd = preview.hwnd().unwrap();
@@ -979,6 +988,11 @@ fn long_capture_toolbar_preserves_viewport_and_leaves_a_recoverable_session() {
         );
         assert_eq!((*state).selection.rect, Some(area));
         assert_eq!(GetAncestor(WindowFromPoint(center), GA_ROOT), source.0);
+        let capture = (*state).long_capture.as_ref().unwrap();
+        assert!(capture.panel.bounds.intersection(area).is_none());
+        let mut affinity = u32::MAX;
+        GetWindowDisplayAffinity(hwnd, &mut affinity).unwrap();
+        assert_eq!(affinity, WDA_NONE.0);
 
         pump_until(|| {
             (*state).long_reselect.is_some()
@@ -999,6 +1013,28 @@ fn long_capture_toolbar_preserves_viewport_and_leaves_a_recoverable_session() {
             let (width, height) = area.size().unwrap();
             assert_eq!(capture.update.as_ref().unwrap().height, height);
             let finish = capture.panel.finish;
+            #[cfg(feature = "diagnostics")]
+            {
+                // Capture the desktop through WGC, just as a screen-sharing client
+                // would. The finish button must be visible in that capture.
+                let _ = UpdateWindow(hwnd);
+                windows::Win32::Graphics::Dwm::DwmFlush().unwrap();
+                let desktop = desktop_capture();
+                let accent = super::super::ui_palette::accent((*state).canvas.dark);
+                let expected = [(accent >> 16) as u8, (accent >> 8) as u8, accent as u8];
+                let sample = point(
+                    finish.left + (finish.right - finish.left) / 4,
+                    (finish.top + finish.bottom) / 2,
+                );
+                assert_eq!(desktop.image.rgb_at(sample), Some(expected));
+                assert_eq!(
+                    desktop.image.region(area).unwrap().pixels(),
+                    source_pixels.pixels()
+                );
+                println!(
+                    "desktop capture includes the control panel and preserves the source pixels"
+                );
+            }
             let start = Instant::now();
             route_test_wheel(point(center.x, center.y), -120);
             pump_until(|| {
@@ -1027,6 +1063,12 @@ fn long_capture_toolbar_preserves_viewport_and_leaves_a_recoverable_session() {
             click(hwnd, bounds, point(finish.left + 2, finish.top + 2));
             pump_until(|| (*state).long_document.is_some());
             let image = (*state).canvas.source();
+            #[cfg(feature = "diagnostics")]
+            assert_eq!(
+                &image.pixels()[..source_pixels.pixels().len()],
+                source_pixels.pixels(),
+                "the first captured viewport must exclude the previous screenshot UI"
+            );
             let path =
                 std::env::temp_dir().join(format!("kiki-long-toolbar-{}.png", std::process::id()));
             let target = output::SaveTarget::new(path.clone(), OutputFormat::Png).unwrap();

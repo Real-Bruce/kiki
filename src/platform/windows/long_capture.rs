@@ -200,7 +200,7 @@ impl Panel {
         }
         .max(1);
         let right = s.right - margin;
-        let mut left = if !edit && selection.right + margin + width <= right {
+        let left = if !edit && selection.right + margin + width <= right {
             selection.right + margin
         } else {
             right - width
@@ -219,28 +219,33 @@ impl Panel {
             top,
             bottom: top + height,
         };
-        if !edit
-            && bounds.intersection(selection) == Some(selection)
-            && selection.left - margin - width >= s.left + margin
-        {
-            left = selection.left - margin - width;
-            bounds.left = left;
-            bounds.right = left + width;
+        if !edit && bounds.intersection(selection).is_some() {
+            let left = selection.left - margin - width;
+            if left >= s.left + margin {
+                bounds.left = left;
+                bounds.right = left + width;
+            } else if selection.bottom + margin + height <= s.bottom - margin {
+                bounds.top = selection.bottom + margin;
+                bounds.bottom = bounds.top + height;
+            } else if selection.top - margin - height >= s.top + margin {
+                bounds.bottom = selection.top - margin;
+                bounds.top = bounds.bottom - height;
+            }
         }
         let inset = margin.min(width / 8);
         let bottom = bounds.bottom - inset;
-        let middle = left + width / 2;
+        let middle = bounds.left + width / 2;
         let button = px(32.).min(height / 5);
         Self {
             bounds,
             track: PixelRect {
-                left: left + inset,
+                left: bounds.left + inset,
                 right: bounds.right - inset,
-                top: top + px(42.).min(height / 5),
+                top: bounds.top + px(42.).min(height / 5),
                 bottom: bottom - if edit { button } else { 4 * button },
             },
             finish: PixelRect {
-                left: left + inset,
+                left: bounds.left + inset,
                 right: middle - 2,
                 top: bottom - button,
                 bottom,
@@ -461,9 +466,17 @@ impl Capture {
         // transfers to Windows only on success. Do not borrow preview state across these calls.
         unsafe {
             let result = (|| {
-                SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)?;
-                verify_exclusion(hwnd.0 as usize)?;
                 let panel = Panel::new(&screen, area, false);
+                // A disjoint panel and the native window region keep all of our pixels
+                // outside the capture area. Keep the UI visible to remote screen sharing.
+                let excluded_window = if panel.bounds.intersection(area).is_some() {
+                    SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)?;
+                    let window = hwnd.0 as usize;
+                    verify_exclusion(window)?;
+                    Some(window)
+                } else {
+                    None
+                };
                 let mut window = RECT::default();
                 GetWindowRect(hwnd, &mut window)?;
                 // Leave the overlay active for Esc and open the source for hit testing
@@ -485,7 +498,7 @@ impl Capture {
                     panel: panel.bounds,
                     ready: false,
                 }));
-                let worker = Worker::start(hwnd.0 as usize, area, screen.clone(), target)?;
+                let worker = Worker::start(excluded_window, area, screen.clone(), target)?;
                 Ok(Self {
                     panel,
                     screen,
@@ -647,7 +660,12 @@ fn capture_mask(
 }
 
 impl Worker {
-    fn start(owner: usize, area: PixelRect, screen: DisplayInfo, target: Target) -> Result<Self> {
+    fn start(
+        excluded_window: Option<usize>,
+        area: PixelRect,
+        screen: DisplayInfo,
+        target: Target,
+    ) -> Result<Self> {
         let permit = Permit::acquire()?;
         let (wake, input) = mpsc::sync_channel(1);
         let cancel = Arc::new(AtomicBool::new(false));
@@ -658,9 +676,15 @@ impl Worker {
             .name("kiki-long-capture".into())
             .spawn(move || {
                 let _permit = permit;
-                if let Err(error) =
-                    run_capture(owner, area, &screen, target, &token, &worker, &input)
-                    && !token.load(Ordering::Acquire)
+                if let Err(error) = run_capture(
+                    excluded_window,
+                    area,
+                    &screen,
+                    target,
+                    &token,
+                    &worker,
+                    &input,
+                ) && !token.load(Ordering::Acquire)
                 {
                     worker.publish(Reply::Stopped(error));
                 }
@@ -686,8 +710,10 @@ impl Worker {
     }
 }
 
-fn check_target(owner: usize, target: Target) -> Result<()> {
-    verify_exclusion(owner)?;
+fn check_target(excluded_window: Option<usize>, target: Target) -> Result<()> {
+    if let Some(window) = excluded_window {
+        verify_exclusion(window)?;
+    }
     if !target.valid() {
         return Err(fail("目标窗口已移动或关闭"));
     }
@@ -695,7 +721,7 @@ fn check_target(owner: usize, target: Target) -> Result<()> {
 }
 
 fn run_capture(
-    owner: usize,
+    excluded_window: Option<usize>,
     area: PixelRect,
     screen: &DisplayInfo,
     target: Target,
@@ -705,7 +731,7 @@ fn run_capture(
 ) -> Result<()> {
     use super::capture::RegionStream;
     let mut initial = Image::new(area).map_err(|e| fail(&e))?;
-    check_target(owner, target)?;
+    check_target(excluded_window, target)?;
     let first_stream = RegionStream::open(area, screen)?;
     let start = Instant::now();
     loop {
@@ -716,7 +742,7 @@ fn run_capture(
             return Err(fail("等待长截图首帧超时，请重新截图"));
         }
     }
-    check_target(owner, target)?;
+    check_target(excluded_window, target)?;
     let mut stitch = Stitcher::new(initial).map_err(|e| fail(&e))?;
     let mut frame = Image::new(area).map_err(|e| fail(&e))?;
     let mut stream = Some(first_stream);
@@ -785,11 +811,11 @@ fn run_capture(
         } else {
             Ok(())
         }
-        .and_then(|()| check_target(owner, target))
+        .and_then(|()| check_target(excluded_window, target))
         .and_then(|()| source.read(&mut frame, FRAME_WAIT, cancel))
         .and_then(|read| {
             if read {
-                check_target(owner, target).map(|()| true)
+                check_target(excluded_window, target).map(|()| true)
             } else {
                 Ok(false)
             }
@@ -998,6 +1024,25 @@ pub(super) mod tests {
         };
         let narrow_panel = Panel::new(&screen, narrow_right, false);
         assert!(narrow_panel.bounds.intersection(narrow_right).is_none());
+        let wide_right = PixelRect {
+            left: -1100,
+            ..narrow_right
+        };
+        let left_panel = Panel::new(&screen, wide_right, false);
+        assert!(left_panel.bounds.right <= wide_right.left);
+        assert!(left_panel.bounds.intersection(wide_right).is_none());
+        let wide_top = PixelRect {
+            left: screen.bounds.left + 20,
+            top: 20,
+            bottom: 210,
+            ..wide_right
+        };
+        let below_panel = Panel::new(&screen, wide_top, false);
+        assert!(below_panel.bounds.top >= wide_top.bottom);
+        assert_eq!(
+            below_panel.bounds.intersection(screen.bounds),
+            Some(below_panel.bounds)
+        );
 
         let image = fixture(1700, 0, 2000);
         let thumbnail = long_image::thumbnail(&image).unwrap();
@@ -1275,7 +1320,7 @@ pub(super) mod tests {
         };
         let start = |window: &NativeTestWindow, area| {
             Worker::start(
-                owner.0.0 as usize,
+                Some(owner.0.0 as usize),
                 area,
                 screen.clone(),
                 Target::read(window.0).unwrap(),
