@@ -16,7 +16,7 @@ pub const OPEN_SETTINGS: u32 = WM_APP + 70;
 pub const CAPTURE: u32 = WM_APP + 71;
 pub const FULLSCREEN: u32 = WM_APP + 72;
 pub const CAPTURE_FROM_SETTINGS: u32 = WM_APP + 73;
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SaveStatus {
     Ready,
     Saving,

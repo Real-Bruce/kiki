@@ -751,7 +751,7 @@ fn dispatch(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
             }
             config_store::SAVED => {
                 preferences::poll();
-                settings::refresh();
+                settings::refresh_save_status();
                 let preview = APP.with_borrow(|app| {
                     app.as_ref()
                         .and_then(|s| s.preview.as_ref())
