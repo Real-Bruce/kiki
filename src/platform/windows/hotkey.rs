@@ -163,9 +163,13 @@ unsafe extern "system" fn themed_proc(
     // SAFETY: the native hotkey control owns focus and keyboard handling on this thread.
     // The paint DC and brush are local to WM_PAINT.
     unsafe {
-        if msg == WM_PAINT {
+        if matches!(msg, WM_PAINT | WM_PRINTCLIENT) {
             let mut ps = PAINTSTRUCT::default();
-            let dc = BeginPaint(hwnd, &mut ps);
+            let dc = if msg == WM_PAINT {
+                BeginPaint(hwnd, &mut ps)
+            } else {
+                HDC(wp.0 as *mut _)
+            };
             let mut rect = RECT::default();
             let _ = GetClientRect(hwnd, &mut rect);
             let dark = super::selection_render::system_dark();
@@ -193,7 +197,9 @@ unsafe extern "system" fn themed_proc(
                 DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS,
             );
             SelectObject(dc, old);
-            let _ = EndPaint(hwnd, &ps);
+            if msg == WM_PAINT {
+                let _ = EndPaint(hwnd, &ps);
+            }
             return LRESULT(0);
         }
         // The native hotkey class normally reserves a square non-client border.

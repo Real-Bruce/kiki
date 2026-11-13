@@ -40,10 +40,31 @@ struct Control {
     hwnd: HWND,
     id: u16,
 }
+struct BufferedPaint;
+
+impl BufferedPaint {
+    fn new() -> Result<Self> {
+        // SAFETY: initialization and teardown are paired on the window thread.
+        unsafe { BufferedPaintInit()? };
+        Ok(Self)
+    }
+}
+
+impl Drop for BufferedPaint {
+    fn drop(&mut self) {
+        // SAFETY: this thread owns the matching initialization.
+        unsafe {
+            let _ = BufferedPaintUnInit();
+        }
+    }
+}
+
 struct State {
     life: Rc<Cell<Option<HWND>>>,
     page: usize,
     scroll: i32,
+    max_scroll: i32,
+    page_wheel: Wheel,
     page_scroll: [i32; 6],
     hover: Option<HWND>,
     keyboard_focus: bool,
@@ -51,6 +72,7 @@ struct State {
     dpi: u32,
     controls: Vec<Control>,
     canvas: Option<Canvas>,
+    _buffered_paint: BufferedPaint,
     font: HFONT,
     icon_font: HFONT,
     brush: HBRUSH,
@@ -116,11 +138,12 @@ fn open_impl(visible: bool) -> Result<()> {
         let work = info.rcWork;
         let width = width.min(work.right - work.left);
         let height = height.min(work.bottom - work.top);
+        let buffered_paint = BufferedPaint::new()?;
         let hwnd = CreateWindowExW(
-            WS_EX_CONTROLPARENT | WS_EX_COMPOSITED,
+            WS_EX_CONTROLPARENT,
             class.lpszClassName,
             w!("kiki 设置"),
-            WS_OVERLAPPEDWINDOW | WS_VSCROLL | WS_CLIPCHILDREN,
+            WS_OVERLAPPEDWINDOW | WS_VSCROLL,
             work.left + (work.right - work.left - width) / 2,
             work.top + (work.bottom - work.top - height) / 2,
             width,
@@ -154,6 +177,8 @@ fn open_impl(visible: bool) -> Result<()> {
             life: Rc::new(Cell::new(Some(hwnd))),
             page: 0,
             scroll: 0,
+            max_scroll: 0,
+            page_wheel: Wheel::default(),
             page_scroll: [0; 6],
             hover: None,
             keyboard_focus: false,
@@ -161,6 +186,7 @@ fn open_impl(visible: bool) -> Result<()> {
             dpi,
             controls: Vec::new(),
             canvas: None,
+            _buffered_paint: buffered_paint,
             font,
             icon_font: font_for_icons(dpi),
             brush: CreateSolidBrush(rgb(appearance::background(system_dark()))),
@@ -276,14 +302,14 @@ fn focus_next(hwnd: HWND, backwards: bool) {
             if let Some(bounds) = bounds {
                 let top = state.scroll + HEADER;
                 let bottom = state.scroll + dip(client.bottom) - FOOTER;
-                (*p).scroll = if bounds.y < top {
+                let scroll = if bounds.y < top {
                     bounds.y - HEADER
                 } else if bounds.y + bounds.h > bottom {
                     bounds.y + bounds.h - dip(client.bottom) + FOOTER
                 } else {
                     state.scroll
                 };
-                layout(hwnd);
+                scroll_to(hwnd, p, scroll);
             }
             (*p).keyboard_focus = true;
             SendMessageW(
@@ -575,6 +601,17 @@ fn page_geometry(state: &State, width: i32) -> Page {
     )
 }
 
+fn scroll_to(hwnd: HWND, p: *mut State, scroll: i32) {
+    // SAFETY: callers pass the live settings state on its owning window thread.
+    unsafe {
+        let next = scroll.clamp(0, (*p).max_scroll);
+        if next != (*p).scroll {
+            (*p).scroll = next;
+            layout(hwnd);
+        }
+    }
+}
+
 fn layout(hwnd: HWND) {
     // SAFETY: snapshot child handles and bounds before SetWindowPos sends messages to them.
     unsafe {
@@ -591,8 +628,8 @@ fn layout(hwnd: HWND) {
         let width = dip(client.right);
         let geometry = page_geometry(&*p, width);
         let viewport = (height - HEADER - FOOTER).max(1);
-        let max_scroll = (geometry.end - HEADER - viewport).max(0);
-        (*p).scroll = (*p).scroll.clamp(0, max_scroll);
+        (*p).max_scroll = (geometry.end - HEADER - viewport).max(0);
+        (*p).scroll = (*p).scroll.clamp(0, (*p).max_scroll);
         let scroll = (*p).scroll;
         let info = SCROLLINFO {
             cbSize: std::mem::size_of::<SCROLLINFO>() as u32,
@@ -678,7 +715,7 @@ fn layout(hwnd: HWND) {
         }
         // Move the native children together and repaint the final layout without a
         // separate background erase at each child's old or new position.
-        let flags = SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW;
+        let flags = SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW | SWP_NOCOPYBITS;
         let positioned = BeginDeferWindowPos(positions.len() as i32)
             .and_then(|batch| {
                 positions
@@ -697,9 +734,96 @@ fn layout(hwnd: HWND) {
             Some(hwnd),
             None,
             None,
-            RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_NOERASE | RDW_UPDATENOW,
+            RDW_INVALIDATE | RDW_NOCHILDREN | RDW_NOERASE,
         );
     }
+}
+
+fn paint_frame(hwnd: HWND, dc: HDC, p: *mut State) -> Result<()> {
+    // SAFETY: the window and its children are owned by this UI thread. The buffered
+    // DC is used only within this paint and is returned to Windows before EndPaint.
+    unsafe {
+        let mut bounds = RECT::default();
+        GetClientRect(hwnd, &mut bounds)?;
+        if bounds.right <= 0 || bounds.bottom <= 0 {
+            return Ok(());
+        }
+        let mut buffer_dc = HDC::default();
+        let buffer = BeginBufferedPaint(dc, &bounds, BPBF_COMPATIBLEBITMAP, None, &mut buffer_dc);
+        let result = paint_frame_to_dc(hwnd, if buffer == 0 { dc } else { buffer_dc }, p);
+        if buffer != 0 {
+            let ended = EndBufferedPaint(buffer, result.is_ok());
+            result.and(ended)
+        } else {
+            result
+        }
+    }
+}
+
+fn paint_frame_to_dc(hwnd: HWND, dc: HDC, p: *mut State) -> Result<()> {
+    paint(hwnd, dc, p)?;
+    // SAFETY: child handles are copied before querying native button state or
+    // sending WM_PRINTCLIENT. Each child uses a clipped portion of the live DC.
+    unsafe {
+        let mut origin = POINT::default();
+        if !ClientToScreen(hwnd, &mut origin).as_bool() {
+            return Err(windows::core::Error::from_win32());
+        }
+        let controls: Vec<_> = (*p).controls.iter().map(|c| (c.hwnd, c.id)).collect();
+        let focus = GetFocus();
+        for (child, id) in controls {
+            if !IsWindowVisible(child).as_bool() {
+                continue;
+            }
+            let mut rect = RECT::default();
+            GetWindowRect(child, &mut rect)?;
+            let saved = SaveDC(dc);
+            if saved == 0 {
+                return Err(windows::core::Error::from_win32());
+            }
+            let left = rect.left - origin.x;
+            let top = rect.top - origin.y;
+            let _ = IntersectClipRect(dc, left, top, rect.right - origin.x, rect.bottom - origin.y);
+            let _ = OffsetViewportOrgEx(dc, left, top, None);
+            if id == 300 || setting_parameter(id, PARAMETER_EDIT).is_some() {
+                SendMessageW(
+                    child,
+                    WM_PRINTCLIENT,
+                    Some(WPARAM(dc.0 as usize)),
+                    Some(LPARAM((PRF_CLIENT | PRF_ERASEBKGND) as isize)),
+                );
+            } else {
+                let button_state = SendMessageW(child, BM_GETSTATE, None, None).0 as u32;
+                let mut item_state = ODS_FLAGS::default();
+                if button_state & BST_PUSHED != 0 {
+                    item_state.0 |= ODS_SELECTED.0;
+                }
+                if focus == child {
+                    item_state.0 |= ODS_FOCUS.0;
+                }
+                if !IsWindowEnabled(child).as_bool() {
+                    item_state.0 |= ODS_DISABLED.0;
+                }
+                draw_button(
+                    &DRAWITEMSTRUCT {
+                        CtlID: u32::from(id),
+                        itemState: item_state,
+                        hwndItem: child,
+                        hDC: dc,
+                        rcItem: RECT {
+                            right: rect.right - rect.left,
+                            bottom: rect.bottom - rect.top,
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    },
+                    p,
+                );
+            }
+            let _ = RestoreDC(dc, saved);
+        }
+    }
+    Ok(())
 }
 
 fn paint(hwnd: HWND, dc: HDC, p: *mut State) -> Result<()> {
@@ -878,6 +1002,7 @@ fn action(hwnd: HWND, id: u16) {
             (*p).page_scroll[(*p).page] = (*p).scroll;
             (*p).page = usize::from(id - 100);
             (*p).scroll = (*p).page_scroll[(*p).page];
+            (*p).page_wheel = Wheel::default();
             (*p).error = None;
             refresh();
             return;
@@ -1669,7 +1794,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             WM_PAINT => {
                 let mut ps = PAINTSTRUCT::default();
                 let dc = BeginPaint(hwnd, &mut ps);
-                if paint(hwnd, dc, p).is_err() {
+                if paint_frame(hwnd, dc, p).is_err() {
                     (*p).canvas = None;
                 }
                 let _ = EndPaint(hwnd, &ps);
@@ -1718,29 +1843,33 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     return LRESULT(0);
                 }
                 (*p).parameter_wheel = (None, Wheel::default());
-                (*p).scroll -= i32::from((wp.0 >> 16) as u16 as i16) / 120 * 48;
-                layout(hwnd);
+                let steps = (*p).page_wheel.steps(wp);
+                scroll_to(hwnd, p, (*p).scroll - steps * 48);
                 LRESULT(0)
             }
             WM_VSCROLL => {
-                let code = (wp.0 & 65535) as i32;
-                (*p).scroll += match code {
-                    0 => -32,
-                    1 => 32,
-                    2 => -160,
-                    3 => 160,
-                    _ => 0,
+                let next = match SCROLLBAR_COMMAND((wp.0 & 65535) as i32) {
+                    SB_LINEUP => (*p).scroll - 32,
+                    SB_LINEDOWN => (*p).scroll + 32,
+                    SB_PAGEUP => (*p).scroll - 160,
+                    SB_PAGEDOWN => (*p).scroll + 160,
+                    SB_TOP => 0,
+                    SB_BOTTOM => (*p).max_scroll,
+                    SB_THUMBPOSITION | SB_THUMBTRACK => {
+                        let mut info = SCROLLINFO {
+                            cbSize: std::mem::size_of::<SCROLLINFO>() as u32,
+                            fMask: SIF_TRACKPOS,
+                            ..Default::default()
+                        };
+                        if GetScrollInfo(hwnd, SB_VERT, &mut info).is_ok() {
+                            info.nTrackPos
+                        } else {
+                            (*p).scroll
+                        }
+                    }
+                    _ => (*p).scroll,
                 };
-                if code == 4 || code == 5 {
-                    let mut info = SCROLLINFO {
-                        cbSize: std::mem::size_of::<SCROLLINFO>() as u32,
-                        fMask: SIF_TRACKPOS,
-                        ..Default::default()
-                    };
-                    let _ = GetScrollInfo(hwnd, SB_VERT, &mut info);
-                    (*p).scroll = info.nTrackPos;
-                }
-                layout(hwnd);
+                scroll_to(hwnd, p, next);
                 LRESULT(0)
             }
             WM_DPICHANGED => {
@@ -1855,7 +1984,7 @@ mod tests {
         unsafe {
             let dc = GetDC(Some(hwnd));
             assert!(!dc.is_invalid());
-            let result = paint(hwnd, dc, pointer(hwnd));
+            let result = paint_frame(hwnd, dc, pointer(hwnd));
             ReleaseDC(Some(hwnd), dc);
             assert!(result.is_ok(), "{result:?}");
         }
@@ -1984,6 +2113,12 @@ mod tests {
                 SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(100 + page)), None);
                 assert_eq!((*pointer(hwnd)).page, page);
                 check_paint(hwnd);
+                if (*pointer(hwnd)).max_scroll == 0 {
+                    let _ = ValidateRect(Some(hwnd), None);
+                    SendMessageW(hwnd, WM_MOUSEWHEEL, Some(WPARAM(0xff88 << 16)), None);
+                    assert_eq!((*pointer(hwnd)).scroll, 0);
+                    assert!(!GetUpdateRect(hwnd, None, false).as_bool());
+                }
                 if page == 1 {
                     let input = (*pointer(hwnd))
                         .controls
@@ -2119,6 +2254,14 @@ mod tests {
             SendMessageW(hwnd, WM_VSCROLL, Some(WPARAM(SB_PAGEDOWN.0 as usize)), None);
             assert!((*pointer(hwnd)).scroll > 0);
             check_paint(hwnd);
+            SendMessageW(hwnd, WM_VSCROLL, Some(WPARAM(SB_BOTTOM.0 as usize)), None);
+            let end = (*pointer(hwnd)).max_scroll;
+            assert_eq!((*pointer(hwnd)).scroll, end);
+            let _ = ValidateRect(Some(hwnd), None);
+            SendMessageW(hwnd, WM_VSCROLL, Some(WPARAM(SB_LINEDOWN.0 as usize)), None);
+            assert!(!GetUpdateRect(hwnd, None, false).as_bool());
+            SendMessageW(hwnd, WM_VSCROLL, Some(WPARAM(SB_TOP.0 as usize)), None);
+            assert_eq!((*pointer(hwnd)).scroll, 0);
             wait_saved();
             assert!(matches!(preferences::status(), SaveStatus::Saved));
             // Real failure and retry: a directory at the destination cannot be atomically replaced by a file.
