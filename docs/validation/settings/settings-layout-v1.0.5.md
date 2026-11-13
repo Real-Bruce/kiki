@@ -19,4 +19,4 @@
 - 正式 Windows x64 Release ZIP 为 586,798 字节。解压得到 16 个文件，EXE 为 1,175,040 字节，产品版本为 1.0.5，PE 架构为 x64。核对包内 EXE 与构建产物哈希一致，并检查包内使用说明。
 - ZIP SHA-256 为 `404ef20dac7bc9fbae8f033320a40ff5677c1d1364e904c666fe14b51d2ab9b5`。
 - EXE SHA-256 为 `c68481b17133e7ada6f6436de260cbcb31c9e4bdbe7d821c95f32289eca057c8`。
-- 本次记录包体积，运行时性能数据仍见 [P7 性能验收](P7.md)。多屏、其他 DPI 和 HDR 仍见 [当前进度](../PROGRESS.md#既有环境与功能遗留)。
+- 本次记录包体积，运行时性能数据仍见 [P7 性能验收](../engineering/P7.md)。多屏、其他 DPI 和 HDR 仍见 [当前进度](../../PROGRESS.md#既有环境与功能遗留)。

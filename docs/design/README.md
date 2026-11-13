@@ -2,6 +2,21 @@
 
 2026-11-10 新确认功能的浅深色 SVG/PNG 草图见 [F01–F12 设计索引](next/README.md)。新增交互以 [开发说明](../FEATURE_PLAN.md) 为准；以下 01–05 为保留的历史视觉基线，不覆盖后续批准的工具条精简、参数和新增功能。
 
+## 按功能查找设计与实现
+
+| 功能 | 视觉基线 / 草图编号 | 开发与验证 |
+| --- | --- | --- |
+| 普通截图与工具条 | [01](01-capture.png)、[02](02-toolbars.png)；S01、S09 | [模块说明](../modules/capture.md) |
+| 标注与参数 | [02](02-toolbars.png)；S01、S02、S04、S05 | [模块说明](../modules/annotation.md) |
+| 取色 | S06 | [模块说明](../modules/color-picker.md) |
+| 长截图 | S07、S08 | [模块说明](../modules/long-capture.md) |
+| 输出与圆角 | S03 | [模块说明](../modules/output.md) |
+| 置顶贴图 | [04](04-pinned.png) | [模块说明](../modules/pinned.md) |
+| 设置与运行入口 | [05](05-settings-layout.png)；S03 | [模块说明](../modules/settings.md) |
+| 视觉资源 | 01、02、04、05；S01–S09 | [模块说明](../modules/visuals.md) |
+
+S01–S09 的浅色/深色 PNG 与 SVG 统一见 [草图索引](next/README.md)。设计图保留原始评审版本，当前真实界面见 [截图图库](../screenshots/README.md)。
+
 生成日期：2026-11-06。使用内置 image_gen 图像生成工具制作，仅用于 UI 设计评审。
 
 | 文件 | 内容 |

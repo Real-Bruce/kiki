@@ -1,66 +1,71 @@
 # kiki
 
-轻量的 Windows 11 截图、标注与置顶贴图工具。使用 Rust 和 Windows 原生图形能力实现，解压即可运行。
+A lightweight, native screenshot and annotation tool for **Windows 11 x64**. Capture a region, mark what matters, and copy, save, or pin the result above other windows. Built with Rust and Windows graphics APIs; just extract the ZIP and run.
 
-![kiki 截图与标注](docs/screenshots/capture-light.png)
+**English** · [简体中文](docs/README.zh-CN.md)
 
-## 功能
+[Download](https://github.com/Real-Bruce/kiki/releases) · [Screenshots](docs/screenshots/README.md) · [Documentation](docs/README.md) · [Changelog](docs/CHANGELOG.md)
 
-- 区域、窗口和当前屏幕截图。
-- 矩形、箭头、画笔、文字、马赛克和顺序编号。支持编辑、文字旋转、撤销与重做。
-- 从冻结截图中读取颜色，支持 HEX / RGB 切换及复制颜色编码。
-- 支持单屏纵向长截图与长图标注。
-- 复制图像、保存 PNG 或 JPEG，或生成可拖动、缩放的置顶贴图。
-- 全局快捷键、托盘入口、自动保存设置，以及跟随系统的深浅主题。
+![kiki capture selection and toolbar, with all tools enabled](docs/screenshots/capture/toolbar-light.png)
 
-面向 **Windows 11 x64**。可在截图设置中选择并实时预览要显示的工具、调整圆角与默认保存格式，或恢复截图默认设置。截图时可用滑杆、数值框或滚轮调整线宽、字号、马赛克颗粒大小和编号直径。 [当前源码版本](VERSION) · [跨屏、混合 DPI 和 HDR 验证进度](docs/PROGRESS.md)
+## Features
 
-## 下载与使用
+- **Capture:** select a region, a visible window, or the current screen.
+- **Annotate:** editable rectangles, arrows, pen strokes, text, mosaic regions, and numbered markers, with undo and redo. Move and rotate text after placing it.
+- **Pick colors:** sample the frozen image, switch between HEX and RGB, and copy a color code without leaving the capture.
+- **Scrolling capture:** manually scroll a vertical region on one screen, then annotate and export the assembled image.
+- **Copy, save, or pin:** copy to the clipboard, save PNG or JPEG, or keep multiple images on top of other windows. Drag and zoom pinned images while preserving their original export size.
+- **Make it yours:** choose visible tools, adjust pixel-based annotation sizes and rounded corners, configure the global shortcut, and use light, dark, or system themes.
 
-从 [Releases](https://github.com/Real-Bruce/kiki/releases) 下载 ZIP，解压后运行 `kiki.exe`，无需安装 Rust 或开发工具。
+The application interface is currently in **Simplified Chinese**. Rectangle, arrow, pen, and text tools are enabled by default. Enable mosaic, numbering, scrolling capture, and the color picker in **截图** (Capture settings).
 
-1. 首次启动点击「开始截图」，之后使用 **Ctrl+Alt+A** 或托盘菜单。
-2. 拖动选择区域，使用工具条添加标注。
-3. 按 **Enter** 复制、**Ctrl+S** 保存、**Ctrl+P** 贴图，或 **Esc** 取消。
+## Get started
 
-贴图支持拖动、滚轮缩放、Ctrl+0 恢复原比例和 Esc 关闭。复制与贴图不会自动保存文件。
+Download the Windows x64 ZIP from [Releases](https://github.com/Real-Bruce/kiki/releases), extract it, and launch `kiki.exe`. No Rust toolchain or installer is required.
 
-[完整使用说明](docs/USAGE.md) · [版本变更](docs/CHANGELOG.md)
+1. Click **开始截图** (Start capture), press **Ctrl+Alt+A**, or use the tray menu. The global shortcut is configurable.
+2. Drag to select a region, or click a highlighted window. Add annotations using the toolbar.
+3. Press **Enter** to copy, **Ctrl+S** to save, or **Ctrl+P** to pin. **Esc** cancels the active operation, then the capture when no operation is active.
 
-## 界面
+While entering text, **Enter** inserts a new line and **Ctrl+Enter** finishes editing. Use **Ctrl+Z / Ctrl+Y** for undo / redo outside text editing.
 
-以下为用户提供的软件实际运行截图，采用暖灰与松绿主题。
+For a pinned image, drag to move, use the wheel to zoom, press **Ctrl+0** to restore its original scale, or **Esc** to close it. Copying and pinning do not automatically save files. Closing Settings leaves kiki in the tray; use the tray menu to exit.
 
-![浅色截图设置](docs/screenshots/settings-light.png)
+Settings are stored in `%LOCALAPPDATA%\kiki`, independently of the extracted application folder. See the [usage guide (中文)](docs/USAGE.md) for editing controls and output behavior.
 
-![深色截图设置](docs/screenshots/settings-dark.png)
+Scrolling capture is limited to one screen and manual vertical scrolling. Entering it discards the current annotations, text draft, and undo/redo history, including if capture fails or is canceled. A known stitching issue remains on the Codex in-app browser Daily page. HDR-to-SDR conversion is unfinished; real multi-monitor and mixed-DPI validation remains incomplete. See [current limitations and validation status (中文)](docs/PROGRESS.md).
 
-截图环境与采集方式见[截图说明](docs/screenshots/README.md)。
+## Interface
 
-## 开发
+Latest user-supplied screenshots, received on November 13, 2026. They show a customized light-theme configuration, including **Ctrl+1** and all eight tools enabled; these are not the factory defaults. Source details and version/environment limits are recorded in the [screenshot gallery](docs/screenshots/README.md).
 
-需要 Windows 11 x64、MSVC Build Tools、Windows SDK 和 PowerShell 7。仓库固定 Rust 1.88.0、2024 edition。
+![Capture settings: tool switches, toolbar preview, and annotation defaults](docs/screenshots/settings/capture-light.png)
+
+| Settings panel | Preview |
+| --- | --- |
+| General — capture and background behavior | [View](docs/screenshots/settings/general-light.png) |
+| Shortcuts — capture hotkey and pinned-image shortcuts | [View](docs/screenshots/settings/shortcuts-light.png) |
+| Capture — tools and annotation defaults | [View](docs/screenshots/settings/capture-light.png) |
+| Pinned images — movement, zoom, and closing | [View](docs/screenshots/settings/pinned-light.png) |
+| Appearance — system, light, and dark themes | [View](docs/screenshots/settings/appearance-light.png) |
+
+## Development
+
+Build on Windows 11 x64 with MSVC Build Tools, the Windows SDK, and PowerShell 7. The repository pins **Rust 1.88.0**, uses **Rust 2024**, and commits `Cargo.lock`. The native UI uses Win32, Direct2D, and DirectWrite; image encoding uses WIC.
 
 ```powershell
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-cargo test --workspace --locked
-cargo test --workspace --all-features --locked
+cargo test --workspace --locked -- --test-threads=1
+cargo test --workspace --all-features --locked -- --test-threads=1
 cargo build --release --locked
-```
-
-程序输出到 `target/x86_64-pc-windows-msvc/release/kiki.exe`。生成免安装包：
-
-```powershell
 ./scripts/Package-Windows.ps1
 ```
 
-[开发与诊断](docs/DEVELOPMENT.md) · [打包与发布](docs/RELEASING.md) · [文档索引](docs/README.md)
+The executable is written to `target/x86_64-pc-windows-msvc/release/kiki.exe`; portable packages and SHA-256 checksums go to `dist/`. The application version comes from [VERSION](VERSION).
 
-## 参与开发
+Design, implementation, and validation guides are organized [by module](docs/modules/README.md). See [development and diagnostics](docs/DEVELOPMENT.md), [packaging and releases](docs/RELEASING.md), and [AGENTS.md](AGENTS.md) before contributing. Engineering documents are maintained in Simplified Chinese. When reporting a bug, include your Windows version, display resolution and scaling, reproduction steps, and expected behavior.
 
-提交问题时请说明系统版本、屏幕分辨率与缩放、复现步骤及预期结果。修改前阅读 [AGENTS.md](AGENTS.md)，保持原生 Rust 技术栈及既定范围；界面变更应附真实运行截图。
+## Licenses
 
-## 第三方许可
-
-依赖许可随程序提供，也可在「关于」页离线查看。来源见[第三方许可说明](docs/THIRD_PARTY_LICENSES.md)。仓库尚未声明项目源码的开源许可证。
+Third-party license texts ship with the application and can be read offline from **关于** (About). See [third-party licenses](docs/THIRD_PARTY_LICENSES.md). A license for this project's source code has not yet been declared.

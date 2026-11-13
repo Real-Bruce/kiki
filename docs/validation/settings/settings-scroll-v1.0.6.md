@@ -15,4 +15,4 @@
 - Windows x64 Release ZIP 为 586,619 字节。解压得到 16 个文件，EXE 为 1,174,528 字节，PE 架构为 x64，产品版本为 1.0.6。包内 EXE 与构建产物哈希一致。
 - ZIP SHA-256 为 `01b5019e3c1a14ac882896d1770aff1f023cc67ab7035947ac0b14763c86cbec`。
 - EXE SHA-256 为 `c07828e17ef1028c0acf1aafbe79bc56dcbc540135adfbd83b3d2cb69a911ec9`。
-- 本次记录包体积与滚动采样，运行时性能基线见 [P7 性能验收](P7.md)。
+- 本次记录包体积与滚动采样，运行时性能基线见 [P7 性能验收](../engineering/P7.md)。

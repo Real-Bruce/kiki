@@ -11,7 +11,7 @@
 - fmt、严格 Clippy、3 项测试和 Release 构建通过；PNG 尺寸/颜色/透明像素往返通过。
 - 100 样本 WGC P95 为 60.273 ms；一次 79.129 秒托盘闲置私有工作集约 4.02 MiB，CPU 增量低于计数器分辨率。不是完整产品达标结论。
 - 关联提交主题：feat(app): establish native Rust tray and capture foundation。
-- 遗留：见 validation/P1.md。不重复建立工程，也不将 P2–P8 标为完成。
+- 遗留：见 validation/engineering/P1.md。不重复建立工程，也不将 P2–P8 标为完成。
 
 ## P1 补充验收
 
@@ -32,7 +32,7 @@
 - 实际检查整屏和裁剪 PNG；独立解码器比较 518,400 像素，全部一致。
 - 100 次正常捕获 P95 46.773 ms；两轮各 100 次启动后取消，第二轮在同一进程成功恢复输出 PNG；句柄未随次数增长，静置后资源回落。
 - 默认及 all-features 严格 Clippy、6 项测试、Release 构建通过；默认 EXE 361,472 字节。
-- 完整方法、数值、原始证据位置及限制见 validation/P2.md。
+- 完整方法、数值、原始证据位置及限制见 validation/capture/P2.md。
 - 关联提交主题：feat(capture): validate physical pixels and cancellable sessions。
 - 遗留：多屏实机暂缓；HDR、锁屏与真实热插拔尚未验收，P2 不标为全部完成。后续继续可独立实施的部分。
 
@@ -43,7 +43,7 @@
 - 最新原生 GUI 实际启动、捕获成功；用户在诊断输入框完成中文、中英切换和多行输入，真实界面与文本证据已留存。
 - 默认及 all-features 的严格 Clippy、6 项默认测试通过；默认 Release 为 362,496 字节。
 - 关联提交主题：fix(app): cancel on session changes and own hidden window lifecycle。
-- 当前测试窗口保留供用户继续操作。P2 详情及未验证环境继续见 validation/P2.md；HDR 和最终选区/编辑界面尚未完成。
+- 当前测试窗口保留供用户继续操作。P2 详情及未验证环境继续见 validation/capture/P2.md；HDR 和最终选区/编辑界面尚未完成。
 
 ## P2 原生失败与退出回归
 
@@ -63,7 +63,7 @@
 - diagnostics 的显式可访问窗口模式下，真实浅色框选 1000×525、移动保持尺寸、右下调整、底部工具条上移、F 1920×1080 和 Tab 焦点均有截图证据。
 - 真实深色界面验证被用户物理 Escape 中止，已停止电脑输入；Return 取消操作未充分确认，不标为通过。
 - 严格 Clippy 与 9 项 all-features 测试通过；默认/诊断 Release 已构建运行。默认检查点构建单独放在 target/p3-checkpoint，避免覆盖运行中的 EXE。
-- 完整证据、测试模式差异和遗留见 validation/P3.md。
+- 完整证据、测试模式差异和遗留见 validation/capture/P3.md。
 - 关联提交主题：feat(selection): add native frozen selection and Fluent toolbar scaffold。
 - 下一步继续 P3 深色/高 DPI/窗口吸附与边界交互验收，再接入 P4 标注。P2 原遗留、多屏暂缓和最终交付要求均保留。
 
@@ -74,7 +74,7 @@
 - 工具条取消按钮、Tab 两次后空格取消、无活动拖动时 Esc 取消均实际关闭遮罩；Return 及拖动中的 Esc 仍未完成真实输入验证。
 - 发现透明光标辅助窗口抢占整屏候选；开发诊断记录证实其 WS_EX_TRANSPARENT 样式，现按样式过滤这类窗口。深色选择图标改为高对比浅色；两项修正已构建，最终界面复验被用户物理 Escape 中止，未标通过。
 - 新增八点调整/穿越对边、点击窗口裁剪、取消恢复及边缘 1×1 选区重新放大的逻辑回归；12 项 all-features 测试、默认及 all-features 严格 Clippy 通过。
-- 证据与准确验证边界见 validation/P3.md。下一步先复验这两项修正，再完成窗口吸附、边缘极小选区与主题/DPI 矩阵；多屏实机继续按用户要求暂缓。
+- 证据与准确验证边界见 validation/capture/P3.md。下一步先复验这两项修正，再完成窗口吸附、边缘极小选区与主题/DPI 矩阵；多屏实机继续按用户要求暂缓。
 - 关联提交主题：fix(selection): filter transparent overlays and validate dark interactions。
 
 ## P3 窗口吸附收口与边缘布局修正
@@ -85,7 +85,7 @@
 - 小选区使用最近调整点，增加横向/纵向/对角调整与移动光标；按钮增加按下态，悬停提示按屏幕收纳；窗口候选裁剪到冻结图像范围，F 全屏会释放活动鼠标捕获。
 - 14 项 all-features 测试、默认及 all-features 严格 Clippy、fmt 与默认 Release 构建通过。最新默认 EXE 368,640 字节，位于独立 target/p3-validation 目录。
 - 默认 ToolWindow 输入、拖动中 Esc、最新边缘布局/按下态/光标的完整实机复验仍未完成；系统设置启动后没有暴露可操作窗口，150%/200% 和系统主题实时变化未验证。用户随后物理 Escape 中止电脑操作，已停止界面输入。
-- P3 不标为完全验收；输出污染检查须随 P5 的真实输出链路联验，参数条随 P4 工具接入验收，多屏实机按用户要求暂缓。详见 validation/P3.md。
+- P3 不标为完全验收；输出污染检查须随 P5 的真实输出链路联验，参数条随 P4 工具接入验收，多屏实机按用户要求暂缓。详见 validation/capture/P3.md。
 - 关联提交主题：fix(selection): keep edge labels visible and refine interaction states。
 
 ## 启动错误修复与改名后回归
@@ -93,7 +93,7 @@
 - 已接续改名后的 kiki 仓库；上轮未提交修复已完成构建与自动检查，未覆盖其他会话的改名提交。
 - 托盘创建失败不再因销毁窗口覆盖错误状态而误报“操作成功”；启动失败返回退出码 1，已在受限环境实际验证。
 - 正常桌面环境 30 次独立启动均注册热键成功并生成 CSV：P95 37.861 ms，最大 48.294 ms。解决此前图标轮次未取得启动采样文件的验证缺项，但托盘图标视觉仍未验收。
-- fmt、默认及 all-features 严格 Clippy、各 14 项测试、两种 Release 构建通过；默认 EXE 477,184 字节。环境、方法、数据路径见 validation/STARTUP.md。
+- fmt、默认及 all-features 严格 Clippy、各 14 项测试、两种 Release 构建通过；默认 EXE 477,184 字节。环境、方法、数据路径见 validation/engineering/STARTUP.md。
 - 真实浅色窗口已启动并枚举；电脑操作授权超时，没有取得新画布截图，P3 最新边缘交互、默认 ToolWindow、高 DPI 与其余视觉项仍未通过。测试程序仍可驻留托盘。
 - 下一步继续上述 P3 实机验收，再推进 P4；P2 多屏暂缓、HDR 等遗留不变，首版未完成。
 - 关联提交主题：fix(app): report tray startup failures and validate renamed build。
@@ -105,7 +105,7 @@
 - 新增平台无关标注模型：矩形、箭头、整笔画笔；顶层轮廓命中、移动、矩形八点与箭头两端调整、删除、样式变更。标注使用全局物理坐标，调整截图选区不平移或删除标注。
 - 接通原生画布事件、三种绘图工具、颜色/粗细参数条、撤销/重做按钮与 Ctrl+Z/Ctrl+Y/Delete。样式按当前屏幕缩放转换为物理线宽，预览裁剪到最终选区。
 - 一次连续操作只入一条撤销记录，新操作清空 redo，历史最多 100 项；不保存底图副本。对象最多 1024 个，单笔最多 16384 个采样点，达到上限会明确提示。
-- fmt、默认及 all-features 严格 Clippy、20 项 all-features 测试通过；默认 Release 构建成功（499,712 字节），详见 validation/P4.md。
+- fmt、默认及 all-features 严格 Clippy、20 项 all-features 测试通过；默认 Release 构建成功（499,712 字节），详见 validation/annotation/P4.md。
 - 实际运行诊断构建：框选 1063×525、浅色工具条、参数条及几何标注真实可见；中途画布可能有用户手动操作，不把混合输入归为完整脚本验收。运行证据已保存；后续小修正尚待 GUI 复验。
 - 本轮未接通文字与中文 IME、输出；深色参数条/高 DPI/全部编辑手势实机矩阵未验收。下一步继续 P4 的文字、多行、再次编辑和文本快捷键优先级，再联验输出语义；不返回 P3 消耗本轮任务范围。
 - 关联提交主题：feat(annotation): add editable geometric objects and bounded undo history。
@@ -119,7 +119,7 @@
 - fmt、默认/all-features 严格 Clippy、24 项 all-features 测试及两种 Release 构建通过；默认 EXE 526,336 字节。最终诊断构建启动探针退出码 0，热键注册成功，单次就绪 36.675 ms（不作为性能统计）。
 - 浅色真实窗口中已检查中文 Unicode 字符、多行、普通 F 字符、Enter 换行、Ctrl+Enter 提交及重编选中。发现 Ctrl+Enter 额外插入空行，已修正并增加原生消息回归；最新修正仍待 GUI 复验。
 - 最终深色窗口读取前已关闭；真实拼音候选、重编取消/IME 候选交互、深色输入框与参数键盘访问等完整 GUI 矩阵未验收。没有用 Unicode 注入或模拟 IME 消息冒充真实拼音通过。
-- 原始界面证据、边界和下一步见 validation/P4_TEXT.md。P4 继续进行，P3 按用户要求暂缓；下一步以真实 IME/编辑取消回归和 P5 合成输出联验收口。
+- 原始界面证据、边界和下一步见 validation/annotation/P4_TEXT.md。P4 继续进行，P3 按用户要求暂缓；下一步以真实 IME/编辑取消回归和 P5 合成输出联验收口。
 - 关联提交主题：feat(annotation): add native multiline text editing and IME routing。
 
 ## P4 成图语义与 P5 基础
@@ -127,7 +127,7 @@
 - 本轮深色窗口在绑定前已消失，真实 IME、取消、深色等原遗留继续保留；未反复唤起截图。
 - 提取预览与输出共用的 annotation_render，新增仅供 diagnostics/test 的 WIC/Direct2D 干净成图；保持全局物理坐标、透明间隙与独立底图所有权，排除对象选择框和 UI 装饰。
 - 25 项 all-features 测试、fmt、两种配置严格 Clippy 与两种 Release 构建通过。独立成图与完整成图裁剪的 84,000 个像素逐字节一致；底图和选中状态相关回归通过。
-- 实际运行 --annotation-probe 并打开两张 PNG，分别为明确的测试底图和真实 WGC 桌面裁剪加诊断标注；中文与三种几何标注可见。原始文件位于忽略目录 artifacts/p4-composition，详见 validation/P4_COMPOSITION.md。
+- 实际运行 --annotation-probe 并打开两张 PNG，分别为明确的测试底图和真实 WGC 桌面裁剪加诊断标注；中文与三种几何标注可见。原始文件位于忽略目录 artifacts/p4-composition，详见 validation/annotation/P4_COMPOSITION.md。
 - 默认 EXE 526,336 字节；composition 尚未进入默认用户输出链路，无新增依赖。P5 下一步接后台合成、剪贴板和原生保存，继续保留失败后的编辑状态；P3 暂缓及 P4 未验收项不变。
 - 关联提交主题：feat(render): share annotation painting with clean image composition。
 
@@ -138,7 +138,7 @@
 - 原生 PNG 保存对话框、默认文件名与本进程最近目录已接通；跨重启目录配置、贴图和完整失败路径实机矩阵尚待完成。
 - 28 项 all-features 测试、fmt、两种配置严格 Clippy及两种 Release 构建通过；默认 EXE 595,968 字节。
 - 真实保存按钮/Ctrl+S 打开原生对话框，Esc 返回选区通过。GUI 文件名自动化未完成，不标保存成功。
-- 真实 Enter 复制后窗口关闭；退出原进程后只读检查仍有 PNG/CF_DIB/DIBV5，尺寸 3420×2042；实际打开 PNG 确认没有截图 UI。详见 validation/P5.md。
+- 真实 Enter 复制后窗口关闭；退出原进程后只读检查仍有 PNG/CF_DIB/DIBV5，尺寸 3420×2042；实际打开 PNG 确认没有截图 UI。详见 validation/output/P5.md。
 - P5 继续进行，下一批为多张置顶贴图，并补常见应用粘贴和 GUI 保存失败矩阵。P3 按用户要求仍暂缓，其余原遗留保留。
 - 关联提交主题：feat(output): connect clipboard and atomic PNG save pipeline。
 
@@ -149,7 +149,7 @@
 - 实际验证两张并存、110% 缩放、100% 恢复、拖动、单张关闭、原生 GUI 保存成功及取消保留；640×360 原图的保存和剪贴板 PNG 哈希完全一致。实际 Ctrl+P 从截图生成真实桌面贴图。最终软件表面另验证深色悬停/缩放提示及相同复制结果。
 - 31 项 all-features 测试、fmt、默认及 all-features 严格 Clippy、两种 Release 构建通过。默认 EXE 656,384 字节，检查点位于 target/p5-pin-checkpoint。
 - 十轮四张 4K 资源采样发现初版句柄增长，已改为共享工厂、最终软件表面及最后窗口关闭后释放工厂。最终开/关句柄固定 209/180；关闭后私有内存仍约 245 MiB，属于待优化风险，未达到闲置内存目标。
-- 画图启动的电脑操作授权等待超时，没有绕过，应用粘贴仍待验收。菜单点击、托盘关闭全部 GUI、最终表面完整矩阵、输出失败矩阵与多屏/混合 DPI 仍待完成。详见 validation/P5_PINNED.md。
+- 画图启动的电脑操作授权等待超时，没有绕过，应用粘贴仍待验收。菜单点击、托盘关闭全部 GUI、最终表面完整矩阵、输出失败矩阵与多屏/混合 DPI 仍待完成。详见 validation/pinned/P5_PINNED.md。
 - P5 继续进行，P3 仍按用户要求暂缓；没有开始 P6，也未推送远端。
 - 关联提交主题：feat(pinned): add independent image windows and bounded display zoom。
 
@@ -160,7 +160,7 @@
 - Word 2016 实际粘贴完整中文/几何测试图；最终菜单恢复比例、保存 PNG 已实测。保存与复制 640×360 PNG 哈希一致，4K 图缩小显示后复制仍为 3840×2160。
 - 用户通过托盘确认四张全部关闭；随后窗口枚举为空、采样 count=0。可见 4K 关闭前/后 private bytes 313.50→58.24 MiB，GPU local 155.32→17.07 MiB；十轮隐藏 4K 最终 private bytes 53.28 MiB、GPU local 13.93 MiB，句柄稳定回落。
 - 新增原生消息泵集成回归，实际覆盖只读文件、独占文件锁、剪贴板占用、取消/退出、重试成功、提交中文草稿后贴图、失败保留标注和无隐含剪贴板/文件副作用；共 32 项测试通过。
-- 默认及 all-features 严格 Clippy、fmt、两种 Release 构建通过。默认 EXE 664,576 字节，位于 target/p5-pin-checkpoint。详见 validation/P5_COMPLETION.md。
+- 默认及 all-features 严格 Clippy、fmt、两种 Release 构建通过。默认 EXE 664,576 字节，位于 target/p5-pin-checkpoint。详见 validation/output/P5_COMPLETION.md。
 - 本次资源指标不等同于私有工作集，P7 的 ≤20 MiB 目标还需测量与优化；更多应用、真实 IME、多屏/混合 DPI、HDR 仍按原阶段矩阵推进，不将其标为已通过。
 - 关联提交主题：fix(p5): reclaim pinned resources and complete output recovery validation。未推送。
 
@@ -169,7 +169,7 @@
 - 当时整理了 P6 临时交接；该文件现已由当前进度入口取代。
 - 已实际查看 03 设置设计稿，实现版本化配置模型、后台有界原子写入/损坏保护及事务式热键注册基础，暂在测试构建中启用，等待运行时和六页设置 UI 接入。
 - 新增 6 项实际回归，全套 all-features 38 项测试通过；原生热键冲突、控件往返、锁定文件、损坏恢复、最后版本保存均有验证。没有配置用户实际开机启动，没有写入用户真实配置。
-- fmt、默认及 all-features 严格 Clippy、默认 Release 构建通过。本轮没有设置窗口 GUI 验收，P6 不标完成；详见 validation/P6.md。
+- fmt、默认及 all-features 严格 Clippy、默认 Release 构建通过。本轮没有设置窗口 GUI 验收，P6 不标完成；详见 validation/settings/P6.md。
 - 关联提交主题：feat(settings): add configuration and hotkey transaction foundations。当时下一步为运行时管理器接入。
 
 
@@ -179,7 +179,7 @@
 - 主题覆盖设置、截图、文字输入、贴图及菜单；提示、新截图默认颜色/线宽/字号和最近保存目录生效。托盘增加设置/当前屏幕截图，第二实例命令可唤回已有程序。
 - 开机启动仅用户显式操作时配置，含当前路径引号和旧路径修复；关于页提供版本、目录、帮助和完整嵌入许可。验收未修改实际开机启动或用户真实配置。
 - 默认及 all-features 各 41 项测试、双配置严格 Clippy、fmt、两种 Release 构建通过。默认 EXE 为 976,896 字节，标准路径 target/x86_64-pc-windows-msvc/release/kiki.exe。
-- 本机单屏 SDR / 125% 实测深浅主题、热键修改/恢复/聚焦保护、重启保持、关闭设置后后台保留、许可全文、测试贴图深色菜单与当前屏幕截图；默认蓝色、8 px 和关闭提示在新截图生效。原始证据放忽略的 artifacts，详见 validation/P6.md。
+- 本机单屏 SDR / 125% 实测深浅主题、热键修改/恢复/聚焦保护、重启保持、关闭设置后后台保留、许可全文、测试贴图深色菜单与当前屏幕截图；默认蓝色、8 px 和关闭提示在新截图生效。原始证据放忽略的 artifacts，详见 validation/settings/P6.md。
 - P3 继续暂缓，P2 多屏/HDR、P4 真实 IME、150%/200% 与混合 DPI、系统主题实际广播、登录自启实机验证保留；P7 性能目标尚未验收。
 - 关联提交主题：feat(settings): finish preferences themes and startup behavior。下一步 P7，未推送远端。
 
@@ -193,14 +193,14 @@
 - 200 轮后闲置 61.010 秒，CPU 0.000%，私有工作集 40.867 MiB，超过 20 MiB 目标。GDI 22，USER 118。USER 对象在可见贴图阶段持续增长。后续对照见下节。
 - 前一审核构建完成 100 轮四张独立 4K 图，最后一轮打开 / 关闭句柄为 294 / 270，关闭两秒后 private bytes 53.78 MiB、GPU local 14.19 MiB。100 次捕获开始后取消及恢复通过，中心裁剪 518,400 像素逐字节一致。
 - 深浅设置、缩窗和滚动、深浅截图边缘工具条，以及最终浅色贴图菜单、关闭和恢复原比例已实测。修复首次设置不可见、交换链挡住原生输入框和 IME 拦截 F。用户确认实际中文输入并复制，已检查含两行中文的 1920×1080 剪贴板成图及三种图像格式。
-- 默认及 all-features 各 41 项测试，双配置严格 Clippy、fmt、Release 构建通过。默认 EXE 为 980,992 字节。完整样本和验证范围见 validation/P7.md。P7 保持进行中，P3 继续暂缓，P8 尚未开始。
+- 默认及 all-features 各 41 项测试，双配置严格 Clippy、fmt、Release 构建通过。默认 EXE 为 980,992 字节。完整样本和验证范围见 validation/engineering/P7.md。P7 保持进行中，P3 继续暂缓，P8 尚未开始。
 - 关联提交主题为 perf(app): share graphics resources and measure P7 lifecycle 和 fix(theme): cache resolved system appearance between notifications。
 
 ## P7 贴图 USER 对象复现与隔离
 
 - 原构建重跑 200 轮，贴图阶段在第 129 轮开始出现跃升。USER 关闭后从 22 增至 112，闲置 60 秒仍为 112，私有工作集 40.742 MiB。同期首次观察到 threadpoolwinrt.dll，具体对象类型尚未定位。
 - 停用鼠标离开跟踪、延后激活、显示时不主动激活、保留输出任务但跳过成图都出现过增长。三组完整对照在最终关闭后分别为 USER 112、102、111。候选改动已撤回，普通截图与贴图路径保留原行为。
-- 默认及 all-features 各 41 项测试通过，双配置严格 Clippy 和 Release 构建通过。对照方法和原始记录目录见 validation/P7.md。重复捕获与重复可见窗口的后续交叉对照见下节。
+- 默认及 all-features 各 41 项测试通过，双配置严格 Clippy 和 Release 构建通过。对照方法和原始记录目录见 validation/engineering/P7.md。重复捕获与重复可见窗口的后续交叉对照见下节。
 
 ## P7 本机回归收口
 
@@ -218,7 +218,7 @@
 - 在含中文和空格的全新解压目录，以最小环境和系统 PATH 启动普通版。Windows 11 x64 设置可见，启动和触发捕获后仅加载 Windows 系统目录内的模块。程序写入首次使用配置。
 - 默认及 all-features 各 41 项测试通过，双配置严格 Clippy、fmt、普通 Release 构建通过。独立无开发工具系统待验。
 - 用户使用解压版保存截图并确认 Word 粘贴、Ctrl+P 置顶贴图和 Esc 关闭通过。已解码窗口和区域 PNG，补测 874×347 PNG 中的矩形和箭头可见。
-- 快速使用、版本变更、性能继承和限制见 README、CHANGELOG.md 和 validation/P8.md。
+- 快速使用、版本变更、性能继承和限制见 README、CHANGELOG.md 和 validation/engineering/P8.md。
 - 关联提交主题为 chore(release): prepare Windows v0.1.0 portable package。
 
 ## P3/P4 截图界面优化
@@ -231,34 +231,34 @@
 - 关联提交主题：fix(annotation): render solid arrows and continuous pen strokes。
 - 接通透明无窗口 Rich Edit、随内容伸缩的细边框和输入时边框拖动。选择工具支持拖动文字、自由旋转与重编，旋转进撤销历史和共用成图。
 - 用户确认透明输入并提供包含箭头、笔画和多行中文的人工成图。Release 探针 PNG 核对旋转中文字；默认和全特性各 43 项通过，双配置严格 Clippy、rustfmt、Release 构建通过。
-- 修正版 ZIP 和 SHA-256 已生成并验算 16 个文件。单次 WGC 首帧及读回为 67.4654 ms。详见 [界面优化验证](validation/UI_POLISH.md)。
+- 修正版 ZIP 和 SHA-256 已生成并验算 16 个文件。单次 WGC 首帧及读回为 67.4654 ms。详见 [界面优化验证](validation/capture/UI_POLISH.md)。
 - 关联提交主题：feat(annotation): add transparent text editing and rotation。下一步实机复测深浅工具条、旋转手柄、拼音候选和高 DPI，延续多屏及 HDR 遗留。
 
 ## P3 工具条按 01-capture.png 对照修订
 
 - 主工具条按参考图的面板、按钮与分隔线比例定位。11 个图标改为原生矢量轮廓，普通按钮保留 42×36 DIP 命中区。
 - 125% 单屏在运行中的 Release 诊断版截图上核对浅色与深色主栏。全特性 43 项测试、严格 Clippy、rustfmt 和两种 Release 构建通过。
-- 已重新生成便携 ZIP 与校验文件并验证 16 个解压文件。截图和数据详见 [界面优化验证](validation/UI_POLISH.md)。下轮继续验证高 DPI、跨屏及文字编辑实机遗留。
+- 已重新生成便携 ZIP 与校验文件并验证 16 个解压文件。截图和数据详见 [界面优化验证](validation/capture/UI_POLISH.md)。下轮继续验证高 DPI、跨屏及文字编辑实机遗留。
 - 关联提交主题：fix(selection): match capture toolbar to approved artwork。
 
 ## P6 设置页按 03-settings.png 对照修订
 
 - 设置窗口调整为蓝灰分栏、带图标的导航、粗体页标题与细边框卡片。通用页对齐三组设置，开机启动保留原生操作并绘制为开关。
 - 核对 125% 下的浅色通用页与贴图页。全特性 43 项测试、严格 Clippy、rustfmt 和两种 Release 构建通过。深色实际界面和其他缩放比例继续待验。
-- 已重新打包并验证全部 16 个解压文件。产物和截图见 [P6 验证](validation/P6.md)。关联提交主题：fix(settings): align settings window with approved design。
+- 已重新打包并验证全部 16 个解压文件。产物和截图见 [P6 验证](validation/settings/P6.md)。关联提交主题：fix(settings): align settings window with approved design。
 
 ## P6 设置页按 05-settings-layout.png 重新设计
 
 - 六页采用无外框布局，通过标题、对齐和间距组织信息。仅在大功能模块间加入细分割线。侧栏与标题栏、托盘共用软件图标。
 - 截图页使用开关、色点、线宽示例与字号选项，外观页使用真实主题预览按钮。共享布局计算控制滚动范围及原生控件位置。
 - 125% 单屏检查浅色通用、截图及浅深色外观。最终桌面复查由用户停止。默认与全特性各 43 项测试、严格 Clippy、rustfmt 和两种 Release 构建通过。
-- 已打包并核对全部 16 个解压文件。证据、SHA-256 和待验环境见 [P6 验证](validation/P6.md)。
+- 已打包并核对全部 16 个解压文件。证据、SHA-256 和待验环境见 [P6 验证](validation/settings/P6.md)。
 - 关联提交主题：fix(settings): redesign settings layout and reuse app icon。
 
 ## P6 设置控件平滑边缘
 
 - 改用 Direct2D 抗锯齿绘制开关、色点、圆角按钮、缩略图和边框，并处理快捷键控件的系统直角框。
-- 125% 缩放下实机检查浅深色截图页。绿色色点截图像素实测出现边缘过渡色。最终一轮桌面复查由用户按 Esc 停止，待验项见 [P6 验证](validation/P6.md)。
+- 125% 缩放下实机检查浅深色截图页。绿色色点截图像素实测出现边缘过渡色。最终一轮桌面复查由用户按 Esc 停止，待验项见 [P6 验证](validation/settings/P6.md)。
 - 默认与全特性各 44 项测试通过，严格 Clippy、格式及两种 Release 构建通过。便携 ZIP 已解压并核对 16 个文件。
 - 关联提交主题：fix(settings): antialias rounded controls。
 
@@ -266,42 +266,42 @@
 
 - 菜单仅显示开始截图、设置、关闭贴图、退出。关闭贴图仍一次关闭所有置顶贴图。菜单宽度随文字计算，采用轻分隔线和圆角。
 - 125% 单屏实测浅深色原生菜单。默认和全特性各 44 项测试、严格 Clippy、rustfmt 及两种 Release 构建通过。
-- 新便携 ZIP 已解压核对 16 个文件。截图、校验与验证范围见 [P6 验证](validation/P6.md)。
+- 新便携 ZIP 已解压核对 16 个文件。截图、校验与验证范围见 [P6 验证](validation/settings/P6.md)。
 - 关联提交主题：fix(tray): simplify and compact the context menu。
 
 ## P6 托盘菜单硬阴影修正
 
 - 隐藏与托盘菜单对应的独立阴影，保留原生圆角和细边框。
 - 125% 单屏对照实际菜单修正前后，并检查深色主题。默认和全特性各 44 项测试、严格 Clippy、rustfmt 及两种 Release 构建通过。
-- 新便携 ZIP 已解压核对 16 个文件，详见 [P6 验证](validation/P6.md)。
+- 新便携 ZIP 已解压核对 16 个文件，详见 [P6 验证](validation/settings/P6.md)。
 - 关联提交主题：fix(tray): remove the duplicate menu shadow。
 
 ## P6 设置窗口标题栏留空
 
 - 隐藏标题栏左侧的图标和文字。保留右侧系统窗口按钮、系统窗口名称和侧栏品牌。
 - 125% 单屏实测浅色与深色窗口。默认和全特性各 44 项测试、严格 Clippy、rustfmt 及两种 Release 构建通过。
-- 已生成便携 ZIP 并核对 16 个解压文件，详见 [P6 验证](validation/P6.md)。
+- 已生成便携 ZIP 并核对 16 个解压文件，详见 [P6 验证](validation/settings/P6.md)。
 - 关联提交主题：fix(settings): hide the caption icon and text。
 
 ## P6 快捷键录入文字提示
 
 - 快捷键输入条改为文字提示。录入时无系统插入光标，新组合注册成功后显示当前组合。
 - 125% 单屏实查浅色和深色录入样式。默认和全特性各 44 项测试、严格 Clippy、rustfmt 及两种 Release 构建通过。
-- 便携 ZIP 已生成并核对 16 个解压文件，详见 [P6 验证](validation/P6.md)。
+- 便携 ZIP 已生成并核对 16 个解压文件，详见 [P6 验证](validation/settings/P6.md)。
 - 关联提交主题：fix(settings): show a text prompt for hotkey recording。
 
 ## P6 首次使用与界面整理
 
 - 通用页突出开始截图。首次普通启动进入通用页，再次启动回到托盘。设置入口收起窗口后开始截图，失败时恢复窗口。
 - 设置和托盘统一暖灰、松绿及文案。菜单显示有效快捷键。快捷键冲突不再阻止无关设置保存。截图提示按框选阶段显示并避开任务栏。
-- 125% 单屏实查首次启动、截图入口、浅深菜单与提示。默认和全特性各 44 项测试、严格 Clippy、rustfmt 和两种 Release 构建通过。ZIP 解压核对 16 个文件，详见 [P6 验证](validation/P6.md)。
+- 125% 单屏实查首次启动、截图入口、浅深菜单与提示。默认和全特性各 44 项测试、严格 Clippy、rustfmt 和两种 Release 构建通过。ZIP 解压核对 16 个文件，详见 [P6 验证](validation/settings/P6.md)。
 - 关联提交主题：feat(settings): guide first-time users into capture。
 
 ## 截图与图标统一主题
 
 - 截图界面、设置和托盘共用暖灰与松绿配色。应用图标在九个尺寸上保留白色爪印与透明边缘，底板改为松绿。
 - 125% 单屏核对浅深色工具条、参数条和设置图标。同一份测试标注 PNG 前后逐字节一致。默认和全特性各 44 项测试、严格 Clippy、rustfmt 及两种 Release 构建通过。
-- 便携 ZIP 已生成并核对 16 个解压文件，详见 [界面优化验证](validation/UI_POLISH.md)。
+- 便携 ZIP 已生成并核对 16 个解压文件，详见 [界面优化验证](validation/capture/UI_POLISH.md)。
 - 关联提交主题：feat(theme): bring pine colors to capture and app icon。
 
 ## v0.2.1 版本交付
@@ -310,12 +310,146 @@
 - Rust 1.88.0 下默认和全特性各 44 项测试通过，两套严格 Clippy、rustfmt、普通 Release 构建及差异检查通过。
 - `dist/kiki-v0.2.1-windows-x64.zip` 为 526,918 字节。解压到含中文和空格的路径，逐一核对全部 16 个文件的 SHA-256，并读取解压后 EXE 的文件版本、产品版本和嵌入清单。
 - ZIP 的 SHA-256 为 `377aa910de2652d1e0e886d94f6ce7afd228e081edd26a68aafe76ea38e35c12`。版本提交主题为 `chore(release): prepare v0.2.1`，主分支版本标签为 `v0.2.1`。
-- 实机界面及成图记录见 [界面优化验证](validation/UI_POLISH.md) 和 [设置与托盘验证](validation/P6.md)。多显示器、混合 DPI、HDR 及完整 IME 验收仍按 [P8 报告](validation/P8.md) 跟踪。
+- 实机界面及成图记录见 [界面优化验证](validation/capture/UI_POLISH.md) 和 [设置与托盘验证](validation/settings/P6.md)。多显示器、混合 DPI、HDR 及完整 IME 验收仍按 [P8 报告](validation/engineering/P8.md) 跟踪。
 
 ## 统一版本与标签发布自动化
 
 - 根目录 `VERSION` 是发布版本来源。同步脚本更新 Cargo 包版本及锁文件，构建脚本校验版本并生成嵌入 EXE 的 Windows 清单。
 - 本地与 GitHub Actions 共用 Windows x64 打包脚本，生成包含 EXE、说明和许可的 ZIP 及 SHA-256。新建 `vX.Y.Z` 标签推送后触发工作流，标签匹配时将两个文件附到 GitHub Release。
 - 本机验证 v0.2.1 便携包和独立副本中的 v0.2.2 升版包，核对 ZIP 内容、校验值、EXE 版本、嵌入清单以及版本错配的拒绝路径。格式检查、全特性严格 Clippy 和正常 Windows 会话中的 44 项全特性测试通过。
-- 正式版本记录为 0.2.1。云端触发、构建和 Release 上传待首次推送新标签时验证。步骤和本机证据见 [发布说明](RELEASING.md) 与 [P8 报告](validation/P8.md#自动打包与标签发布)。
+- 正式版本记录为 0.2.1。云端触发、构建和 Release 上传待首次推送新标签时验证。步骤和本机证据见 [发布说明](RELEASING.md) 与 [P8 报告](validation/engineering/P8.md#自动打包与标签发布)。
 - 关联提交主题为 `ci(release): automate versioned Windows packages`。
+
+## 2026-11-13 归档：功能阶段与维护记录
+
+以下从当时的 PROGRESS.md 移入，保留原有测试条件、失败样本、提交及“下一步”语境；这些下一步不是当前任务。当前版本与缺项仍以 [PROGRESS.md](PROGRESS.md) 为准。
+
+## v1.0.8 · 截图设置滑块闪烁
+
+- 滑块和对应数值框通过同一缓冲区提交。圆角变化同步刷新示意图，保存成功只更新页脚。
+- 单屏 125% 下复测浅深主题全部七条滑块，1,724 个拖动过程帧与各位置参考帧逐像素一致。实际鼠标拖动、键盘输入、滚轮、重启和截图贴图通过。默认及全特性测试各通过 82 项，跳过 6 项。 [验收记录](validation/settings/settings-slider-v1.0.8.md)
+- Windows x64 便携包已解压核验。本地提交主题为 `fix(settings): stop flicker while dragging capture sliders`。其他实机 DPI 待补测。
+
+## v1.0.7 · 设置滚动闪烁复修
+
+- v1.0.6 的浅深主题仍有控件消失、错位和文字重影。现在滚动位置不变时跳过重绘，移动时将页面与可见控件绘制到同一缓冲区，再整帧提交。
+- 单屏 125% 逐帧对照六页，深色 221 帧、浅色 236 帧未检出上述闪烁。原生滚轮、数值框、确认框和实际贴图通过，默认及全特性测试各通过 82 项、跳过 6 项。Windows x64 ZIP 已解压核验。 [验收记录](validation/settings/settings-flicker-v1.0.7.md)
+- 本地提交主题为 `fix(settings): present complete frames during scrolling`。其他 DPI 及录屏中的原始中键手势仍待复测。
+
+## v1.0.6 · 设置快滚重绘
+
+- 修复快速滚动截图设置时滑杆、数值框和按钮闪白。设置背景与原生控件统一由 Win32 缓冲合成，滚动时批量调整控件位置并重绘。
+- 125% 单屏实测快滚。最终 Release 诊断版深色 208 帧、浅色 204 帧均未检出白块特征。默认和全特性测试各通过 82 项、跳过 6 项，Windows x64 ZIP 已校验。 [验收记录](validation/settings/settings-scroll-v1.0.6.md)
+- 本地提交主题为 `fix(settings): prevent white flashes during fast scrolling`。其他 DPI 和既有环境项继续按下方记录补验。
+
+## v1.0.5 · 设置布局调整
+
+- 「快捷键」集中显示四项固定贴图快捷键。「截图」页进入即可在「截图提示」上方使用「恢复默认」。
+- 浅深主题下检查了三个原生设置页，实测恢复默认的取消、确认与配置写入，并核对了真实截图生成的贴图。默认与全特性测试各通过 82 项、跳过 6 项。Windows x64 ZIP 已打包、解压并复核校验值。 [验收记录与截图](validation/settings/settings-layout-v1.0.5.md)
+- 实现与验收记录同批提交，主题为 `fix(settings): consolidate pinned shortcuts and move capture reset`。后续继续按下方记录补验内置浏览器长截图漏段及既有环境项。
+
+## v1.0.4 · 长截图远程显示
+
+- 用户对照确认，UU 远程点击长截图时出现整屏画面、滚轮操作异常，本机键鼠操作正常。
+- 长截图预览优先放在选区外，使 Windows 桌面捕获能看到遮罩及预览，成图只读取原选区。预览与选区无法错开时沿用捕获排除。
+- Windows 原生桌面捕获、滚轮拼接及 PNG 验证通过。用户确认本次问题已修复，按要求合入 `main` 并创建本地标签 `v1.0.4`。内置浏览器漏段仍见 v1.0.3 的验收记录。 [验收记录](validation/long-capture/long-capture-v1.0.4.md)
+
+## v1.0.3 候选 · 长截图启动与滚轮修复
+
+- 启动时沿用已选区域，保留遮罩窗口的焦点，并开放选区供源应用接收输入。遇到其他窗口或临时浮层时跳过该次滚轮，返回正文后可继续采集。
+- 首帧失败时关闭当前采集并提示拖动重选。重选只接收拖动框选，单击最大化窗口不会吸附整窗。Esc 可结束会话。
+- 默认和全特性套件各通过 82 项。Windows 原生回归另测临时浮层、工具条启动、滚轮拼接、失败恢复和 PNG 输出。ZIP 已解压核对。
+- 在 Codex 内置浏览器的 Daily 页面复现拼接漏段。两轮正文都能滚动，但导出的长图分别只比选区高 31 px 和 67 px。下一步记录滚动帧及接缝判定，定位漏段原因。 [验收记录](validation/long-capture/long-capture-v1.0.3.md)
+
+## v1.0.2 · F12 本地版本
+
+- 按复测反馈恢复撤销按钮。它在普通截图、长图编辑和设置预览中常驻，有编辑历史时可点击撤销。重做通过 Ctrl+Y 操作，复制仍为双页图标。
+- 修订版默认及全特性测试各通过 82 项，覆盖 256 种工具开关组合、四档缩放、窄屏和两个编辑器中的鼠标与键盘撤销。Windows x64 ZIP 已重新打包并核对。
+- 修订版在单屏 125% 下复核浅深主题的撤销显示与设置预览。深色普通截图中，绘制矩形后按钮亮起，点击撤销后矩形消失且按钮变灰，Ctrl+Y 恢复并保存 PNG。长图编辑实机、实际粘贴及中文 IME 候选缺项见 [F12 验收报告](validation/capture/F12-v1.0.2.md)。
+- 按复测标注将长截图、取色和撤销合为一组。浅色设置预览实机可见，用户提供的深色截图确认实际工具条与预览一致。两套测试各通过 82 项，新候选 ZIP 已重新打包并核对。
+- 按用户要求快进合入本地 `main` 并创建带说明的 `v1.0.2` 标签。发布记录与 ZIP 校验值见 [F12 验收报告](validation/capture/F12-v1.0.2.md)。
+
+## v1.0.1 · 发布流程验证版
+
+- 在本地 `main` 准备补丁版本和带中文更新介绍的标签，用于验证 GitHub Release 正文和附件。该版本占用原计划版本号，F12 顺延至 `v1.0.2`。 [版本变更](CHANGELOG.md)
+- Rust 1.88.0 / Windows x64 上通过格式检查和 Release 打包。解压核对 16 个文件、x64 架构、EXE 文件和产品版本、内嵌清单、编译后的「关于」文本以及 ZIP 校验文件。
+- ZIP `dist/kiki-v1.0.1-windows-x64.zip` 的 SHA-256 为 `78c46969a0612de943739e5bdec27682765f6585594a43e6c9ad3042a871965e`。包内 EXE 的 SHA-256 为 `dcf6116b2a5c0614915a46d3d170feee8ce03c9b5f4157ca1b641400f32f733c`。
+- 本地提交为 `ce16c18`。维护者确认推送 `v1.0.1` 后 GitHub Release 正常发布。后续标签的 Release 正文使用英文。 [打包与发布](RELEASING.md)
+
+## 最近维护 · 版本与发布说明
+
+- 构建和打包统一从 `VERSION` 取得应用版本，移除版本同步脚本。GitHub Release 正文取自带说明标签，发版步骤见 [打包与发布](RELEASING.md)。
+- Rust 1.88.0 / Windows x64 上通过格式检查、全特性 Clippy 和 Release 打包。默认及全特性测试串行各通过 81 项、跳过 4 项。默认测试并行运行时曾有一项原生输出重试时序失败，串行复测通过。
+- 在独立副本只改 `VERSION`，分别核对 1.0.0 与 2.34.65535 的「关于」编译文本、EXE 版本资源、内嵌清单及 ZIP。两份 ZIP 各 16 个文件，架构和 SHA-256 校验通过。错误标签和无效版本均被拒绝，锁文件内容一致。
+- 工作流 YAML 解析通过。本地浅克隆保留了标签中的多行中文 Markdown，模拟 GitHub CLI 调用核对了标签、正文来源和两个附件参数。
+- 本地提交主题为 `chore(release): centralize app version and use tag notes`。
+
+F03 实现 8–256 px 连续字号、滚轮、数值输入和配置同步。用户确认滚轮及设置双向同步，并提供浅色和深色成图。默认和全特性各 54 项通过，重启后保留字号。已按用户要求快进合并并创建本地 `v0.5.0` 版本标签，ZIP 经解压与哈希核对。
+
+F02 随 F03 的提交历史合入主分支，独立候选版的验收缺项见 F02 报告。F03 的真实 IME 候选组合、其他 DPI 和三条输出路径的同图对照仍待补。
+
+F04 在截图设置加入 0–256 px 圆角及即时示意。用户确认设置和滚轮生效，附件四角 Alpha 为 0。v0.6.1 修复滚动条出现时数值框偏移。首次进入和切回截图页的原生回归通过，默认及全特性各 55 项通过，ZIP 已解压核对。待补修复版界面截图、重启持久化、深色预览、实机多 DPI 和跨屏间隙，以及同一内容保存、复制与贴图的对照。
+
+F05 在截图设置增加默认格式，截图与贴图共用原生另存为。PNG 保留透明，JPEG 将透明像素合成到白底并以 90% 品质编码。用户提交两种格式的保存文件并确认深色模式通过。最终默认及全特性测试各 56 项通过，ZIP 与内置 EXE 的 SHA-256 已复核。待补最终下拉箭头的实机截图、贴图另存为、剪贴板实际粘贴、重启读取和多 DPI／跨屏实机矩阵。
+
+F06 增加截图设置的恢复默认入口与确认框。125% 浅深主题下验证了取消、确认、保存失败和重试。默认和全特性测试各 57 项通过，原生用例覆盖活动标注和草稿、重复恢复、配置重载及新截图初值。ZIP 已解压并核对版本与哈希。整进程重启录像及其他 DPI 实机记录待补。
+
+F07 增加四项工具显示开关、动态工具条和窄屏「更多」。浅深实机验证全开、交错和全关，重启保持配置，恢复默认后四项全开。已检查实际 PNG 和贴图。默认和全特性各 61 项通过，覆盖 16 种组合、活动文字草稿与键盘焦点。ZIP 已解压核对。真实窄屏、混合 DPI 双屏与 IME 候选组合待补。下一步为 F08 马赛克。
+
+F07 人工反馈修订移除了选择按钮，并在设置页加入同序图标和实时预览。浅深主题、窄设置窗口、绘图和 PNG 输出实测通过。默认及全特性各 61 项通过，便携包已解压核对。真实多屏、混合 DPI 和其他实机缩放的待验范围见 [修订验收](validation/capture/F07-v0.8.1.md)。
+
+F08 新增可编辑矩形马赛克和独立颗粒默认值。单屏 200% 下实测浅深主题、拖绘移动和调整范围、参数双向同步与重启、开关和恢复默认。实际 PNG、JPEG、剪贴板和贴图均已检查，默认与全特性各 64 项通过。其他 DPI、跨屏透明间隙和 100 轮资源验证待补。
+
+按用户标注，马赛克颗粒设置与范围说明移至「默认标注样式」末尾。修订版已在浅深主题复测开关、滑杆、数值输入和实际 PNG 输出，默认和全特性各 64 项通过。ZIP 与历史验收证据的哈希见 [F08 验收记录](validation/annotation/F08-v0.9.0.md#设置布局修订)。
+
+F09、F10 已按用户要求快进合入本地 `main`。两版 Windows x64 ZIP 的 SHA-256、包内 EXE 版本和架构已核对。`v0.10.0` 指向独立编号版本 `0300e86`。`v0.11.0` 指向包含两项功能和验收记录的主分支提交。2026-11-12 归档五张浅色和四张深色用户截图，记录连续编号、直径和工具开关，以及浅色 `#365F56` / `RGB(54, 95, 86)` 和深色 `#A0CEBB` / `RGB(160, 206, 187)` 两组取色值。
+
+按用户要求补跑 F09/F10 自动验证。默认和全特性各 68 项通过，真实剪贴板专项另跑 1 项通过。覆盖重排、撤销重做、原生参数及持久化、PNG/JPEG、贴图、Shift 切换、剪贴板占用后重试及冻结底图采样。测试提交为 `9bd410a`。当前仅枚举到 1 台显示器，真实混合 DPI 和物理间隙仍待实机补测。其他遗留项见对应验收报告。
+
+F11 接入单屏纵向滚动采集、右侧预览、静态长图编辑和完整输出。默认及全特性单元测试、Release 构建、长图合成性能采样及 ZIP 内容校验见 [F11 验收报告](validation/long-capture/F11-v1.0.0.md)。
+
+F11 根据人工反馈修复选区外遮罩消失，并调整滚轮采样与接缝判定。修订版默认及全特性测试各 79 项通过，已完成合成长图性能回归和候选 ZIP 校验。待复验真实正文滚动、预览增长及最终接缝。
+
+用户确认遮罩已修复，并反馈稍快滚动仍会中断拼接。后续候选复用同一捕获会话，在滚动中对齐中间帧，收尾时才确认缺段。Release 原生测试窗连续 36 次位移的成图逐像素一致。
+
+快速滚动修订交付后共归档九张用户截图。用户确认实测页面快滚持续增长、回滚不追加、滚到底停止增长。样张覆盖深色长图编辑、多行中文标注、长图导航、HEX 取色、透明圆角 PNG、白底 JPEG、剪贴板图和贴图窗口。另一网页的复制图与 JPEG 同为 1459 × 1733 px，贴图显示相应内容。
+
+F11 补跑自动验收。默认和全特性套件各 81 项通过，另外运行的长图 RGB 实际复制、Release 原生编号文档和快滚逐像素比较均通过。已覆盖长图保存取消、目标文件占用后解锁重试、关闭源窗口后停止采集并重开，以及模拟跨屏重选与 100%／150% 导航取色。实际捕获为单屏 125% SDR。实体混合 DPI 双屏、其他真实缩放和独立记事本应用仍待覆盖。
+
+F11 按用户要求快进合入本地 `main` 并创建带说明的 `v1.0.0` 标签。复核了 Windows x64 ZIP 的 SHA-256、包内文件数和 EXE 版本及架构。实体双屏和混合 DPI 后续补验。下一项功能为 F12 工具条精简。
+
+## 最近维护：确认功能与验收文档基线
+
+- 落地 F01–F12 开发说明、逐项进度、浅深设计草图、验收计划/模板及十二份待执行报告；同步产品、视觉、代理和发布说明。
+- 保留“长截图切入直接丢弃旧标注及历史”“新增四工具默认关闭”“Shift 按次持续切换”等用户最终决策。
+- 本次只检查文档链接、功能/版本/用例映射、草图及布局、Git 差异；未修改代码，未执行新功能 Rust/GUI 验收。
+- 文档验证记录见 [本轮基线检查](validation/engineering/FEATURE_BASELINE.md)。本地提交主题：docs: record approved feature designs and acceptance plan。应用及 v0.2.2 标签不变。
+
+## 最近维护：替换文档截图
+
+- 使用用户提供的三张原始 PNG 替换截图标注、浅色设置及深色设置介绍图，移除旧的压缩截图。
+- 更新 README 引用与截图来源说明；逐一核对附件与仓库文件 SHA-256 相同，并检查图片尺寸、引用和 Git 空白差异。
+- 仅更新图片及文档，未修改应用代码，未重复构建或运行功能测试；原有待验项不变。
+- 本地提交主题：docs: replace screenshots with user-provided originals。
+
+## 最近维护：v0.2.2 本地打包
+
+- 版本同步为 0.2.2，使用正式打包脚本生成本地 Windows x64 ZIP 和 SHA-256。解压检查 16 个文件、EXE 版本及其与构建产物的哈希，并确认 EXE 图标。
+- 本次未进行完整 GUI 或跨环境验收；沿用既有待验项。未推送或发布。
+- 本地提交主题：chore(release): prepare v0.2.2。
+
+## 最近维护：应用图标
+
+- 替换为用户确认的松绿和暖白猫爪图标，边缘保留过渡色；ICO 包含九种尺寸。
+- Release 构建通过，从 EXE 提取关联图标并检查；启动后未出现可供检查的窗口，设置及托盘内的实际显示待复核。
+- 全特性测试在沙箱中 40 项通过、4 项失败：热键测试无法取得可用组合，另三项因访问被拒；不计为通过。
+- 本地提交主题：fix(icon): smooth and update application icon。
+
+## 最近维护：文档与构建复核
+
+- README 改为项目介绍、使用、开发及文档入口；使用、开发、发布、版本变更和资源说明集中到 docs。
+- 删除失效的 P6 临时交接文件；阶段流水账移到 [实施历史](IMPLEMENTATION_HISTORY.md)，保留验证报告与批准设计图。
+- AGENTS.md 更新当前阶段、松绿主题和文档维护约定。
+- 重新构建 v0.2.1 ZIP，默认及全特性各 44 项测试通过；采集真实浅深设置及深色标注工具条。
+- 本轮具体结果与限制见 [维护验证](validation/engineering/DOCS_REFRESH.md)。
+- 本地提交主题：docs: refresh project guides and current screenshots。未推送远端。

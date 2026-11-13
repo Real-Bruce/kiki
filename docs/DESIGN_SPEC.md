@@ -138,4 +138,4 @@ v0.2.2 至 v0.8.0 工具条顺序：
 
 禁止把设计 PNG 当作实现截图提交。视觉错误与功能错误一样需要修复；如运行环境无法真实截图，明确标注未验证。
 
-逐功能执行 [验收计划](ACCEPTANCE_PLAN.md)，对应报告使用 [统一模板](validation/FEATURE_ACCEPTANCE_TEMPLATE.md)。本次只验证草图文件与文档，不将应用功能或 GUI 记为通过。
+逐功能执行 [验收计划](ACCEPTANCE_PLAN.md)，对应报告使用 [统一模板](validation/FEATURE_ACCEPTANCE_TEMPLATE.md)。2026-11-10 文档基线阶段只检查草图与文档；后续真实 GUI 和输出结果见 [模块验证索引](validation/README.md)，当前外观见 [软件截图](screenshots/README.md)。

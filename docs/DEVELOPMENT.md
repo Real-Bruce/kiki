@@ -17,6 +17,8 @@ cargo build --release --locked
 
 原生集成测试访问热键、注册表、窗口和原子文件操作，受限沙箱可能拒绝这些调用。区分环境失败与产品失败，在有权限的桌面会话复测并保留原结果。若受限 TEMP 导致 Rust 归档重命名失败，可将当前构建进程的 TEMP/TMP 指向仓库内忽略的 artifacts/build-tmp。
 
+按功能查找设计、源码和验证入口见 [模块索引](modules/README.md)。
+
 ## 模块与约束
 
 | 路径 | 职责 |
@@ -24,7 +26,7 @@ cargo build --release --locked
 | src/core | 平台无关的坐标、图像、选区、标注、配置及会话模型 |
 | src/platform/windows | 捕获、窗口、绘制、输入、输出、设置与资源管理 |
 | resources | 编译和分发使用的图标、清单、许可原文 |
-| scripts | 版本同步、打包和性能采样 |
+| scripts | 打包、区域验证和性能采样；应用版本统一来自根目录 VERSION |
 | docs | 使用、开发、规格、进度及验证说明 |
 
 代码与 Git 规则见 [AGENTS.md](../AGENTS.md)。界面变化必须运行实际程序检查，并核对最终成图，不能只跑单元测试。
@@ -69,4 +71,4 @@ scripts/Measure-Startup.ps1 采集 30 次进程启动到热键/托盘就绪；Me
 
 每次报告说明源码版本、构建模式、机器、显示器和采样方法。应用内时延不能混称物理键盘全链路时延，不通过清空工作集优化指标。
 
-当前待验项见 [PROGRESS.md](PROGRESS.md)，环境矩阵见 [实施清单](IMPLEMENTATION_PLAN.md)，历史性能证据见 [P7](validation/P7.md)，本轮复核见 [DOCS_REFRESH](validation/DOCS_REFRESH.md)。
+当前待验项见 [PROGRESS.md](PROGRESS.md)，环境矩阵见 [实施清单](IMPLEMENTATION_PLAN.md)，历史性能证据见 [P7](validation/engineering/P7.md)，历史文档与构建复核见 [DOCS_REFRESH](validation/engineering/DOCS_REFRESH.md)。
