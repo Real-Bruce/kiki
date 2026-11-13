@@ -121,8 +121,16 @@ impl Page {
                         Tone::Warning,
                     );
                 }
+                p.divider();
+                p.heading("贴图快捷键");
+                p.row("恢复原始比例", "Ctrl+0");
+                p.row("复制", "Ctrl+C");
+                p.row("保存", "Ctrl+S");
+                p.row("关闭当前贴图", "Esc");
             }
             2 => {
+                p.control(RESET_CAPTURE, 0, 0, 148, 38);
+                p.y += 60;
                 p.heading("截图提示");
                 p.text("显示操作提示", 0, p.width - 64, Tone::Normal);
                 p.control(400, p.width - 52, -10, 52, 42);
@@ -197,21 +205,12 @@ impl Page {
                 let preview_height = super::super::capture_toolbar::BAR_HEIGHT as i32;
                 p.items
                     .push(Item::ToolbarPreview(p.rect(0, 0, p.width, preview_height)));
-                p.y += preview_height + 22;
-                p.control(RESET_CAPTURE, 0, 0, 148, 38);
-                p.y += 38;
+                p.y += preview_height;
             }
             3 => {
                 p.heading("窗口操作");
                 p.row("移动", "拖动贴图");
                 p.row("缩放", "滚轮");
-                p.row("恢复原始比例", "Ctrl+0");
-
-                p.divider();
-                p.heading("贴图快捷键");
-                p.row("复制", "Ctrl+C");
-                p.row("保存", "Ctrl+S");
-                p.row("关闭当前贴图", "Esc");
                 p.note("右键贴图可复制、保存或关闭。", Tone::Muted);
                 p.y += 16;
                 p.control(500, 0, 0, 142, 38);
