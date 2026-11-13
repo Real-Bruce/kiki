@@ -606,10 +606,13 @@ fn caption(id: u16, cfg: &Config, start: &std::result::Result<startup::State, St
             _ => "开机启动：关闭",
         }
         .into(),
-        201 => "更新启动位置".into(),
+        201 => "更新开机启动".into(),
         START_CAPTURE => "开始截图".into(),
-        301 => "恢复默认".into(),
-        400 => format!("截图提示：{}", if cfg.show_hints { "开启" } else { "关闭" }),
+        301 => "恢复默认快捷键".into(),
+        400 => format!(
+            "截图时显示操作提示：{}",
+            if cfg.show_hints { "开启" } else { "关闭" }
+        ),
         410..=417 => {
             let i = (id - 410) as usize;
             format!(
@@ -621,8 +624,8 @@ fn caption(id: u16, cfg: &Config, start: &std::result::Result<startup::State, St
         id if setting_parameter(id, PARAMETER_SLIDER).is_some() => {
             PARAMETER_LABELS[usize::from(id - PARAMETER_SLIDER)].into()
         }
-        OUTPUT_FORMAT => format!("输出格式：{}", cfg.output_format.label()),
-        RESET_CAPTURE => "恢复默认".into(),
+        OUTPUT_FORMAT => format!("默认保存格式：{}", cfg.output_format.label()),
+        RESET_CAPTURE => "恢复截图默认设置".into(),
         id if CAPTURE_TOOL_IDS.contains(&id) => {
             let index = usize::from(id - CAPTURE_TOOL);
             let tool = Tool::TOOLBAR[index].label();
@@ -633,7 +636,7 @@ fn caption(id: u16, cfg: &Config, start: &std::result::Result<startup::State, St
             };
             format!("{tool}：{status}")
         }
-        500 => "关闭贴图".into(),
+        500 => "关闭所有贴图".into(),
         600..=602 => {
             let i = (id - 600) as usize;
             format!(
@@ -646,7 +649,7 @@ fn caption(id: u16, cfg: &Config, start: &std::result::Result<startup::State, St
                 }
             )
         }
-        700 => "打开配置目录".into(),
+        700 => "打开设置文件夹".into(),
         701 => "使用帮助".into(),
         702 => "第三方许可".into(),
         800 => "重试保存".into(),
@@ -1074,14 +1077,6 @@ fn paint(hwnd: HWND, dc: HDC, p: *mut State) -> Result<()> {
         let sidebar = page.sidebar as f32;
         c.fill(sidebar, 0., width - sidebar, HEADER as f32, bg);
         c.heading(PAGES[state.page], x, 19., w, 24., fg);
-        let subtitle = match state.page {
-            0 => Some("也可从任务栏右下角的 kiki 图标开始截图。"),
-            2 => Some("默认样式只影响新截图。"),
-            _ => None,
-        };
-        if let Some(subtitle) = subtitle {
-            c.text(subtitle, x, 55., w, 12., sub);
-        }
         c.fill(
             sidebar,
             height - FOOTER as f32,
@@ -1165,7 +1160,7 @@ fn action(hwnd: HWND, id: u16) {
             300 => {
                 let child = (*p).controls.iter().find(|c| c.id == 300).unwrap().hwnd;
                 hotkey::control_value(child)
-                    .map_err(|_| "请按 Ctrl 或 Alt，再按字母、数字或功能键。".to_string())
+                    .map_err(|_| "请按住 Ctrl 或 Alt，再按字母、数字或 F1 至 F24。".to_string())
                     .and_then(preferences::set_shortcut)
             }
             301 => preferences::set_shortcut(Hotkey::default()),
@@ -1560,7 +1555,7 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                     right,
                     bottom: y + dip(2),
                 };
-                shapes.rounded(track, dip(3), appearance::divider(dark));
+                shapes.rounded(track, dip(3), if dark { 0x797166 } else { 0x8b8275 });
                 if x > left {
                     shapes.rounded(RECT { right: x, ..track }, dip(3), accent);
                 }
@@ -1592,9 +1587,6 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                     (true, _, _) => Some(appearance::pressed(dark)),
                     (_, true, _) => Some(appearance::selected(dark)),
                     (_, _, true) => Some(appearance::hover(dark)),
-                    _ if matches!(id, 201 | 301 | 500 | 700..=702 | 800) => {
-                        Some(appearance::sidebar(dark))
-                    }
                     _ => None,
                 };
                 if let Some(fill) = fill {
@@ -1665,8 +1657,8 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                         );
                         cfg.output_format.label().to_owned()
                     }
-                    RESET_CAPTURE => {
-                        shapes.focus_ring(r, dip(8) as f32, dpi_scale, appearance::divider(dark));
+                    201 | 301 | RESET_CAPTURE | 500 | 700..=702 | 800 => {
+                        shapes.focus_ring(r, dip(6) as f32, dpi_scale, appearance::divider(dark));
                         caption(id, &cfg, &state.startup)
                     }
                     _ => caption(id, &cfg, &state.startup),
@@ -2290,11 +2282,22 @@ mod tests {
             SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(602)), None);
             assert!(system_dark());
             assert_eq!(preferences::current().theme, Theme::Dark);
+            SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(102)), None);
             SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(400)), None);
             assert!(!preferences::hints());
             SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(414)), None);
             let width_edit = GetDlgItem(Some(hwnd), i32::from(PARAMETER_EDIT)).unwrap();
             let width_slider = GetDlgItem(Some(hwnd), i32::from(PARAMETER_SLIDER)).unwrap();
+            let state = pointer(hwnd);
+            let mut client = RECT::default();
+            GetClientRect(hwnd, &mut client).unwrap();
+            let dip = |px| (px as f32 * 96. / (*state).dpi as f32).round() as i32;
+            let geometry = page_geometry(&*state, dip(client.right));
+            let first_slider = geometry.items.iter().find_map(|item| match item {
+                Item::Control(PARAMETER_SLIDER, bounds) => Some(bounds),
+                _ => None,
+            });
+            scroll_to(hwnd, state, first_slider.unwrap().y - HEADER);
             let mut track = RECT::default();
             GetClientRect(width_slider, &mut track).unwrap();
             let right = LPARAM(isize::try_from(track.right).unwrap());

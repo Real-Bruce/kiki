@@ -1,9 +1,9 @@
 //! Settings page geometry shared by native control positioning and canvas painting.
 use super::startup;
 use crate::core::annotation::Tool;
-use crate::core::config::{Config, OutputFormat};
+use crate::core::config::{CaptureParameter, Config, OutputFormat};
 
-pub const HEADER: i32 = 84;
+pub const HEADER: i32 = 68;
 pub const START_CAPTURE: u16 = 202;
 pub const PARAMETER_SLIDER: u16 = 420;
 pub const PARAMETER_EDIT: u16 = 440;
@@ -21,8 +21,7 @@ pub const PARAMETER_LABELS: [&str; 7] = [
     "马赛克颗粒大小",
     "编号直径",
 ];
-pub const FOOTER: i32 = 56;
-const GROUP_GAP: i32 = 26;
+pub const FOOTER: i32 = 48;
 const ROW: i32 = 42;
 
 #[derive(Clone, Copy)]
@@ -68,56 +67,74 @@ impl Page {
         hotkey_active: bool,
         shortcut_error: Option<&str>,
     ) -> Self {
-        let sidebar = if width >= 790 { 192 } else { 148 };
+        let sidebar = if width >= 790 { 176 } else { 148 };
         let margin = if width >= 790 { 36 } else { 24 };
-        let body = (width - sidebar - 2 * margin).clamp(1, 800);
+        let body = (width - sidebar - 2 * margin).clamp(1, 720);
         let mut p = Self {
             left: sidebar + (width - sidebar - body).max(0) / 2,
             width: body,
             sidebar,
             items: Vec::new(),
             end: 0,
-            y: HEADER + 16,
+            y: HEADER + 6,
         };
         match page {
             0 => {
-                p.heading("开始使用");
                 p.control(START_CAPTURE, 0, 0, 132, 38);
                 if hotkey_active {
                     p.items.push(Item::Text(
                         format!("快捷键 {}", cfg.hotkey.label()),
-                        p.rect(148, 11, p.width - 148, ROW),
+                        p.rect(148, 9, p.width - 148, ROW),
                         Tone::Muted,
                     ));
+                } else {
+                    p.text(
+                        "可在「快捷键」中修改截图快捷键。",
+                        148,
+                        p.width - 148,
+                        Tone::Muted,
+                    );
                 }
-                p.y += 46;
+                p.y += 52;
+                p.note("拖动框选区域，或单击选择窗口。", Tone::Normal);
+                p.note(
+                    "按 Enter 复制，再按 Ctrl+V 粘贴。也可按 Ctrl+S 保存或按 Ctrl+P 贴图。",
+                    Tone::Normal,
+                );
                 p.divider();
-                p.heading("启动");
+                p.heading("启动与后台");
                 let moved = matches!(start, Ok(startup::State::Moved));
-                p.text("登录 Windows 时启动 kiki", 0, p.width - 64, Tone::Normal);
-                p.control(200, p.width - 52, -8, 52, 38);
-                p.y += ROW;
+                p.toggle_row("登录 Windows 时自动启动", 200);
                 if moved {
-                    p.text("开机启动仍指向旧位置。", 0, p.width - 174, Tone::Warning);
-                    p.control(201, p.width - 154, -7, 154, 34);
+                    p.text(
+                        "kiki 已移动，开机启动需要更新。",
+                        0,
+                        p.width - 146,
+                        Tone::Warning,
+                    );
+                    p.control(201, p.width - 132, -7, 132, 36);
                     p.y += ROW;
                 }
+                p.note(
+                    "关闭设置后，仍可从任务栏右下角的 kiki 图标开始截图。",
+                    Tone::Muted,
+                );
             }
             1 => {
-                p.heading("开始截图");
-                let recorder = (p.width - 126).clamp(120, 244);
-                p.control(300, 0, 0, recorder, 38);
-                p.control(301, recorder + 12, 0, 108, 38);
-                p.y += 54;
+                p.heading("截图快捷键");
+                let recorder = (p.width - 124).clamp(120, 216);
+                p.control(300, 0, 0, recorder, 36);
+                p.control(301, recorder + 12, 0, 112, 36);
+                p.y += 48;
                 p.note(
-                    "按 Ctrl 或 Alt，再按字母、数字或功能键（F1 至 F24）。",
+                    "更改时，选中上方输入框，按住 Ctrl 或 Alt，再按字母、数字或 F1 至 F24。",
                     Tone::Muted,
                 );
                 if let Some(error) = shortcut_error {
                     p.note(error, Tone::Warning);
                 } else if !hotkey_active {
                     p.note(
-                        "当前快捷键不可用，请更换组合。仍可从托盘开始截图。",
+                        "当前快捷键不可用。请换一组按键，或从通用页开始截图。",
                         Tone::Warning,
                     );
                 }
@@ -129,95 +146,86 @@ impl Page {
                 p.row("关闭当前贴图", "Esc");
             }
             2 => {
-                p.control(RESET_CAPTURE, 0, 0, 148, 38);
-                p.y += 60;
-                p.heading("截图提示");
-                p.text("显示操作提示", 0, p.width - 64, Tone::Normal);
-                p.control(400, p.width - 52, -10, 52, 42);
-                p.y += 30;
+                p.heading("截图工具条");
+                let columns = if p.width >= 576 { 4 } else { 2 };
+                let gap = 12;
+                let cell = (p.width - (columns - 1) * gap) / columns;
+                for i in 0..Tool::TOOLBAR.len() {
+                    let x = (i as i32 % columns) * (cell + gap);
+                    p.control(CAPTURE_TOOL + i as u16, x, 0, cell, 36);
+                    if i as i32 % columns == columns - 1 {
+                        p.y += 38;
+                    }
+                }
+                p.y += 6;
+                p.note("工具条预览", Tone::Muted);
+                let preview_height = super::super::capture_toolbar::BAR_HEIGHT as i32;
+                p.items
+                    .push(Item::ToolbarPreview(p.rect(0, 0, p.width, preview_height)));
+                p.y += preview_height + 16;
+                p.toggle_row("截图时显示操作提示", 400);
                 p.divider();
                 p.heading("默认标注样式");
-                let compact = p.width < 510;
-                p.text("颜色", 0, p.width, Tone::Normal);
-                p.choices(410, 8, 34, compact, 26);
-                for index in 0..4 {
-                    p.parameter_row(index);
+                p.note("用于新标注。尺寸按截图的实际像素计算。", Tone::Muted);
+                p.text("标注颜色", 0, 86, Tone::Normal);
+                p.choices(410, 8);
+                for index in 0..3 {
+                    p.parameter_row(index, CaptureParameter::Stroke(usize::from(index)));
                 }
-                p.note("成图实际像素 · 线宽 1–64 px · 字号 8–256 px", Tone::Muted);
+                p.parameter_row(3, CaptureParameter::TextSize);
                 if Tool::Mosaic
                     .index()
                     .is_some_and(|index| cfg.capture_tools[index])
                 {
-                    p.parameter_row(5);
-                    p.note("成图实际像素 · 马赛克颗粒 2–64 px", Tone::Muted);
+                    p.parameter_row(5, CaptureParameter::MosaicSize);
                 }
                 if Tool::Sequence
                     .index()
                     .is_some_and(|index| cfg.capture_tools[index])
                 {
-                    p.parameter_row(6);
-                    p.note("成图实际像素 · 编号直径 16–128 px", Tone::Muted);
+                    p.parameter_row(6, CaptureParameter::SequenceSize);
                 }
                 p.divider();
-                p.heading("图像输出");
-                p.parameter_row(4);
-                p.text("输出格式", 0, p.width - 126, Tone::Normal);
-                p.control(OUTPUT_FORMAT, p.width - 116, -4, 116, 32);
+                p.heading("保存与圆角");
+                p.text("默认保存格式", 0, p.width - 126, Tone::Normal);
+                p.control(OUTPUT_FORMAT, p.width - 116, -8, 116, 36);
                 p.y += ROW;
+                p.parameter_row(4, CaptureParameter::CornerRadius);
+                p.y += 8;
                 p.items.push(Item::CornerPreview(p.rect(0, 0, 108, 72)));
                 p.text(
                     match cfg.output_format {
-                        OutputFormat::Png => "PNG 四角透明",
-                        OutputFormat::Jpeg => "JPEG 白底 · 品质 90%",
+                        OutputFormat::Png => "保存为 PNG 时，圆角外透明。",
+                        OutputFormat::Jpeg => "保存为 JPEG 时，圆角外填白。",
                     },
                     122,
                     p.width - 122,
                     Tone::Normal,
                 );
-                p.y += 24;
+                p.y += 26;
                 p.text(
-                    "0–256 px · 实际半径最多为选区短边的一半",
+                    "圆角半径最多为截图短边的一半。",
                     122,
                     p.width - 122,
                     Tone::Muted,
                 );
-                p.y += 48;
+                p.y += 46;
                 p.divider();
-                p.heading("工具显示");
-                let columns = if p.width >= 576 {
-                    4
-                } else if p.width >= 276 {
-                    2
-                } else {
-                    1
-                };
-                let gap = 12;
-                let cell = (p.width - (columns - 1) * gap) / columns;
-                for i in 0..Tool::TOOLBAR.len() {
-                    let x = (i as i32 % columns) * (cell + gap);
-                    p.control(CAPTURE_TOOL + i as u16, x, -6, cell, 38);
-                    if i as i32 % columns == columns - 1 || i + 1 == Tool::TOOLBAR.len() {
-                        p.y += ROW;
-                    }
-                }
-                p.y += 3;
-                p.note("工具条预览", Tone::Muted);
-                let preview_height = super::super::capture_toolbar::BAR_HEIGHT as i32;
-                p.items
-                    .push(Item::ToolbarPreview(p.rect(0, 0, p.width, preview_height)));
-                p.y += preview_height;
+                p.control(RESET_CAPTURE, 0, 0, 152, 36);
+                p.y += 36;
             }
             3 => {
+                p.note("截图时按 Ctrl+P，图片会显示在其他窗口上方。", Tone::Normal);
+                p.divider();
                 p.heading("窗口操作");
                 p.row("移动", "拖动贴图");
                 p.row("缩放", "滚轮");
-                p.note("右键贴图可复制、保存或关闭。", Tone::Muted);
+                p.row("复制、保存或关闭", "右键单击贴图");
                 p.y += 16;
                 p.control(500, 0, 0, 142, 38);
                 p.y += 38;
             }
             4 => {
-                p.heading("主题");
                 let gap = if p.width >= 500 { 18 } else { 8 };
                 let size = ((p.width - 2 * gap) / 3).clamp(1, 174);
                 for i in 0..3 {
@@ -226,18 +234,15 @@ impl Page {
                 p.y += 142;
             }
             _ => {
-                p.heading("应用信息");
                 p.row("版本", concat!("kiki ", env!("KIKI_VERSION")));
-                p.row("平台", "Windows 11（64 位）");
                 p.divider();
-                p.heading("帮助与资源");
                 for id in [701, 700, 702] {
-                    p.control(id, 0, -6, 132, 34);
+                    p.control(id, 0, 0, 152, 36);
                     p.y += ROW;
                 }
             }
         }
-        p.end = p.y + 20;
+        p.end = p.y + 18;
         p
     }
 
@@ -252,7 +257,7 @@ impl Page {
 
     fn heading(&mut self, text: &'static str) {
         self.items.push(Item::Heading(text, self.y));
-        self.y += 39;
+        self.y += 32;
     }
 
     fn text(&mut self, text: impl Into<String>, x: i32, w: i32, tone: Tone) {
@@ -263,14 +268,15 @@ impl Page {
     fn note(&mut self, text: &str, tone: Tone) {
         self.text(text, 0, self.width, tone);
         // A Chinese glyph can occupy a full em; use that bound for narrow wrapping notes.
-        let lines = (text.chars().count() as u32 * 12)
+        let size = if matches!(tone, Tone::Normal) { 14 } else { 12 };
+        let lines = (text.chars().count() as u32 * size)
             .div_ceil(self.width as u32)
             .max(1) as i32;
-        self.y += lines * 18 + 9;
+        self.y += lines * 20 + 4;
     }
 
     fn row(&mut self, label: &str, value: impl Into<String>) {
-        let split = self.width * 2 / 5;
+        let split = self.width / 2;
         self.text(label, 0, split - 12, Tone::Normal);
         self.items.push(Item::Value(
             value.into(),
@@ -279,46 +285,62 @@ impl Page {
         self.y += ROW;
     }
 
-    fn parameter_row(&mut self, index: u16) {
-        let start = (self.width - 276).max(110);
+    fn parameter_row(&mut self, index: u16, parameter: CaptureParameter) {
+        let start = (self.width - 360).max(132);
         self.text(
             PARAMETER_LABELS[usize::from(index)],
             0,
             start - 10,
             Tone::Normal,
         );
+        let (min, max) = parameter.bounds();
+        self.items.push(Item::Text(
+            format!("{min}–{max} px"),
+            self.rect(0, 20, start - 10, 18),
+            Tone::Muted,
+        ));
         self.control(
             PARAMETER_SLIDER + index,
             start,
-            -3,
+            5,
             self.width - start - 83,
             28,
         );
-        self.control(PARAMETER_EDIT + index, self.width - 74, -3, 49, 28);
-        self.text("px", self.width - 18, 18, Tone::Muted);
-        self.y += ROW;
+        self.control(PARAMETER_EDIT + index, self.width - 74, 5, 49, 28);
+        self.items.push(Item::Text(
+            "px".into(),
+            self.rect(self.width - 18, 10, 18, 18),
+            Tone::Muted,
+        ));
+        self.y += 48;
     }
 
     fn divider(&mut self) {
-        // A regular row already leaves some space below the last text baseline.
-        self.y += GROUP_GAP - 10;
+        self.y += 12;
         self.items.push(Item::Divider(self.y));
-        self.y += GROUP_GAP + 1;
+        self.y += 21;
+    }
+
+    fn toggle_row(&mut self, label: &str, id: u16) {
+        self.text(label, 0, self.width - 64, Tone::Normal);
+        self.control(id, self.width - 52, -8, 52, 36);
+        self.y += 32;
     }
 
     fn control(&mut self, id: u16, x: i32, dy: i32, w: i32, h: i32) {
         self.items.push(Item::Control(id, self.rect(x, dy, w, h)));
     }
 
-    fn choices(&mut self, id: u16, count: u16, preferred: i32, compact: bool, label_height: i32) {
-        let gap = if compact { 3 } else { 6 };
-        let n = i32::from(count);
-        let size = preferred.min(((self.width - (n - 1) * gap) / n).max(1));
-        let start = self.width - n * size - (n - 1) * gap;
-        let dy = if compact { label_height + 8 } else { -6 };
+    fn choices(&mut self, id: u16, count: u16) {
+        let gap = 4;
+        let size = 36;
+        let width = i32::from(count) * (size + gap) - gap;
+        let compact = self.width < width + 94;
+        let start = if compact { 0 } else { self.width - width };
+        let dy = if compact { 24 } else { -8 };
         for i in 0..count {
             self.control(id + i, start + i32::from(i) * (size + gap), dy, size, 36);
         }
-        self.y += if compact { dy + 55 } else { 76 };
+        self.y += dy + 46;
     }
 }

@@ -177,18 +177,28 @@ unsafe extern "system" fn themed_proc(
             let bg = CreateSolidBrush(ref_color(appearance::background(dark)));
             FillRect(dc, &rect, bg);
             let _ = DeleteObject(bg.into());
+            let focused = GetFocus() == hwnd;
+            let scale = windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd).max(96) as f32 / 96.;
+            appearance::paint_control(dc, rect, appearance::background(dark), |shapes| {
+                let border = if focused {
+                    appearance::accent(dark)
+                } else {
+                    appearance::divider(dark)
+                };
+                shapes.focus_ring(rect, 6. * scale, scale, border);
+            });
             SetBkMode(dc, TRANSPARENT);
-            SetTextColor(dc, ref_color(appearance::accent(dark)));
+            SetTextColor(dc, ref_color(appearance::foreground(dark)));
             let font = HFONT(SendMessageW(hwnd, WM_GETFONT, None, None).0 as *mut _);
             let old = SelectObject(dc, font.into());
-            let label = if GetFocus() == hwnd {
-                "请按下新快捷键…".to_owned()
+            let label = if focused {
+                "按下新快捷键".to_owned()
             } else {
-                format!(
-                    "{}（点击更改）",
-                    super::preferences::current().hotkey.label()
-                )
+                super::preferences::current().hotkey.label()
             };
+            let padding = (12. * scale).round() as i32;
+            rect.left += padding;
+            rect.right -= padding;
             let mut text: Vec<_> = label.encode_utf16().collect();
             DrawTextW(
                 dc,

@@ -28,12 +28,12 @@ struct Template {
 
 const LABELS: [(PCWSTR, i32, i32); 4] = [
     (w!("恢复截图默认设置"), 18, 30),
-    (w!("恢复截图提示、标注样式、图像输出和工具显示。"), 60, 22),
     (
-        w!("保留快捷键、主题、自启、保存目录和首次提示记录。"),
-        85,
+        w!("恢复工具条、操作提示、标注样式、保存格式和圆角。"),
+        60,
         22,
     ),
+    (w!("保留快捷键、主题、开机启动和保存位置。"), 85, 22),
     (w!("保留当前截图的标注和文字草稿。"), 110, 22),
 ];
 
@@ -267,7 +267,7 @@ fn layout(hwnd: HWND, p: *mut Dialog, dpi: u32, bounds: RECT, center: bool) -> R
         )?;
         let fonts = [
             font(dpi, 14, w!("Microsoft YaHei UI")),
-            font(dpi, 20, w!("Microsoft YaHei UI")),
+            font(dpi, 16, w!("Microsoft YaHei UI")),
         ];
         let old = std::mem::replace(&mut (*p).fonts, fonts);
         let children = (*p).children;
