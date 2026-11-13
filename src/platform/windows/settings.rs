@@ -117,7 +117,7 @@ fn open_impl(visible: bool) -> Result<()> {
         let width = width.min(work.right - work.left);
         let height = height.min(work.bottom - work.top);
         let hwnd = CreateWindowExW(
-            WS_EX_CONTROLPARENT,
+            WS_EX_CONTROLPARENT | WS_EX_COMPOSITED,
             class.lpszClassName,
             w!("kiki 设置"),
             WS_OVERLAPPEDWINDOW | WS_VSCROLL | WS_CLIPCHILDREN,
@@ -613,9 +613,10 @@ fn layout(hwnd: HWND) {
             // positions measured before SetScrollInfo changed the window frame.
             return;
         }
-        let controls: Vec<_> = (*p).controls.iter().map(|c| (c.hwnd, c.id)).collect();
         let failed = matches!(preferences::status(), SaveStatus::Failed(_));
-        for (child, id) in controls {
+        let mut positions = Vec::with_capacity((*p).controls.len());
+        for control in &(*p).controls {
+            let Control { hwnd: child, id } = *control;
             let bounds = match id {
                 BRAND => Some(Rect {
                     x: 20,
@@ -656,40 +657,62 @@ fn layout(hwnd: HWND) {
                     y += 4;
                     h -= 8;
                 }
-                let _ = SetWindowPos(
+                positions.push((
                     child,
-                    None,
                     px(x),
                     px(y),
                     px(x + w) - px(x),
                     px(y + h) - px(y),
-                    SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW,
-                );
-                let _ = InvalidateRect(Some(child), None, false);
-            } else {
-                if (*p).hover == Some(child) {
-                    (*p).hover = None;
-                }
-                let _ = ShowWindow(child, SW_HIDE);
+                    SWP_SHOWWINDOW,
+                ));
+            } else if GetWindowLongPtrW(child, GWL_STYLE) & WS_VISIBLE.0 as isize != 0 {
+                positions.push((child, 0, 0, 0, 0, SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE));
             }
         }
-        let _ = InvalidateRect(Some(hwnd), None, false);
+        if let Some(hover) = (*p).hover
+            && positions
+                .iter()
+                .any(|pos| pos.0 == hover && pos.5.contains(SWP_HIDEWINDOW))
+        {
+            (*p).hover = None;
+        }
+        // Move the native children together and repaint the final layout without a
+        // separate background erase at each child's old or new position.
+        let flags = SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW;
+        let positioned = BeginDeferWindowPos(positions.len() as i32)
+            .and_then(|batch| {
+                positions
+                    .iter()
+                    .try_fold(batch, |batch, &(child, x, y, w, h, visibility)| {
+                        DeferWindowPos(batch, child, None, x, y, w, h, flags | visibility)
+                    })
+            })
+            .and_then(|batch| EndDeferWindowPos(batch));
+        if positioned.is_err() {
+            for (child, x, y, w, h, visibility) in positions {
+                let _ = SetWindowPos(child, None, x, y, w, h, flags | visibility);
+            }
+        }
+        let _ = RedrawWindow(
+            Some(hwnd),
+            None,
+            None,
+            RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_NOERASE | RDW_UPDATENOW,
+        );
     }
 }
 
-fn paint(hwnd: HWND, p: *mut State) -> Result<()> {
+fn paint(hwnd: HWND, dc: HDC, p: *mut State) -> Result<()> {
     // SAFETY: the HWND and state are live for this UI-thread paint dispatch.
     unsafe {
         let mut rect = RECT::default();
         GetClientRect(hwnd, &mut rect)?;
+        if rect.right <= 0 || rect.bottom <= 0 {
+            return Ok(());
+        }
         let state = &mut *p;
         if state.canvas.is_none() {
-            state.canvas = Some(Canvas::new(
-                hwnd,
-                rect.right as u32,
-                rect.bottom as u32,
-                state.dpi,
-            )?);
+            state.canvas = Some(Canvas::new()?);
         }
         let Some(c) = state.canvas.as_ref() else {
             return Ok(());
@@ -706,7 +729,7 @@ fn paint(hwnd: HWND, p: *mut State) -> Result<()> {
         let sub = appearance::muted(dark);
         let bg = appearance::background(dark);
 
-        c.begin(dark);
+        c.begin(dc, &rect, state.dpi, dark)?;
         c.fill(
             0.,
             0.,
@@ -1625,6 +1648,18 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 draw_button(&*(lp.0 as *const DRAWITEMSTRUCT), p);
                 LRESULT(1)
             }
+            WM_CTLCOLORBTN => {
+                let dc = HDC(wp.0 as *mut _);
+                let id = GetDlgCtrlID(HWND(lp.0 as *mut _));
+                let dark = system_dark();
+                let background = if (100..=105).contains(&id) {
+                    appearance::sidebar(dark)
+                } else {
+                    appearance::background(dark)
+                };
+                let _ = SetDCBrushColor(dc, rgb(background));
+                LRESULT(GetStockObject(DC_BRUSH).0 as isize)
+            }
             WM_CTLCOLORSTATIC | WM_CTLCOLOREDIT => {
                 let dc = HDC(wp.0 as *mut _);
                 SetTextColor(dc, rgb(appearance::foreground(system_dark())));
@@ -1633,8 +1668,8 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             }
             WM_PAINT => {
                 let mut ps = PAINTSTRUCT::default();
-                BeginPaint(hwnd, &mut ps);
-                if paint(hwnd, p).is_err() {
+                let dc = BeginPaint(hwnd, &mut ps);
+                if paint(hwnd, dc, p).is_err() {
                     (*p).canvas = None;
                 }
                 let _ = EndPaint(hwnd, &ps);
@@ -1642,21 +1677,6 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             }
             WM_ERASEBKGND => LRESULT(1),
             WM_SIZE => {
-                let mut client = RECT::default();
-                if GetClientRect(hwnd, &mut client).is_ok() {
-                    if let Some(canvas) = (*p).canvas.as_ref() {
-                        if canvas
-                            .resize(
-                                client.right.max(1) as u32,
-                                client.bottom.max(1) as u32,
-                                (*p).dpi,
-                            )
-                            .is_err()
-                        {
-                            (*p).canvas = None;
-                        }
-                    }
-                }
                 layout(hwnd);
                 LRESULT(0)
             }
@@ -1830,6 +1850,16 @@ mod tests {
             std::thread::sleep(Duration::from_millis(5));
         }
     }
+    fn check_paint(hwnd: HWND) {
+        // SAFETY: the test acquires and releases this window's DC on its owning thread.
+        unsafe {
+            let dc = GetDC(Some(hwnd));
+            assert!(!dc.is_invalid());
+            let result = paint(hwnd, dc, pointer(hwnd));
+            ReleaseDC(Some(hwnd), dc);
+            assert!(result.is_ok(), "{result:?}");
+        }
+    }
     #[test]
     fn native_settings_apply_rollback_scroll_retry_and_teardown() {
         super::super::tests::graphics_runtime();
@@ -1953,7 +1983,7 @@ mod tests {
             for page in 0..6 {
                 SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(100 + page)), None);
                 assert_eq!((*pointer(hwnd)).page, page);
-                assert!(paint(hwnd, pointer(hwnd)).is_ok());
+                check_paint(hwnd);
                 if page == 1 {
                     let input = (*pointer(hwnd))
                         .controls
@@ -2088,7 +2118,7 @@ mod tests {
             SetWindowPos(hwnd, None, 0, 0, 860, 480, SWP_NOZORDER | SWP_NOACTIVATE).unwrap();
             SendMessageW(hwnd, WM_VSCROLL, Some(WPARAM(SB_PAGEDOWN.0 as usize)), None);
             assert!((*pointer(hwnd)).scroll > 0);
-            assert!(paint(hwnd, pointer(hwnd)).is_ok());
+            check_paint(hwnd);
             wait_saved();
             assert!(matches!(preferences::status(), SaveStatus::Saved));
             // Real failure and retry: a directory at the destination cannot be atomically replaced by a file.
