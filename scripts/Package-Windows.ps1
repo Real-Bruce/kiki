@@ -39,6 +39,7 @@ try {
             throw "打包的 EXE 版本 $exeVersion 与 VERSION 中的 $version 不一致。"
         }
         Copy-Item -LiteralPath 'docs/QUICK_START.txt' -Destination (Join-Path $payload 'README.txt')
+        Copy-Item -LiteralPath 'LICENSE' -Destination $payload
         Copy-Item -LiteralPath 'resources/THIRD_PARTY_LICENSES.txt' -Destination $payload
         Copy-Item -LiteralPath (Join-Path $rustDocs 'COPYRIGHT-library.html') -Destination $licenseDir
         Copy-Item -LiteralPath (Join-Path $rustDocs 'licenses') -Destination $licenseDir -Recurse

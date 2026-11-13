@@ -41,6 +41,7 @@ Rust 2024 / Rust 1.88.0 / Windows MSVC x64。核心接收通用数据，Win32/CO
 - [P8.md](../validation/engineering/P8.md)
 - [STARTUP.md](../validation/engineering/STARTUP.md)
 - [docs-organization-2026-11-13.md](../validation/engineering/docs-organization-2026-11-13.md)
+- [open-source-audit-2026-11-13.md](../validation/engineering/open-source-audit-2026-11-13.md)
 
 报告只代表各自记录的版本和环境，当前放行及缺项见 [PROGRESS.md](../PROGRESS.md)。
 

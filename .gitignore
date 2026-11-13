@@ -3,6 +3,7 @@
 /artifacts/
 /.local/
 /.vs/
+/.idea/
 *.pdb
 *.dmp
 *.log

@@ -2,6 +2,8 @@
 
 在 Windows x64 上使用 PowerShell 7，在仓库根目录运行 `./scripts/Package-Windows.ps1`。脚本按锁文件构建 Release，将 EXE、快速使用说明和许可证打成 ZIP，并在 `dist` 下生成 ZIP 及 SHA-256 校验文件。
 
+ZIP 根目录包含项目的 [MIT 协议](../LICENSE)（`LICENSE`）和 `THIRD_PARTY_LICENSES.txt`；Rust 标准库许可仍放在 `licenses/rust`。旧版本 ZIP 不会因源码补充协议而自动更新，下次发布须用当前脚本重新打包。
+
 应用版本只在根目录的 `VERSION` 中填写，格式为 `X.Y.Z`。构建会将它写入「关于」页、EXE 版本资源和 Windows 清单，打包脚本用它校验标签并命名 ZIP。Cargo 为本地应用包自动使用 `0.0.0`，锁文件照常提交。 [版本文件](../VERSION)
 
 最小修订递增第三位，小优化或常规新增递增第二位，大优化递增第一位，递增较高位时较低位归零。仅规划文档不升级应用版本、不创建功能完成标签。 [开发说明](FEATURE_PLAN.md) · [验收计划](ACCEPTANCE_PLAN.md)

@@ -42,4 +42,5 @@ kiki · Windows 11 x64
 
 截图捕获的既有验证范围为单屏 SDR。HDR 捕获暂不可用。
 200% 缩放下后续截图时延有波动。多屏与混合 DPI 仍待实机验收。
-第三方许可见 THIRD_PARTY_LICENSES.txt 与 licenses\rust。
+本项目采用 MIT 开源协议，原文见 LICENSE。
+第三方组件保留各自的许可，见 THIRD_PARTY_LICENSES.txt 与 licenses\rust。

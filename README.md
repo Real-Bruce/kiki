@@ -86,4 +86,6 @@ Design, implementation, and validation guides are organized [by module](docs/mod
 
 ## Licenses
 
-Third-party license texts ship with the application and can be read offline from **关于** (About). See [third-party licenses](docs/THIRD_PARTY_LICENSES.md). A license for this project's source code has not yet been declared.
+This project is licensed under the [MIT License](LICENSE).
+
+Third-party components retain their respective licenses. Their license texts ship with the application and can be read offline from **关于** (About). See [third-party licenses](docs/THIRD_PARTY_LICENSES.md).

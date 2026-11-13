@@ -4,13 +4,21 @@
 
 ## 当前状态与下一步
 
-F01–F12 已实现并按下表记录放行；已实现能力不因环境待验而重新搭建。最近代码提交为 `e9547be`，Windows x64 ZIP 及实际验证范围见 [v1.0.9 设置验收](validation/settings/settings-usability-v1.0.9.md)。本次仅整理文档与截图，应用版本、二进制和版本标签保持不变。
+F01–F12 已实现并按下表记录放行；已实现能力不因环境待验而重新搭建。最近应用代码提交为 `e9547be`，Windows x64 ZIP 及实际验证范围见 [v1.0.9 设置验收](validation/settings/settings-usability-v1.0.9.md)。最近维护为开源前检查、MIT 许可与打包说明，应用版本、既有二进制和版本标签保持不变。
 
 1. 继续定位 Codex 内置浏览器 Daily 页面长截图漏段，保留 [v1.0.3 失败样本](validation/long-capture/long-capture-v1.0.3.md)；v1.0.4 的远程显示修复不代表漏段已修复。
 2. 补验 v1.0.9 手动框选后的复制粘贴、保存及贴图链路；本次用户截图不替代这些验收。
 3. 按下方环境遗留补齐实机矩阵；维护者指定任务优先于这些待验项。
 
-## 最近维护：README 截图展示
+## 最近维护：开源前检查与 MIT
+
+- 检查当前受控文件、103 个历史提交及当前／历史图片，未发现入库密钥或明显工作资料；发现 Git 作者／标签邮箱、本机路径和测试环境信息。被忽略的 IDE、日志和浏览器测试资料含本地信息，不能直接随整个目录分发。详情与范围限制见 [检查报告](validation/engineering/open-source-audit-2026-11-13.md)，本次未改写历史或删除旧证据。
+- 增加 MIT 协议及 Cargo 许可声明，更新双语 README、快速说明和打包脚本，未来 ZIP 将包含 `LICENSE`。增加 `.idea` 忽略规则，保留本地 IDE 文件。
+- 已删除 14 个合入 `main` 且未被工作树占用的旧分支，保留 `main` 和当前文档工作分支；标签及远端引用未变。
+- Cargo 元数据与隔离打包烟雾检查通过；打包检查复用已有 EXE，未重新构建、运行 GUI 或替换既有 ZIP。应用版本仍为 v1.0.9。本地提交主题：`chore: prepare MIT licensing and record open-source audit`。
+- 开源前仍需维护者决定是否接受历史中的个人邮箱和路径公开；仅修改当前文件不能消除历史元数据。
+
+## README 截图展示
 
 - 中英文 README 均直接展示全部六张界面图：顶部截图工具条，以及通用、快捷键、截图、贴图、外观五个面板。移除“查看”链接表格和截图来源、日期、配置解释等过程性介绍，使用功能标题与简短说明。
 - 图片引用与本地链接检查见 [文档检查补充](validation/engineering/docs-organization-2026-11-13.md#readme-截图展示修订)。仅更新 Markdown，版本保持 v1.0.9；本地提交主题：`docs: display all screenshots in bilingual readmes`。

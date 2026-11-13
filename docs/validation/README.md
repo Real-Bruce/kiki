@@ -79,6 +79,7 @@
 - [P8.md](engineering/P8.md)
 - [STARTUP.md](engineering/STARTUP.md)
 - [docs-organization-2026-11-13.md](engineering/docs-organization-2026-11-13.md)
+- [open-source-audit-2026-11-13.md](engineering/open-source-audit-2026-11-13.md)
 
 ## 维护约定
 
