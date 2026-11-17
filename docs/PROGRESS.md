@@ -15,6 +15,7 @@ F01–F12 已实现并按下表记录放行；已实现能力不因环境待验�
 - 按用户要求将 Windows 实现归入 `app`、`capture`、`editor`、`pinned`、`settings`、`output`、`graphics`、`ui`、`diagnostics`，入口只保留模块声明和启动／报错导出。同步迁移测试、资源相对路径及模块文档链接，功能逻辑与界面保持原样。
 - 格式、全特性严格 Clippy 和正常桌面权限下的默认／全特性测试通过（各 82 通过、6 跳过）；首次沙箱测试的 4 项权限失败保留在 [目录整理验证](validation/engineering/windows-modules-2026-11-17.md)。Release 构建及交付情况见同一记录。
 - 本次为内部结构整理，版本保持 v1.0.11，不新增发布标签；提交主题为 `refactor(windows): group platform modules by feature`。既有 GUI、多屏、HDR、长截图漏段和性能待验项继续保留，下一步仍按上方列表推进。
+- 用户复测包：基于 `68f8216` 运行正式打包脚本，更新 `dist/kiki-v1.0.11-windows-x64.zip`；旧包已备份，17 个文件、版本及哈希核对通过，等待用户人工验证。补充记录提交主题为 `docs(build): record latest ZIP for manual verification`。
 
 ## 最近维护：v1.0.11 贴图界面
 
