@@ -234,17 +234,37 @@ pub fn close() {
     }
 }
 
-pub fn hide_for_capture() -> Option<HWND> {
-    let hwnd = WINDOW.get()?;
+pub fn hide_for_capture() -> Result<Option<HWND>> {
+    let Some(hwnd) = WINDOW.get() else {
+        return Ok(None);
+    };
     // SAFETY: the settings HWND belongs to this UI thread and remains live while hidden.
     unsafe {
-        if IsWindowVisible(hwnd).as_bool() {
-            let _ = ShowWindow(hwnd, SW_HIDE);
-            let _ = DwmFlush();
-            Some(hwnd)
-        } else {
-            None
+        if !IsWindowVisible(hwnd).as_bool() {
+            return Ok(None);
         }
+        // DwmFlush presents the hide, but does not wait for an exit animation to finish.
+        let transitions_disabled = BOOL::from(true);
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_TRANSITIONS_FORCEDISABLED,
+            (&transitions_disabled as *const BOOL).cast(),
+            std::mem::size_of::<BOOL>() as u32,
+        )?;
+        let _ = ShowWindow(hwnd, SW_HIDE);
+        let presented = DwmFlush();
+        let transitions_disabled = BOOL::from(false);
+        let restored = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_TRANSITIONS_FORCEDISABLED,
+            (&transitions_disabled as *const BOOL).cast(),
+            std::mem::size_of::<BOOL>() as u32,
+        );
+        if let Err(error) = presented.and(restored) {
+            restore_after_capture_failure(Some(hwnd));
+            return Err(error);
+        }
+        Ok(Some(hwnd))
     }
 }
 

@@ -69,6 +69,7 @@
 - [settings-scroll-v1.0.6.md](settings/settings-scroll-v1.0.6.md)
 - [settings-slider-v1.0.8.md](settings/settings-slider-v1.0.8.md)
 - [settings-usability-v1.0.9.md](settings/settings-usability-v1.0.9.md)
+- [v1.0.13 设置页截图残影](settings/settings-capture-v1.0.13.md)
 
 ## 工程、性能与交付
 

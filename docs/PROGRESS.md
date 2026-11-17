@@ -1,6 +1,6 @@
 # 当前进度
 
-更新时间：2026-11-17。当前源码 **v1.0.12**（[VERSION](../VERSION)）。[按模块阅读](README.md) · [实施历史](IMPLEMENTATION_HISTORY.md) · [验证记录](validation/README.md)
+更新时间：2026-11-17。当前源码 **v1.0.13**（[VERSION](../VERSION)）。[按模块阅读](README.md) · [实施历史](IMPLEMENTATION_HISTORY.md) · [验证记录](validation/README.md)
 
 ## 当前状态与下一步
 
@@ -9,6 +9,12 @@ F01–F12 已实现并按下表记录放行；已实现能力不因环境待验�
 1. 继续定位 Codex 内置浏览器 Daily 页面长截图漏段，保留 [v1.0.3 失败样本](validation/long-capture/long-capture-v1.0.3.md)；v1.0.4 的远程显示修复不代表漏段已修复。
 2. 补验普通框选后直接保存和复制至外部应用，以及贴图复制按钮；本次已补验框选后贴图和贴图保存。
 3. 按下方环境遗留补齐实机矩阵；维护者指定任务优先于这些待验项。
+
+## v1.0.13 设置页截图残影
+
+- 从「通用 → 开始截图」隐藏设置窗口时临时禁用该窗口的 DWM 过渡，等隐藏画面提交后再开始捕获。隐藏或捕获失败时沿用恢复设置并提示重试的流程。
+- 用户人工复测浅色、深色均通过，两段录屏的框选预览无残影。单屏浅色 Release diagnostics 保存的 750 × 417 PNG 无残影。正式 ZIP 解压启动后，从通用页成功进入截图。82 项全特性串行测试通过，6 项按原标记跳过。[验证记录](validation/settings/settings-capture-v1.0.13.md)
+- 本地提交主题为 `fix(settings): prevent window fade in screenshots`，补丁标签为 `v1.0.13`。
 
 ## v1.0.12 本地版本
 

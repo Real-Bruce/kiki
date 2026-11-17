@@ -372,7 +372,13 @@ fn begin_capture_from_settings(hwnd: HWND) {
     if !ready {
         return;
     }
-    let settings = settings::hide_for_capture();
+    let settings = match settings::hide_for_capture() {
+        Ok(window) => window,
+        Err(error) => {
+            report_capture_error(&format!("无法隐藏设置窗口，请重试。\n{error}"));
+            return;
+        }
+    };
     match try_begin_capture_mode(hwnd, false) {
         Ok(()) => APP.with_borrow_mut(|app| {
             if let Some(state) = app {
