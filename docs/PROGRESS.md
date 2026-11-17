@@ -1,6 +1,6 @@
 # 当前进度
 
-更新时间：2026-11-17。当前源码 **v1.0.11**（[VERSION](../VERSION)）。[按模块阅读](README.md) · [实施历史](IMPLEMENTATION_HISTORY.md) · [验证记录](validation/README.md)
+更新时间：2026-11-17。当前源码 **v1.0.12**（[VERSION](../VERSION)）。[按模块阅读](README.md) · [实施历史](IMPLEMENTATION_HISTORY.md) · [验证记录](validation/README.md)
 
 ## 当前状态与下一步
 
@@ -9,6 +9,11 @@ F01–F12 已实现并按下表记录放行；已实现能力不因环境待验�
 1. 继续定位 Codex 内置浏览器 Daily 页面长截图漏段，保留 [v1.0.3 失败样本](validation/long-capture/long-capture-v1.0.3.md)；v1.0.4 的远程显示修复不代表漏段已修复。
 2. 补验普通框选后直接保存和复制至外部应用，以及贴图复制按钮；本次已补验框选后贴图和贴图保存。
 3. 按下方环境遗留补齐实机矩阵；维护者指定任务优先于这些待验项。
+
+## v1.0.12 本地版本
+
+- 用户要求合入 `main` 并新增标签；在已合入的目录整理基础上递增补丁版本至 1.0.12，保留旧标签。应用逻辑沿用 `68f8216`，版本与打包验证见 [目录整理记录](validation/engineering/windows-modules-2026-11-17.md)。
+- 本地提交主题为 `chore(release): prepare v1.0.12 platform refactor`，带英文说明标签为 `v1.0.12`；不推送或发布远端。
 
 ## 最近维护：Windows 源码按功能分目录
 
