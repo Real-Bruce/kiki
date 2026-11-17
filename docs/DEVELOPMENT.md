@@ -31,6 +31,24 @@ cargo build --release --locked
 
 代码与 Git 规则见 [AGENTS.md](../AGENTS.md)。界面变化必须运行实际程序检查，并核对最终成图，不能只跑单元测试。
 
+### Windows 源码目录
+
+`src/platform/windows/mod.rs` 只声明功能模块并导出 `run`、`show_error`。各功能以 `mod.rs` 为入口，测试随被测模块放置；跨功能引用使用明确的模块路径，可见性限制在 Windows 平台内部。
+
+| 子目录 | 职责 |
+| --- | --- |
+| app | 应用生命周期、托盘消息路由、单实例、COM 运行环境、系统热键和自启 |
+| capture | 桌面与区域帧采集、显示器枚举、可见窗口识别及捕获测试 |
+| editor | 截图编辑窗口、选区绘制、工具条、取色、文字输入、长截图及编辑验收测试 |
+| pinned | 贴图窗口、操作与绘制 |
+| settings | 设置窗口、布局、恢复默认对话框、偏好同步与配置存储 |
+| output | 后台输出、剪贴板、保存、成图合成与 WIC 编码 |
+| graphics | 多种窗口共用的图形设备与标注绘制 |
+| ui | 共用菜单、参数控件、文本查看器、主题色与图标 |
+| diagnostics | 仅诊断特性启用的探针与性能采样 |
+
+共享设备由编辑画布、设置和贴图共同使用，因此放在 `graphics/device.rs`。重构验证与范围见 [目录整理记录](validation/engineering/windows-modules-2026-11-17.md)。
+
 ## 普通启动参数
 
 - --settings：打开设置；已有实例时转发请求。

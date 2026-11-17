@@ -20,10 +20,10 @@
 | 源码 | 职责 |
 | --- | --- |
 | [src/core/long_image.rs](../../src/core/long_image.rs) | 重叠匹配、追加与容量限制 |
-| [src/platform/windows/long_capture.rs](../../src/platform/windows/long_capture.rs) | 采集、预览与静态编辑 |
-| [src/platform/windows/capture.rs](../../src/platform/windows/capture.rs) | 捕获资源 |
-| [src/platform/windows/capture_stream_tests.rs](../../src/platform/windows/capture_stream_tests.rs) | 原生滚动捕获回归 |
-| [src/platform/windows/composition.rs](../../src/platform/windows/composition.rs) | 完整长图合成 |
+| [src/platform/windows/editor/long_capture.rs](../../src/platform/windows/editor/long_capture.rs) | 采集、预览与静态编辑 |
+| [src/platform/windows/capture/mod.rs](../../src/platform/windows/capture/mod.rs) | 捕获资源 |
+| [src/platform/windows/capture/tests.rs](../../src/platform/windows/capture/tests.rs) | 原生滚动捕获回归 |
+| [src/platform/windows/output/composition.rs](../../src/platform/windows/output/composition.rs) | 完整长图合成 |
 
 共用构建、原生诊断和资源约束见 [开发说明](../DEVELOPMENT.md)。
 

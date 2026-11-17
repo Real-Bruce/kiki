@@ -18,8 +18,8 @@ Rust 2024 / Rust 1.88.0 / Windows MSVC x64。核心接收通用数据，Win32/CO
 | [rust-toolchain.toml](../../rust-toolchain.toml) | 已验证工具链 |
 | [build.rs](../../build.rs) | 构建元数据 |
 | [VERSION](../../VERSION) | 应用版本 |
-| [src/platform/windows/diagnostics.rs](../../src/platform/windows/diagnostics.rs) | 显式诊断入口 |
-| [src/platform/windows/performance.rs](../../src/platform/windows/performance.rs) | 性能采样 |
+| [src/platform/windows/diagnostics/mod.rs](../../src/platform/windows/diagnostics/mod.rs) | 显式诊断入口 |
+| [src/platform/windows/diagnostics/performance.rs](../../src/platform/windows/diagnostics/performance.rs) | 性能采样 |
 | [scripts/Package-Windows.ps1](../../scripts/Package-Windows.ps1) | ZIP 与校验值 |
 | [scripts/Measure-Performance.ps1](../../scripts/Measure-Performance.ps1) | 性能测量 |
 | [scripts/Measure-Startup.ps1](../../scripts/Measure-Startup.ps1) | 启动时延 |

@@ -17,11 +17,11 @@
 
 | 源码 | 职责 |
 | --- | --- |
-| [src/platform/windows/color_picker.rs](../../src/platform/windows/color_picker.rs) | 格式、取色状态与浮层 |
+| [src/platform/windows/editor/color_picker.rs](../../src/platform/windows/editor/color_picker.rs) | 格式、取色状态与浮层 |
 | [src/core/image.rs](../../src/core/image.rs) | 底图像素 |
-| [src/platform/windows/preview.rs](../../src/platform/windows/preview.rs) | 普通截图采样路由 |
-| [src/platform/windows/long_capture.rs](../../src/platform/windows/long_capture.rs) | 长图视口与采样 |
-| [src/platform/windows/output.rs](../../src/platform/windows/output.rs) | 剪贴板输出 |
+| [src/platform/windows/editor/mod.rs](../../src/platform/windows/editor/mod.rs) | 普通截图采样路由 |
+| [src/platform/windows/editor/long_capture.rs](../../src/platform/windows/editor/long_capture.rs) | 长图视口与采样 |
+| [src/platform/windows/output/mod.rs](../../src/platform/windows/output/mod.rs) | 剪贴板输出 |
 
 共用构建、原生诊断和资源约束见 [开发说明](../DEVELOPMENT.md)。
 

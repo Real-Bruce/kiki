@@ -19,14 +19,15 @@
 | 源码 | 职责 |
 | --- | --- |
 | [src/core/config.rs](../../src/core/config.rs) | 配置、默认值与迁移 |
-| [src/platform/windows/settings.rs](../../src/platform/windows/settings.rs) | 设置交互 |
-| [src/platform/windows/settings_layout.rs](../../src/platform/windows/settings_layout.rs) | 布局与滚动 |
-| [src/platform/windows/settings_render.rs](../../src/platform/windows/settings_render.rs) | 整帧绘制与主题 |
-| [src/platform/windows/config_store.rs](../../src/platform/windows/config_store.rs) | 配置读写 |
-| [src/platform/windows/preferences.rs](../../src/platform/windows/preferences.rs) | 偏好同步 |
-| [src/platform/windows/hotkey.rs](../../src/platform/windows/hotkey.rs) | 系统热键注册 |
-| [src/platform/windows/startup.rs](../../src/platform/windows/startup.rs) | 开机启动 |
-| [src/platform/windows/runtime.rs](../../src/platform/windows/runtime.rs) | 运行入口与托盘协调 |
+| [src/platform/windows/settings/mod.rs](../../src/platform/windows/settings/mod.rs) | 设置交互 |
+| [src/platform/windows/settings/layout.rs](../../src/platform/windows/settings/layout.rs) | 布局与滚动 |
+| [src/platform/windows/settings/render.rs](../../src/platform/windows/settings/render.rs) | 整帧绘制与主题 |
+| [src/platform/windows/settings/config_store.rs](../../src/platform/windows/settings/config_store.rs) | 配置读写 |
+| [src/platform/windows/settings/preferences.rs](../../src/platform/windows/settings/preferences.rs) | 偏好同步 |
+| [src/platform/windows/app/hotkey.rs](../../src/platform/windows/app/hotkey.rs) | 系统热键注册 |
+| [src/platform/windows/app/startup.rs](../../src/platform/windows/app/startup.rs) | 开机启动 |
+| [src/platform/windows/app/mod.rs](../../src/platform/windows/app/mod.rs) | 运行入口与托盘协调 |
+| [src/platform/windows/app/runtime.rs](../../src/platform/windows/app/runtime.rs) | COM 与图形运行环境 |
 
 共用构建、原生诊断和资源约束见 [开发说明](../DEVELOPMENT.md)。
 

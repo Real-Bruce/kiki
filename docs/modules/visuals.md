@@ -21,11 +21,11 @@
 
 | 源码 | 职责 |
 | --- | --- |
-| [src/platform/windows/ui_palette.rs](../../src/platform/windows/ui_palette.rs) | 主题颜色 |
-| [src/platform/windows/toolbar_icons.rs](../../src/platform/windows/toolbar_icons.rs) | 线性工具图标 |
-| [src/platform/windows/icon.rs](../../src/platform/windows/icon.rs) | 应用图标 |
-| [src/platform/windows/selection_render.rs](../../src/platform/windows/selection_render.rs) | 选区绘制 |
-| [src/platform/windows/settings_render.rs](../../src/platform/windows/settings_render.rs) | 设置面板绘制 |
+| [src/platform/windows/ui/palette.rs](../../src/platform/windows/ui/palette.rs) | 主题颜色 |
+| [src/platform/windows/ui/toolbar_icons.rs](../../src/platform/windows/ui/toolbar_icons.rs) | 线性工具图标 |
+| [src/platform/windows/ui/icon.rs](../../src/platform/windows/ui/icon.rs) | 应用图标 |
+| [src/platform/windows/editor/render.rs](../../src/platform/windows/editor/render.rs) | 选区绘制 |
+| [src/platform/windows/settings/render.rs](../../src/platform/windows/settings/render.rs) | 设置面板绘制 |
 
 共用构建、原生诊断和资源约束见 [开发说明](../DEVELOPMENT.md)。
 

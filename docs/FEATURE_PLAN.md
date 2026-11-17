@@ -99,7 +99,7 @@
 | --- | --- | --- |
 | 标注模型和历史 | `src/core/annotation.rs` | 复用 Object/Shape/Editor、命中与历史；增加同工具编辑和马赛克/编号对象；把 Tool 的业务标识与工具条数组下标分离 |
 | 选区和会话 | `src/core/selection.rs`、`src/core/session.rs` | 增加整边命中、显式选择手势和长截图阶段；保留物理坐标、取消及晚到帧保护 |
-| 输入路由与参数 | `src/platform/windows/preview.rs`、`text_input.rs` | 按控件/文本/活动手势/画布路由；接入滚轮、数值输入和工具状态，不把新逻辑继续集中进主消息循环 |
+| 输入路由与参数 | `src/platform/windows/editor/mod.rs`、`editor/text_input.rs` | 按控件/文本/活动手势/画布路由；接入滚轮、数值输入和工具状态，不把新逻辑继续集中进主消息循环 |
 | 绘制和布局 | `selection_render.rs`、`annotation_render.rs`、`toolbar_icons.rs` | 绘制真实参数控件和动态工具列表；预览与成图共用对象几何及样式；长图增加文档坐标到视口坐标的明确转换 |
 | 设置与存储 | `src/core/config.rs`、`preferences.rs`、`config_store.rs`、`settings_layout.rs`、`settings.rs` | 扩展 Config、版本迁移、设置布局和异步保存；共享参数范围定义，避免工具条与设置的数值再次不一致 |
 | 合成与编码 | `composition.rs`、`output.rs`、`image_encode.rs` | 合成阶段接入马赛克/编号/圆角；在现有 WIC 路径扩展 JPEG，输出请求携带格式和成图选项，不根据最终文件后缀猜测全部行为 |

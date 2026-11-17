@@ -17,10 +17,10 @@
 | 源码 | 职责 |
 | --- | --- |
 | [src/core/pinned.rs](../../src/core/pinned.rs) | 缩放与位置模型 |
-| [src/platform/windows/pinned.rs](../../src/platform/windows/pinned.rs) | 窗口与操作 |
-| [src/platform/windows/pinned_render.rs](../../src/platform/windows/pinned_render.rs) | 浮窗绘制 |
-| [src/platform/windows/pinned_device.rs](../../src/platform/windows/pinned_device.rs) | 设备与资源 |
-| [src/platform/windows/output.rs](../../src/platform/windows/output.rs) | 复制与保存 |
+| [src/platform/windows/pinned/mod.rs](../../src/platform/windows/pinned/mod.rs) | 窗口与操作 |
+| [src/platform/windows/pinned/render.rs](../../src/platform/windows/pinned/render.rs) | 浮窗绘制 |
+| [src/platform/windows/graphics/device.rs](../../src/platform/windows/graphics/device.rs) | 与编辑、设置共用的设备与资源 |
+| [src/platform/windows/output/mod.rs](../../src/platform/windows/output/mod.rs) | 复制与保存 |
 
 共用构建、原生诊断和资源约束见 [开发说明](../DEVELOPMENT.md)。
 

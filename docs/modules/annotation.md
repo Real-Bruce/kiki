@@ -25,10 +25,10 @@
 | --- | --- |
 | [src/core/annotation.rs](../../src/core/annotation.rs) | 对象、命中、编辑与历史 |
 | [src/core/config.rs](../../src/core/config.rs) | 参数范围与默认值 |
-| [src/platform/windows/parameter_control.rs](../../src/platform/windows/parameter_control.rs) | 滑杆与数值输入 |
-| [src/platform/windows/text_input.rs](../../src/platform/windows/text_input.rs) | 中文 IME 与文本编辑 |
-| [src/platform/windows/annotation_render.rs](../../src/platform/windows/annotation_render.rs) | 标注绘制 |
-| [src/platform/windows/composition.rs](../../src/platform/windows/composition.rs) | 最终成图合成 |
+| [src/platform/windows/ui/parameter_control.rs](../../src/platform/windows/ui/parameter_control.rs) | 滑杆与数值输入 |
+| [src/platform/windows/editor/text_input.rs](../../src/platform/windows/editor/text_input.rs) | 中文 IME 与文本编辑 |
+| [src/platform/windows/graphics/annotation.rs](../../src/platform/windows/graphics/annotation.rs) | 标注绘制 |
+| [src/platform/windows/output/composition.rs](../../src/platform/windows/output/composition.rs) | 最终成图合成 |
 
 共用构建、原生诊断和资源约束见 [开发说明](../DEVELOPMENT.md)。
 

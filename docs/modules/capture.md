@@ -24,10 +24,10 @@
 | [src/core/geometry.rs](../../src/core/geometry.rs) | 物理坐标与边界 |
 | [src/core/selection.rs](../../src/core/selection.rs) | 选区与拖动 |
 | [src/core/session.rs](../../src/core/session.rs) | 会话与取消 |
-| [src/platform/windows/capture.rs](../../src/platform/windows/capture.rs) | 冻结图像捕获 |
-| [src/platform/windows/window_targets.rs](../../src/platform/windows/window_targets.rs) | 可见窗口识别 |
-| [src/platform/windows/capture_toolbar.rs](../../src/platform/windows/capture_toolbar.rs) | 工具条动作与布局 |
-| [src/platform/windows/preview.rs](../../src/platform/windows/preview.rs) | 普通截图输入路由 |
+| [src/platform/windows/capture/mod.rs](../../src/platform/windows/capture/mod.rs) | 冻结图像捕获 |
+| [src/platform/windows/capture/window_targets.rs](../../src/platform/windows/capture/window_targets.rs) | 可见窗口识别 |
+| [src/platform/windows/editor/toolbar.rs](../../src/platform/windows/editor/toolbar.rs) | 工具条动作与布局 |
+| [src/platform/windows/editor/mod.rs](../../src/platform/windows/editor/mod.rs) | 普通截图输入路由 |
 
 共用构建、原生诊断和资源约束见 [开发说明](../DEVELOPMENT.md)。
 

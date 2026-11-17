@@ -18,9 +18,9 @@
 | 源码 | 职责 |
 | --- | --- |
 | [src/core/image.rs](../../src/core/image.rs) | 图像尺寸与像素 |
-| [src/platform/windows/composition.rs](../../src/platform/windows/composition.rs) | 标注、马赛克与圆角合成 |
-| [src/platform/windows/image_encode.rs](../../src/platform/windows/image_encode.rs) | WIC PNG/JPEG 编码 |
-| [src/platform/windows/output.rs](../../src/platform/windows/output.rs) | 剪贴板、保存对话框与后台输出 |
+| [src/platform/windows/output/composition.rs](../../src/platform/windows/output/composition.rs) | 标注、马赛克与圆角合成 |
+| [src/platform/windows/output/encode.rs](../../src/platform/windows/output/encode.rs) | WIC PNG/JPEG 编码 |
+| [src/platform/windows/output/mod.rs](../../src/platform/windows/output/mod.rs) | 剪贴板、保存对话框与后台输出 |
 
 共用构建、原生诊断和资源约束见 [开发说明](../DEVELOPMENT.md)。
 
