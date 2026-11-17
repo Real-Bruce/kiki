@@ -54,6 +54,7 @@
 [设计与开发入口](../modules/pinned.md)
 
 - [P5_PINNED.md](pinned/P5_PINNED.md)
+- [v1.0.11 贴图菜单与悬停工具条](pinned/pinned-ui-v1.0.11.md)
 
 ## 设置与运行入口
 

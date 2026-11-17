@@ -1,7 +1,7 @@
 //! Independent topmost image windows. Each HWND owns one State until NCDESTROY.
 use super::{
     output::{self, Completed, Destination, Job},
-    pinned_render::{self, Canvas},
+    pinned_render::{Button, Canvas, Controls, Toolbar},
 };
 use crate::core::{image::Image, pinned::View, selection::PixelPoint};
 use std::{
@@ -34,21 +34,29 @@ struct State {
     minimum: (i32, i32),
     dpi: u32,
     hover: bool,
-    down: Option<usize>,
+    hot: Option<Button>,
+    down: Option<Button>,
     notice: Option<String>,
     busy: bool,
     job: Option<Job>,
 }
 impl State {
+    fn toolbar(&self) -> Toolbar {
+        Toolbar::new(self.view.dimensions(self.minimum).0, self.dpi)
+    }
+
     fn paint(&mut self, hwnd: HWND) -> Result<()> {
         let draw = |canvas: &Canvas| {
             canvas.paint(
                 self.view,
                 self.minimum,
                 self.dpi,
-                self.hover,
+                self.hover.then_some(Controls {
+                    hot: self.hot,
+                    down: self.down,
+                    busy: self.busy,
+                }),
                 self.notice.as_deref(),
-                self.busy,
             )
         };
         if let Some(canvas) = self.canvas.as_ref() {
@@ -236,6 +244,7 @@ fn open_with_preview(
             minimum,
             dpi,
             hover: false,
+            hot: None,
             down: None,
             notice: None,
             busy: false,
@@ -390,7 +399,11 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 LRESULT(0)
             }
             WM_MOUSEMOVE => {
-                if !(*pointer).hover {
+                let hot = (*pointer).toolbar().hit(point(lp));
+                let entering = !(*pointer).hover;
+                let changed = (*pointer).hot != hot;
+                (*pointer).hot = hot;
+                if entering {
                     (*pointer).hover = true;
                     let mut track = TRACKMOUSEEVENT {
                         cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
@@ -399,28 +412,30 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                         dwHoverTime: 0,
                     };
                     let _ = TrackMouseEvent(&mut track);
+                }
+                if entering || changed {
                     let _ = InvalidateRect(Some(hwnd), None, false);
                 }
                 LRESULT(0)
             }
             WM_MOUSELEAVE => {
                 (*pointer).hover = false;
+                (*pointer).hot = None;
                 (*pointer).down = None;
                 let _ = InvalidateRect(Some(hwnd), None, false);
                 LRESULT(0)
             }
-            WM_LBUTTONDOWN => {
-                let hit = {
-                    let s = &*pointer;
-                    pinned_render::button(
-                        s.view.dimensions(s.minimum).0,
-                        point(lp),
-                        s.dpi as f32 / 96.,
-                    )
-                };
-                (*pointer).down = hit;
-                if hit.is_some() {
-                    let _ = SetCapture(hwnd);
+            WM_LBUTTONDOWN | WM_LBUTTONDBLCLK => {
+                if let Some(button) = (*pointer).toolbar().hit(point(lp)) {
+                    if button.enabled((*pointer).busy) {
+                        (*pointer).down = Some(button);
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                        let _ = SetCapture(hwnd);
+                    }
+                } else if msg == WM_LBUTTONDBLCLK {
+                    let mut p = POINT::default();
+                    let _ = GetCursorPos(&mut p);
+                    zoom(hwnd, pointer, None, (p.x, p.y));
                 } else {
                     let _ = SendMessageW(
                         hwnd,
@@ -432,32 +447,24 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 LRESULT(0)
             }
             WM_LBUTTONUP => {
-                let hit = {
-                    let s = &*pointer;
-                    pinned_render::button(
-                        s.view.dimensions(s.minimum).0,
-                        point(lp),
-                        s.dpi as f32 / 96.,
-                    )
-                };
-                let down = (*pointer).down.take();
+                let hit = (*pointer).toolbar().hit(point(lp));
                 let life = (*pointer).life.clone();
-                let _ = ReleaseCapture();
-                if life.get() == Some(hwnd) && down.is_some() && down == hit {
-                    action(
-                        hwnd,
-                        pointer,
-                        match hit {
-                            Some(0) => 1,
-                            Some(1) => 2,
-                            _ => 4,
-                        },
-                    );
+                let down = (*pointer).down.take();
+                if GetCapture() == hwnd {
+                    let _ = ReleaseCapture();
+                }
+                if life.get() == Some(hwnd) {
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                    if let Some(button) = down.filter(|&button| Some(button) == hit) {
+                        action(hwnd, pointer, button.command());
+                    }
                 }
                 LRESULT(0)
             }
             WM_CAPTURECHANGED => {
-                (*pointer).down = None;
+                if (*pointer).down.take().is_some() {
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                }
                 LRESULT(0)
             }
             WM_MOUSEWHEEL => {
@@ -467,10 +474,8 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 }
                 LRESULT(0)
             }
-            WM_LBUTTONDBLCLK => {
-                let mut p = POINT::default();
-                let _ = GetCursorPos(&mut p);
-                zoom(hwnd, pointer, None, (p.x, p.y));
+            WM_ENTERIDLE if wp.0 == MSGF_MENU as usize => {
+                super::menu::style_context_popup(hwnd, HWND(lp.0 as *mut _));
                 LRESULT(0)
             }
             WM_CONTEXTMENU => {
@@ -630,13 +635,13 @@ fn context_menu(hwnd: HWND, p: (i32, i32), busy: bool) -> u32 {
         hwnd,
         p.0,
         p.1,
-        super::menu::Style::Pinned,
+        super::menu::Style::Context,
         &[
-            (1, "复制\tCtrl+C", !busy),
-            (2, "保存\tCtrl+S", !busy),
+            (Button::Copy.command(), "复制\tCtrl+C", !busy),
+            (Button::Save.command(), "保存\tCtrl+S", !busy),
             (3, "恢复原始比例\tCtrl+0", !busy),
             (0, "", true),
-            (4, "关闭\tEsc", true),
+            (Button::Close.command(), "关闭\tEsc", true),
         ],
     )
 }
@@ -833,7 +838,7 @@ pub fn stress(path: &std::path::Path) -> Result<()> {
                     unsafe {
                         let s = &*(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const State);
                         if let Some(canvas) = s.canvas.as_ref() {
-                            canvas.paint(s.view, s.minimum, s.dpi, false, None, false)?;
+                            canvas.paint(s.view, s.minimum, s.dpi, None, None)?;
                         }
                     }
                 }

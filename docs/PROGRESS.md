@@ -1,16 +1,22 @@
 # 当前进度
 
-更新时间：2026-11-13。当前源码 **v1.0.10**（[VERSION](../VERSION)）。[按模块阅读](README.md) · [实施历史](IMPLEMENTATION_HISTORY.md) · [验证记录](validation/README.md)
+更新时间：2026-11-17。当前源码 **v1.0.11**（[VERSION](../VERSION)）。[按模块阅读](README.md) · [实施历史](IMPLEMENTATION_HISTORY.md) · [验证记录](validation/README.md)
 
 ## 当前状态与下一步
 
-F01–F12 已实现并按下表记录放行；已实现能力不因环境待验而重新搭建。应用功能沿用 `e9547be`，实际 GUI 验证范围见 [v1.0.9 设置验收](validation/settings/settings-usability-v1.0.9.md)。用户已要求合入 `main` 并创建发布标签，本次以 v1.0.10 交付 MIT 协议和文档整理；本地构建、自动测试和 ZIP 解压核验已通过，详见 [v1.0.10 发布验证](validation/engineering/release-v1.0.10.md)。
+F01–F12 已实现并按下表记录放行；已实现能力不因环境待验而重新搭建。v1.0.11 完成贴图菜单和悬停工具条优化，已在单屏 125% 下验证浅深界面、缩放及保存，并完成正式 ZIP 的解压启动与框选贴图。详见 [贴图界面验证](validation/pinned/pinned-ui-v1.0.11.md)。
 
 1. 继续定位 Codex 内置浏览器 Daily 页面长截图漏段，保留 [v1.0.3 失败样本](validation/long-capture/long-capture-v1.0.3.md)；v1.0.4 的远程显示修复不代表漏段已修复。
-2. 补验 v1.0.9 手动框选后的复制粘贴、保存及贴图链路；本次用户截图不替代这些验收。
+2. 补验普通框选后直接保存和复制至外部应用，以及贴图复制按钮；本次已补验框选后贴图和贴图保存。
 3. 按下方环境遗留补齐实机矩阵；维护者指定任务优先于这些待验项。
 
-## 最近维护：v1.0.10 开源发布
+## 最近维护：v1.0.11 贴图界面
+
+- 贴图与托盘共用原生菜单样式；复制、保存和关闭复用截图工具条的矢量轮廓，按钮绘制与命中使用同一布局。
+- 严格 Clippy、82 项串行测试、浅深 GUI 和正式 ZIP 烟雾验证通过。4K 隐藏贴图资源采样及待验项见 [验收记录](validation/pinned/pinned-ui-v1.0.11.md)。
+- 在 `codex/pinned-ui-polish` 以 `fix(pinned): unify context menu and toolbar styling` 提交，本地版本标签为 `v1.0.11`。
+
+## v1.0.10 开源发布
 
 - 已将 `codex/docs-module-guide` 快进合入 `main`，包含双语 README、当前截图、模块文档和 MIT 协议；用户已确认接受历史中的姓名及个人邮箱公开，保留既有身份和提交历史。
 - 按用户本次发布要求递增补丁版本至 1.0.10，使用带英文更新说明的 `v1.0.10` 标签；v1.0.9 或更早标签保持不变。已合并的文档分支清理后只保留 `main`，远端推送由用户执行。

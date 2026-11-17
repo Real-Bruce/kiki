@@ -14,8 +14,7 @@ use windows::{
 };
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Style {
-    Tray,
-    Pinned,
+    Context,
     Settings,
 }
 
@@ -44,6 +43,7 @@ struct Menu {
 }
 impl Drop for Menu {
     fn drop(&mut self) {
+        // SAFETY: this guard owns the menu, its font and its brush. Destroy the menu before releasing the drawing resources.
         unsafe {
             let _ = DestroyMenu(self.handle);
             let _ = DeleteObject(self.font.into());
@@ -58,7 +58,7 @@ pub fn tray(owner: HWND, x: i32, y: i32) -> u32 {
         owner,
         x,
         y,
-        Style::Tray,
+        Style::Context,
         &[
             (1, &start, true),
             (4, "设置", true),
@@ -76,11 +76,9 @@ pub fn popup(owner: HWND, x: i32, y: i32, style: Style, entries: &[(u32, &str, b
             return 0;
         };
         let mut dpi = GetDpiForWindow(owner).max(96);
-        if style != Style::Pinned {
-            let monitor = MonitorFromPoint(POINT { x, y }, MONITOR_DEFAULTTONEAREST);
-            let mut vertical = dpi;
-            let _ = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi, &mut vertical);
-        }
+        let monitor = MonitorFromPoint(POINT { x, y }, MONITOR_DEFAULTTONEAREST);
+        let mut vertical = dpi;
+        let _ = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi, &mut vertical);
         let dpi = dpi.max(96);
         let font = CreateFontW(
             -((14 * dpi / 96) as i32),
@@ -94,16 +92,11 @@ pub fn popup(owner: HWND, x: i32, y: i32, style: Style, entries: &[(u32, &str, b
             DEFAULT_CHARSET,
             OUT_DEFAULT_PRECIS,
             CLIP_DEFAULT_PRECIS,
-            if style != Style::Pinned {
-                CLEARTYPE_QUALITY
-            } else {
-                DEFAULT_QUALITY
-            },
+            CLEARTYPE_QUALITY,
             DEFAULT_PITCH.0 as u32,
             w!("Segoe UI"),
         );
-        let background = CreateSolidBrush(rgb(menu_background(
-            style,
+        let background = CreateSolidBrush(rgb(super::ui_palette::background(
             super::selection_render::system_dark(),
         )));
         let mut menu = Menu {
@@ -114,26 +107,14 @@ pub fn popup(owner: HWND, x: i32, y: i32, style: Style, entries: &[(u32, &str, b
         };
         let info = MENUINFO {
             cbSize: std::mem::size_of::<MENUINFO>() as u32,
-            fMask: if style != Style::Pinned {
-                MIM_BACKGROUND | MIM_STYLE
-            } else {
-                MIM_BACKGROUND
-            },
-            dwStyle: if style != Style::Pinned {
-                MNS_NOCHECK
-            } else {
-                Default::default()
-            },
+            fMask: MIM_BACKGROUND | MIM_STYLE,
+            dwStyle: MNS_NOCHECK,
             hbrBack: background,
             ..Default::default()
         };
         let _ = SetMenuInfo(handle, &info);
         for (id, label, enabled) in entries {
             let separator = *id == 0;
-            if separator && style == Style::Pinned {
-                let _ = AppendMenuW(handle, MF_SEPARATOR, 0, None);
-                continue;
-            }
             let mut text: Vec<_> = label.encode_utf16().chain(Some(0)).collect();
             let item = Box::new(Item {
                 accessible: MSAAMENUINFO {
@@ -182,7 +163,7 @@ pub fn popup(owner: HWND, x: i32, y: i32, style: Style, entries: &[(u32, &str, b
         )
         .0 as u32;
         let _ = PostMessageW(Some(owner), WM_NULL, WPARAM(0), LPARAM(0));
-        if style == Style::Tray {
+        if style == Style::Context {
             super::settings_render::release_control_surface();
         }
         command
@@ -205,7 +186,6 @@ pub fn handle(msg: u32, lp: LPARAM) -> Option<LRESULT> {
                 info.itemHeight = item.px(9) as u32;
                 return Some(LRESULT(1));
             }
-            let scale = item.dpi as f32 / 96.;
             let dc = GetDC(None);
             let old = SelectObject(dc, item.font.into());
             let width = |text: &[u16]| {
@@ -214,25 +194,16 @@ pub fn handle(msg: u32, lp: LPARAM) -> Option<LRESULT> {
                 size.cx
             };
             let text = &item.text[..item.text.len() - 1];
-            (info.itemWidth, info.itemHeight) = if item.style != Style::Pinned {
-                let mut parts = text.split(|c| *c == u16::from(b'\t'));
-                let label = parts.next().map_or(0, width);
-                let shortcut = parts.next().map_or(0, |key| width(key) + item.px(20));
-                let width = label + shortcut + item.px(24);
-                (
-                    if item.style == Style::Settings {
-                        width.max(item.px(108))
-                    } else {
-                        width
-                    } as u32,
-                    item.px(36) as u32,
-                )
+            let mut parts = text.split(|c| *c == u16::from(b'\t'));
+            let label = parts.next().map_or(0, width);
+            let shortcut = parts.next().map_or(0, |key| width(key) + item.px(20));
+            let width = label + shortcut + item.px(24);
+            info.itemWidth = if item.style == Style::Settings {
+                width.max(item.px(108))
             } else {
-                (
-                    (width(text).max(190) as f32 + 56. * scale) as u32,
-                    (36. * scale) as u32,
-                )
-            };
+                width
+            } as u32;
+            info.itemHeight = item.px(36) as u32;
             SelectObject(dc, old);
             ReleaseDC(None, dc);
             return Some(LRESULT(1));
@@ -245,7 +216,7 @@ pub fn handle(msg: u32, lp: LPARAM) -> Option<LRESULT> {
             let item = &*(info.itemData as *const Item);
             let dark = super::selection_render::system_dark();
             use super::settings_render as appearance;
-            let surface = menu_background(item.style, dark);
+            let surface = appearance::background(dark);
             if item.separator {
                 fill(info.hDC, &info.rcItem, surface);
                 let pad = item.px(9);
@@ -264,18 +235,8 @@ pub fn handle(msg: u32, lp: LPARAM) -> Option<LRESULT> {
             }
             let selected = info.itemState.0 & ODS_SELECTED.0 != 0;
             let disabled = info.itemState.0 & (ODS_DISABLED.0 | ODS_GRAYED.0) != 0;
-            let bg = if selected {
-                if item.style != Style::Pinned {
-                    appearance::selected(dark)
-                } else if dark {
-                    0x174b73
-                } else {
-                    0xdcecff
-                }
-            } else {
-                surface
-            };
-            if item.style != Style::Pinned && selected && !disabled {
+            if selected && !disabled {
+                let bg = appearance::selected(dark);
                 let horizontal = item.px(4);
                 let vertical = item.px(1);
                 let r = info.rcItem;
@@ -296,30 +257,22 @@ pub fn handle(msg: u32, lp: LPARAM) -> Option<LRESULT> {
                     fill(info.hDC, &r, bg);
                 }
             } else {
-                fill(info.hDC, &info.rcItem, bg);
+                fill(info.hDC, &info.rcItem, surface);
             }
             SetBkMode(info.hDC, TRANSPARENT);
             SetTextColor(
                 info.hDC,
-                rgb(if item.style != Style::Pinned {
-                    if disabled {
-                        appearance::muted(dark)
-                    } else if selected {
-                        appearance::accent(dark)
-                    } else {
-                        appearance::foreground(dark)
-                    }
-                } else if disabled {
-                    0x858585
-                } else if dark {
-                    0xf2f2f2
+                rgb(if disabled {
+                    appearance::muted(dark)
+                } else if selected {
+                    appearance::accent(dark)
                 } else {
-                    0x202020
+                    appearance::foreground(dark)
                 }),
             );
             let old = SelectObject(info.hDC, item.font.into());
             let mut rect = info.rcItem;
-            let pad = item.px(if item.style == Style::Pinned { 16 } else { 12 });
+            let pad = item.px(12);
             rect.left += pad;
             rect.right -= pad;
             let text = String::from_utf16_lossy(&item.text[..item.text.len() - 1]);
@@ -332,7 +285,7 @@ pub fn handle(msg: u32, lp: LPARAM) -> Option<LRESULT> {
                 DT_LEFT | DT_VCENTER | DT_SINGLELINE,
             );
             if let Some(shortcut) = parts.get(1) {
-                if item.style == Style::Tray {
+                if item.style == Style::Context {
                     SetTextColor(info.hDC, rgb(appearance::muted(dark)));
                 }
                 let mut shortcut: Vec<_> = shortcut.encode_utf16().collect();
@@ -349,8 +302,8 @@ pub fn handle(msg: u32, lp: LPARAM) -> Option<LRESULT> {
         None
     }
 }
-/// Style the live tray menu delivered by WM_ENTERIDLE without changing system settings.
-pub fn style_tray_popup(owner: HWND, popup: HWND) {
+/// Style a live context menu delivered by WM_ENTERIDLE without changing system settings.
+pub fn style_context_popup(owner: HWND, popup: HWND) {
     if popup.is_invalid() || popup == owner {
         return;
     }
@@ -367,11 +320,11 @@ pub fn style_tray_popup(owner: HWND, popup: HWND) {
             (&corner as *const DWM_WINDOW_CORNER_PREFERENCE).cast(),
             std::mem::size_of_val(&corner) as u32,
         );
-        hide_tray_shadow(popup);
+        hide_native_shadow(popup);
     }
 }
 
-fn hide_tray_shadow(popup: HWND) {
+fn hide_native_shadow(popup: HWND) {
     // SAFETY: work only on the native shadow immediately behind the live popup on
     // its owning UI thread. The shadow is owned and destroyed by Windows.
     unsafe {
@@ -406,14 +359,6 @@ fn is_class(window: HWND, expected: &str) -> bool {
         let mut class = [0u16; 16];
         let len = GetClassNameW(window, &mut class) as usize;
         len != 0 && class[..len].iter().copied().eq(expected.encode_utf16())
-    }
-}
-
-fn menu_background(style: Style, dark: bool) -> u32 {
-    match (style, dark) {
-        (Style::Tray | Style::Settings, _) => super::settings_render::background(dark),
-        (Style::Pinned, true) => 0x292929,
-        (Style::Pinned, false) => 0xffffff,
     }
 }
 

@@ -26,8 +26,9 @@
 
 ## 验证与记录
 
-按 P5 检查多图、悬停控件、右键菜单、缩放中心、恢复原比例、关闭全部、输出原图尺寸及释放资源。最新附件是设置中的贴图说明页，不是贴图浮窗截图。
+按 P5 检查多图、悬停控件、右键菜单、缩放中心、恢复原比例、关闭全部、输出原图尺寸及释放资源。
 
+- [v1.0.11 菜单与悬停工具条验证](../validation/pinned/pinned-ui-v1.0.11.md)
 - [P5_PINNED.md](../validation/pinned/P5_PINNED.md)
 - [输出与贴图综合验收](../validation/output/P5_COMPLETION.md)
 
@@ -35,8 +36,8 @@
 
 ## 真实界面
 
-![置顶贴图相关界面](../screenshots/settings/pinned-light.png)
+![贴图悬停工具条](../screenshots/pinned/toolbar-light.png)
 
-以上为用户提供的最新浅色截图，来源和环境限制见 [图库](../screenshots/README.md)。
+[更多主题与菜单实拍](../screenshots/README.md#贴图)
 
 相关模块：[输出与圆角](output.md) · [设置与运行入口](settings.md) · [工程、性能与交付](engineering.md)

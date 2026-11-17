@@ -6,7 +6,9 @@ use crate::core::{
 };
 
 pub const UNDO: usize = 5;
+pub const SAVE: usize = 8;
 pub const COPY: usize = 9;
+pub const CLOSE: usize = 10;
 pub const MORE: usize = 21;
 pub const MOSAIC: usize = 22;
 pub const SEQUENCE: usize = 23;
@@ -22,8 +24,8 @@ const TOOLS: [usize; Tool::TOOLBAR.len()] = [1, 2, 3, 4, MOSAIC, SEQUENCE, LONG_
 const DRAWING: &[usize] = TOOLS.split_at(TOOLS.len() - 2).0;
 const UTILITIES: &[usize] = &[LONG_CAPTURE, PICKER, UNDO];
 const UNDO_ONLY: &[usize] = &[UNDO];
-const OUTPUT: &[usize] = &[7, 8, COPY];
-const CANCEL: &[usize] = &[10];
+const OUTPUT: &[usize] = &[7, SAVE, COPY];
+const CANCEL: &[usize] = &[CLOSE];
 const FULL: &[&[usize]] = &[DRAWING, UTILITIES, OUTPUT, CANCEL];
 const COLLAPSED: &[&[usize]] = &[&[MORE], UNDO_ONLY, OUTPUT, CANCEL];
 const MAX_BUTTONS: usize = TOOLS.len() + UNDO_ONLY.len() + OUTPUT.len() + CANCEL.len();

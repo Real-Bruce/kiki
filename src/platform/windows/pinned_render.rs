@@ -1,4 +1,9 @@
 //! Event-driven image surface. Display scaling never alters the source pixels.
+use super::{
+    capture_toolbar::{CLOSE, COPY, SAVE},
+    toolbar_icons::ToolbarIcons,
+    ui_palette as palette,
+};
 use crate::core::{image::Image, pinned::View};
 use windows::{
     Win32::{
@@ -11,6 +16,7 @@ use windows::{
     },
     core::{Result, w},
 };
+use windows_numerics::Vector2;
 
 pub fn shutdown() {
     super::pinned_device::shutdown();
@@ -22,18 +28,95 @@ pub struct Canvas {
     bitmap: ID2D1Bitmap,
     brush: ID2D1SolidColorBrush,
     text: IDWriteTextFormat,
-    icons: IDWriteTextFormat,
+    icons: ToolbarIcons,
     pub dark: bool,
     _device: std::rc::Rc<super::pinned_device::Device>,
 }
-pub fn button(width: i32, p: (i32, i32), scale: f32) -> Option<usize> {
-    let left = width as f32 - 124. * scale;
-    let x = p.0 as f32;
-    let y = p.1 as f32;
-    if y >= 8. * scale && y < 44. * scale && x >= left && x < left + 108. * scale {
-        Some(((x - left) / (36. * scale)) as usize)
-    } else {
-        None
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Button {
+    Copy,
+    Save,
+    Close,
+}
+
+impl Button {
+    const ALL: [Self; 3] = [Self::Copy, Self::Save, Self::Close];
+
+    const fn icon(self) -> usize {
+        match self {
+            Self::Copy => COPY,
+            Self::Save => SAVE,
+            Self::Close => CLOSE,
+        }
+    }
+
+    pub const fn command(self) -> u32 {
+        match self {
+            Self::Copy => 1,
+            Self::Save => 2,
+            Self::Close => 4,
+        }
+    }
+
+    pub const fn enabled(self, busy: bool) -> bool {
+        !busy || matches!(self, Self::Close)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct Toolbar {
+    panel: D2D_RECT_F,
+    scale: f32,
+}
+
+pub(super) struct Controls {
+    pub hot: Option<Button>,
+    pub down: Option<Button>,
+    pub busy: bool,
+}
+
+impl Toolbar {
+    const EDGE: f32 = 6.;
+    const PADDING: f32 = 4.;
+    const BUTTON: f32 = 36.;
+
+    pub fn new(width: i32, dpi: u32) -> Self {
+        let scale = dpi as f32 / 96.;
+        let right = width as f32 - Self::EDGE * scale;
+        let top = Self::EDGE * scale;
+        Self {
+            panel: D2D_RECT_F {
+                left: right
+                    - (Self::BUTTON * Button::ALL.len() as f32 + 2. * Self::PADDING) * scale,
+                top,
+                right,
+                bottom: top + (Self::BUTTON + 2. * Self::PADDING) * scale,
+            },
+            scale,
+        }
+    }
+
+    fn buttons(self) -> impl Iterator<Item = (Button, D2D_RECT_F)> {
+        Button::ALL.into_iter().enumerate().map(move |(i, button)| {
+            let left = self.panel.left + (Self::PADDING + Self::BUTTON * i as f32) * self.scale;
+            let top = self.panel.top + Self::PADDING * self.scale;
+            (
+                button,
+                D2D_RECT_F {
+                    left,
+                    top,
+                    right: left + Self::BUTTON * self.scale,
+                    bottom: top + Self::BUTTON * self.scale,
+                },
+            )
+        })
+    }
+
+    pub fn hit(self, (x, y): (i32, i32)) -> Option<Button> {
+        let (x, y) = (x as f32, y as f32);
+        self.buttons().find_map(|(button, r)| {
+            (x >= r.left && x < r.right && y >= r.top && y < r.bottom).then_some(button)
+        })
     }
 }
 impl Canvas {
@@ -84,24 +167,18 @@ impl Canvas {
             let brush = target.CreateSolidColorBrush(&color(0., 1.), None)?;
             let dw: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let scale = dpi as f32 / 96.;
-            let format = |icons| -> Result<IDWriteTextFormat> {
-                let f = dw.CreateTextFormat(
-                    if icons {
-                        w!("Segoe Fluent Icons")
-                    } else {
-                        w!("Segoe UI")
-                    },
-                    None,
-                    DWRITE_FONT_WEIGHT_NORMAL,
-                    DWRITE_FONT_STYLE_NORMAL,
-                    DWRITE_FONT_STRETCH_NORMAL,
-                    if icons { 18. * scale } else { 13. * scale },
-                    w!("zh-CN"),
-                )?;
-                f.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER)?;
-                f.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
-                Ok(f)
-            };
+            let text = dw.CreateTextFormat(
+                w!("Segoe UI"),
+                None,
+                DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL,
+                13. * scale,
+                w!("zh-CN"),
+            )?;
+            text.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER)?;
+            text.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
+            let icons = ToolbarIcons::new(&target.GetFactory()?)?;
             Ok(Self {
                 target,
                 context,
@@ -109,8 +186,8 @@ impl Canvas {
                 _device: device,
                 bitmap,
                 brush,
-                text: format(false)?,
-                icons: format(true)?,
+                text,
+                icons,
                 dark: super::selection_render::system_dark(),
             })
         }
@@ -135,9 +212,8 @@ impl Canvas {
         view: View,
         minimum: (i32, i32),
         dpi: u32,
-        hover: bool,
+        controls: Option<Controls>,
         notice: Option<&str>,
-        busy: bool,
     ) -> Result<()> {
         let (width, height) = view.dimensions(minimum);
         let (x, y) = view.image_origin(minimum);
@@ -172,40 +248,6 @@ impl Canvas {
                 1.,
                 None,
             );
-            if hover {
-                let left = width as f32 - 128. * scale;
-                self.panel(
-                    D2D_RECT_F {
-                        left,
-                        top: 4. * scale,
-                        right: width as f32 - 8. * scale,
-                        bottom: 48. * scale,
-                    },
-                    scale,
-                );
-                self.brush
-                    .SetColor(&color(if self.dark { 0.94 } else { 0.12 }, 1.));
-                for (i, glyph) in [0xe8c8u16, 0xe74e, 0xe8bb].iter().enumerate() {
-                    self.brush.SetColor(&color(
-                        if self.dark { 0.94 } else { 0.12 },
-                        if busy && i < 2 { 0.4 } else { 1. },
-                    ));
-                    let left = left + (4. + i as f32 * 36.) * scale;
-                    self.target.DrawText(
-                        &[*glyph],
-                        &self.icons,
-                        &D2D_RECT_F {
-                            left,
-                            top: 8. * scale,
-                            right: left + 36. * scale,
-                            bottom: 44. * scale,
-                        },
-                        &self.brush,
-                        D2D1_DRAW_TEXT_OPTIONS_NONE,
-                        DWRITE_MEASURING_MODE_NATURAL,
-                    );
-                }
-            }
             if let Some(text) = notice {
                 let right = width as f32 - 10. * scale;
                 let bottom = height as f32 - 10. * scale;
@@ -228,25 +270,79 @@ impl Canvas {
                     DWRITE_MEASURING_MODE_NATURAL,
                 );
             }
+            if let Some(controls) = controls {
+                self.draw_toolbar(Toolbar::new(width, dpi), controls);
+            }
             self.target.EndDraw(None, None)?;
             self.swap
                 .Present(0, windows::Win32::Graphics::Dxgi::DXGI_PRESENT(0))
                 .ok()
         }
     }
+    fn draw_toolbar(&self, toolbar: Toolbar, controls: Controls) {
+        let scale = toolbar.scale;
+        let dark = self.dark;
+        self.panel(toolbar.panel, scale);
+        // SAFETY: drawing on the owning UI thread between BeginDraw and EndDraw.
+        unsafe {
+            for (button, rect) in toolbar.buttons() {
+                let enabled = button.enabled(controls.busy);
+                let hot = enabled && controls.hot == Some(button);
+                if hot {
+                    let bg = if controls.down == Some(button) {
+                        palette::pressed(dark)
+                    } else {
+                        palette::selected(dark)
+                    };
+                    self.brush.SetColor(&rgb(bg, 1.));
+                    let inset = 2. * scale;
+                    self.target.FillRoundedRectangle(
+                        &D2D1_ROUNDED_RECT {
+                            rect: D2D_RECT_F {
+                                left: rect.left + inset,
+                                right: rect.right - inset,
+                                top: rect.top + inset,
+                                bottom: rect.bottom - inset,
+                            },
+                            radiusX: 6. * scale,
+                            radiusY: 6. * scale,
+                        },
+                        &self.brush,
+                    );
+                }
+                self.brush.SetColor(&rgb(
+                    if hot {
+                        palette::accent(dark)
+                    } else {
+                        palette::foreground(dark)
+                    },
+                    if enabled { 1. } else { 0.4 },
+                ));
+                self.icons.draw(
+                    &self.target,
+                    &self.brush,
+                    button.icon(),
+                    Vector2 {
+                        X: (rect.left + rect.right) * 0.5,
+                        Y: (rect.top + rect.bottom) * 0.5,
+                    },
+                    scale,
+                );
+            }
+        }
+    }
     fn panel(&self, rect: D2D_RECT_F, scale: f32) {
         // SAFETY: called only during the owning target's active draw on the UI thread.
         unsafe {
             self.brush
-                .SetColor(&color(if self.dark { 0.16 } else { 0.99 }, 0.97));
+                .SetColor(&rgb(palette::background(self.dark), 0.97));
             let rounded = D2D1_ROUNDED_RECT {
                 rect,
                 radiusX: 8. * scale,
                 radiusY: 8. * scale,
             };
             self.target.FillRoundedRectangle(&rounded, &self.brush);
-            self.brush
-                .SetColor(&color(if self.dark { 0.35 } else { 0.78 }, 1.));
+            self.brush.SetColor(&rgb(palette::divider(self.dark), 1.));
             self.target
                 .DrawRoundedRectangle(&rounded, &self.brush, 1., None);
         }
@@ -266,6 +362,16 @@ fn color(v: f32, a: f32) -> D2D1_COLOR_F {
         r: v,
         g: v,
         b: v,
+        a,
+    }
+}
+
+fn rgb(value: u32, a: f32) -> D2D1_COLOR_F {
+    let channel = |shift: u32| ((value >> shift) & 255) as f32 / 255.;
+    D2D1_COLOR_F {
+        r: channel(16),
+        g: channel(8),
+        b: channel(0),
         a,
     }
 }

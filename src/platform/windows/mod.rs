@@ -834,7 +834,7 @@ fn dispatch(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
                 LRESULT(0)
             }
             WM_ENTERIDLE if wparam.0 == MSGF_MENU as usize => {
-                menu::style_tray_popup(hwnd, HWND(lparam.0 as *mut _));
+                menu::style_context_popup(hwnd, HWND(lparam.0 as *mut _));
                 LRESULT(0)
             }
             TRAY if lparam.0 as u32 == WM_RBUTTONUP => {
