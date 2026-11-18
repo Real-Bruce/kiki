@@ -169,13 +169,13 @@ impl ControlShapes<'_> {
             PixelRect {
                 left: 4,
                 top: 4,
-                right: dip(rect.right) - 32,
+                right: dip(rect.right) - 4,
                 bottom: dip(rect.bottom) - 4,
             },
             capture_tools,
         );
         // SAFETY: the control owns the bound target during this paint. Restore its
-        // physical-pixel coordinate system before drawing the disclosure and focus ring.
+        // physical-pixel coordinate system before drawing the focus ring.
         unsafe {
             self.surface.target.SetDpi(dpi as f32, dpi as f32);
             BarPaint {
@@ -190,27 +190,19 @@ impl ControlShapes<'_> {
     }
 
     pub fn chevron_down(&self, bounds: RECT, width: f32, rgb: u32) {
-        self.chevron(bounds, true, width, rgb);
-    }
-
-    pub fn chevron(&self, bounds: RECT, down: bool, width: f32, rgb: u32) {
         let rect = self.rect(bounds);
-        let point = |x, y| {
-            let (left, top) = if down {
-                (rect.left + x, rect.top + y)
-            } else {
-                (rect.left + y, rect.top + x)
-            };
-            Vector2 { X: left, Y: top }
+        let left = Vector2 {
+            X: rect.left,
+            Y: rect.top,
         };
-        let (w, h) = if down {
-            (rect.right - rect.left, rect.bottom - rect.top)
-        } else {
-            (rect.bottom - rect.top, rect.right - rect.left)
+        let middle = Vector2 {
+            X: (rect.left + rect.right) / 2.,
+            Y: rect.bottom,
         };
-        let left = point(0., 0.);
-        let middle = point(w / 2., h);
-        let right = point(w, 0.);
+        let right = Vector2 {
+            X: rect.right,
+            Y: rect.top,
+        };
         // SAFETY: the target and brush belong to the active control paint.
         unsafe {
             self.surface.brush.SetColor(&color(rgb));

@@ -1354,12 +1354,7 @@ unsafe extern "system" fn button_proc(
                 if let Some(parameter) = setting_parameter(id as u16) {
                     let state = &*p;
                     let available = state.page == 2
-                        && match parameter {
-                            CaptureParameter::SequenceSize => Tool::Sequence
-                                .index()
-                                .is_some_and(|index| preferences::current().capture_tools[index]),
-                            _ => true,
-                        };
+                        && settings_layout::parameter_visible(parameter, &preferences::current());
                     if available
                         && let Some(result) = slider_input(hwnd, parent, msg, wp, lp, parameter)
                     {
@@ -1440,19 +1435,6 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                     shapes.rounded(r, dip(12), fill);
                 }
                 shapes.toolbar_preview(r, state.dpi, cfg.capture_tools, dark);
-                let x = r.right - dip(16);
-                let y = (r.top + r.bottom) / 2;
-                shapes.chevron(
-                    RECT {
-                        left: x - dip(4),
-                        top: y - dip(4),
-                        right: x + dip(4),
-                        bottom: y + dip(4),
-                    },
-                    state.tools_expanded,
-                    1.5 * dpi_scale,
-                    fg,
-                );
             } else if CAPTURE_TOOL_IDS.contains(&id) {
                 let index = usize::from(id - CAPTURE_TOOL);
                 let on = cfg.capture_tools[index];
@@ -2367,6 +2349,17 @@ mod tests {
             let hidden = preferences::current();
             assert_eq!(hidden.capture_tools, [false; Tool::TOOLBAR.len()]);
             assert_eq!(hidden.stroke_widths, [1, 3, 3]);
+            assert_eq!(
+                GetWindowLongPtrW(width_slider, GWL_STYLE) & WS_VISIBLE.0 as isize,
+                0
+            );
+            SendMessageW(
+                width_slider,
+                WM_KEYDOWN,
+                Some(WPARAM(VK_END.0 as usize)),
+                None,
+            );
+            assert_eq!(preferences::current().stroke_widths, hidden.stroke_widths);
             for id in CAPTURE_TOOL_IDS.take(4) {
                 SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(usize::from(id))), None);
             }

@@ -28,6 +28,18 @@ pub const PARAMETER_LABELS: [&str; 7] = [
 pub const FOOTER: i32 = 48;
 const ROW: i32 = 42;
 
+pub fn parameter_visible(parameter: CaptureParameter, cfg: &Config) -> bool {
+    let tool = match parameter {
+        CaptureParameter::Stroke(0) => Tool::Rectangle,
+        CaptureParameter::Stroke(1) => Tool::Arrow,
+        CaptureParameter::Stroke(2) => Tool::Pen,
+        CaptureParameter::TextSize => Tool::Text,
+        CaptureParameter::SequenceSize => Tool::Sequence,
+        _ => return true,
+    };
+    tool.index().is_some_and(|index| cfg.capture_tools[index])
+}
+
 #[derive(Clone, Copy)]
 pub struct Rect {
     pub x: i32,
@@ -172,20 +184,21 @@ impl Page {
                 }
                 p.toggle_row("截图时显示操作提示", 400);
                 p.divider();
-                p.heading("默认标注样式");
+                p.heading("样式调整");
                 p.note("用于新标注。尺寸按截图的实际像素计算。", Tone::Muted);
                 p.text("标注颜色", 0, 86, Tone::Normal);
                 p.choices(410, 8);
-                for index in 0..3 {
-                    p.parameter_row(index, CaptureParameter::Stroke(usize::from(index)));
-                }
-                p.parameter_row(3, CaptureParameter::TextSize);
-                p.parameter_row(5, CaptureParameter::MosaicSize);
-                if Tool::Sequence
-                    .index()
-                    .is_some_and(|index| cfg.capture_tools[index])
-                {
-                    p.parameter_row(6, CaptureParameter::SequenceSize);
+                for (index, parameter) in [
+                    (0, CaptureParameter::Stroke(0)),
+                    (1, CaptureParameter::Stroke(1)),
+                    (2, CaptureParameter::Stroke(2)),
+                    (3, CaptureParameter::TextSize),
+                    (5, CaptureParameter::MosaicSize),
+                    (6, CaptureParameter::SequenceSize),
+                ] {
+                    if parameter_visible(parameter, cfg) {
+                        p.parameter_row(index, parameter);
+                    }
                 }
                 p.divider();
                 p.heading("保存与圆角");
@@ -444,6 +457,23 @@ mod tests {
                         && readout.x > slider.x + slider.w
                         && readout.x + readout.w == closed.left + closed.width
                 )));
+            }
+            for (tool, hidden_row) in [
+                (Tool::Rectangle, 0),
+                (Tool::Arrow, 1),
+                (Tool::Pen, 2),
+                (Tool::Text, 3),
+            ] {
+                let mut config = cfg.clone();
+                config.capture_tools[tool.index().unwrap()] = false;
+                let updated = Page::new(width, (2, false), &config, &startup, true, None, &factory);
+                assert_eq!(closed.end - updated.end, 48);
+                for index in 0..=5 {
+                    assert_eq!(
+                        bounds(&updated, PARAMETER_SLIDER + index).is_some(),
+                        index != hidden_row
+                    );
+                }
             }
         }
     }
