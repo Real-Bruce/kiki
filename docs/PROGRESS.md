@@ -1,6 +1,6 @@
 # 当前进度
 
-更新时间：2026-11-18。当前源码 **v1.0.14**（[VERSION](../VERSION)）。[按模块阅读](README.md) · [实施历史](IMPLEMENTATION_HISTORY.md) · [验证记录](validation/README.md)
+更新时间：2026-11-18。当前源码 **v1.0.15**（[VERSION](../VERSION)）。[按模块阅读](README.md) · [实施历史](IMPLEMENTATION_HISTORY.md) · [验证记录](validation/README.md)
 
 ## 当前状态与下一步
 
@@ -9,6 +9,12 @@ F01–F12 已实现并按下表记录放行；已实现能力不因环境待验�
 1. 继续定位 Codex 内置浏览器 Daily 页面长截图漏段，保留 [v1.0.3 失败样本](validation/long-capture/long-capture-v1.0.3.md)；v1.0.4 的远程显示修复不代表漏段已修复。
 2. 补验普通框选后直接保存和复制至外部应用，以及贴图复制按钮；本次已补验框选后贴图和贴图保存。
 3. 按下方环境遗留补齐实机矩阵；维护者指定任务优先于这些待验项。
+
+## v1.0.15 关于页与设置文件入口
+
+- 关于页直接显示产品、版本及分组操作帮助。移除两处弹窗按钮，第三方许可原文随便携 ZIP 提供。「打开设置文件夹」移至通用页「设置文件」。
+- 自动检查覆盖自定义快捷键、快捷键不可用时的帮助、文件夹按钮的页面可见性及六页绘制回归。实际窗口排版和资源管理器打开效果由用户人工核对。 [功能验证](validation/settings/settings-about-v1.0.15.md)
+- 本地提交主题为 `fix(settings): show help inline on the about page`，供人工核对的便携包标签为 `v1.0.15`。后续事项见本页开头。
 
 ## v1.0.14 截图设置滑杆
 

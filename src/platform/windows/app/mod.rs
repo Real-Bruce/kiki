@@ -11,7 +11,7 @@ use super::{
     capture, editor as preview,
     pinned::{self, render as pinned_render},
     settings::{self, config_store, preferences},
-    ui::{icon, menu, text_viewer},
+    ui::{icon, menu},
 };
 
 use crate::core::session::{SessionGate, SessionId};
@@ -771,7 +771,6 @@ fn dispatch(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
                 }
                 settings::refresh();
                 pinned::theme_changed();
-                text_viewer::theme_changed();
                 let preview = APP.with_borrow(|app| {
                     app.as_ref()
                         .and_then(|s| s.preview.as_ref())

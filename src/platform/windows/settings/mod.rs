@@ -19,8 +19,8 @@ mod layout;
 mod reset_dialog;
 use layout as settings_layout;
 use settings_layout::{
-    CAPTURE_TOOL, CAPTURE_TOOL_IDS, FOOTER, HEADER, Item, OUTPUT_FORMAT, PARAMETER_LABELS,
-    PARAMETER_SLIDER, Page, RESET_CAPTURE, Rect, START_CAPTURE, Tone,
+    CAPTURE_TOOL, CAPTURE_TOOL_IDS, FOOTER, HEADER, Item, OPEN_CONFIG_FOLDER, OUTPUT_FORMAT,
+    PARAMETER_LABELS, PARAMETER_SLIDER, Page, RESET_CAPTURE, Rect, START_CAPTURE, Tone,
 };
 use std::{cell::Cell, rc::Rc};
 use windows::{
@@ -588,6 +588,7 @@ fn caption(id: u16, cfg: &Config, start: &std::result::Result<startup::State, St
         .into(),
         201 => "更新开机启动".into(),
         START_CAPTURE => "开始截图".into(),
+        OPEN_CONFIG_FOLDER => "打开设置文件夹".into(),
         301 => "恢复默认快捷键".into(),
         400 => format!(
             "截图时显示操作提示：{}",
@@ -629,9 +630,6 @@ fn caption(id: u16, cfg: &Config, start: &std::result::Result<startup::State, St
                 }
             )
         }
-        700 => "打开设置文件夹".into(),
-        701 => "使用帮助".into(),
-        702 => "第三方许可".into(),
         800 => "重试保存".into(),
         _ => String::new(),
     }
@@ -647,15 +645,13 @@ fn create_controls(hwnd: HWND) -> Result<()> {
                 200,
                 201,
                 START_CAPTURE,
+                OPEN_CONFIG_FOLDER,
                 300,
                 301,
                 400,
                 OUTPUT_FORMAT,
                 RESET_CAPTURE,
                 500,
-                700,
-                701,
-                702,
                 800,
             ])
             .chain(410..=417)
@@ -1109,6 +1105,7 @@ fn action(hwnd: HWND, id: u16) {
                 result
             }
             START_CAPTURE => preferences::request_capture_from_settings(),
+            OPEN_CONFIG_FOLDER if (*p).page == 0 => open_folder(hwnd),
             300 => {
                 let child = (*p).controls.iter().find(|c| c.id == 300).unwrap().hwnd;
                 hotkey::control_value(child)
@@ -1146,17 +1143,6 @@ fn action(hwnd: HWND, id: u16) {
                 cfg.theme = [Theme::System, Theme::Light, Theme::Dark][(id - 600) as usize];
                 preferences::update(cfg)
             }
-            700 => open_folder(hwnd),
-            701 => {
-                crate::platform::windows::ui::text_viewer::open(hwnd, "kiki 使用帮助", &help(&cfg))
-                    .map_err(|e| e.to_string())
-            }
-            702 => crate::platform::windows::ui::text_viewer::open(
-                hwnd,
-                "第三方许可",
-                include_str!("../../../../resources/THIRD_PARTY_LICENSES.txt"),
-            )
-            .map_err(|e| e.to_string()),
             800 => {
                 preferences::retry();
                 Ok(())
@@ -1585,7 +1571,7 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                         );
                         cfg.output_format.label().to_owned()
                     }
-                    201 | 301 | RESET_CAPTURE | 500 | 700..=702 | 800 => {
+                    201 | 301 | OPEN_CONFIG_FOLDER | RESET_CAPTURE | 500 | 800 => {
                         shapes.focus_ring(r, dip(6) as f32, dpi_scale, appearance::divider(dark));
                         caption(id, &cfg, &state.startup)
                     }
@@ -2004,12 +1990,6 @@ fn open_folder(hwnd: HWND) -> std::result::Result<(), String> {
         Ok(())
     }
 }
-fn help(cfg: &Config) -> String {
-    format!(
-        "开始截图：{}，或点击系统托盘图标。\r\n\r\n拖动选择区域；拖动边框调整。\r\n选择矩形、箭头、画笔或文字进行标注。\r\nCtrl+Z 撤销；Ctrl+Y 重做；Esc 取消。\r\n复制后可用 Ctrl+V 粘贴。保存可选择 PNG 或 JPEG。贴图会把截图置顶。\r\n\r\n贴图：拖动移动，滚轮缩放，Ctrl+0 原始比例。\r\nCtrl+C 复制，Ctrl+S 保存，Esc 关闭。\r\n\r\n右键托盘可打开设置、关闭贴图或退出。",
-        cfg.hotkey.label()
-    )
-}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2150,9 +2130,17 @@ mod tests {
                     );
                 }
             }
+            let folder_button = GetDlgItem(Some(hwnd), i32::from(OPEN_CONFIG_FOLDER)).unwrap();
             for page in 0..6 {
                 SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(100 + page)), None);
                 assert_eq!((*pointer(hwnd)).page, page);
+                if page == 0 {
+                    SendMessageW(hwnd, WM_VSCROLL, Some(WPARAM(SB_BOTTOM.0 as usize)), None);
+                }
+                assert_eq!(
+                    GetWindowLongPtrW(folder_button, GWL_STYLE) & WS_VISIBLE.0 as isize != 0,
+                    page == 0,
+                );
                 check_paint(hwnd);
                 if (*pointer(hwnd)).max_scroll == 0 {
                     let _ = ValidateRect(Some(hwnd), None);

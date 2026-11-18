@@ -88,4 +88,4 @@ cargo build --release --locked
 
 本项目采用 [MIT 开源协议](LICENSE)。
 
-第三方组件保留各自的许可证。第三方许可原文随应用提供，可在「关于」页离线查看，来源见[第三方许可说明](docs/THIRD_PARTY_LICENSES.md)。
+第三方组件保留各自的许可证。许可原文随便携 ZIP 提供。 [第三方许可说明](docs/THIRD_PARTY_LICENSES.md)

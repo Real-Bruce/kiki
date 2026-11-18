@@ -3,5 +3,4 @@ pub(super) mod icon;
 pub(super) mod menu;
 pub(super) mod palette;
 pub(super) mod parameter_control;
-pub(super) mod text_viewer;
 pub(super) mod toolbar_icons;

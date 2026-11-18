@@ -5,6 +5,7 @@ use crate::platform::windows::app::startup;
 
 pub const HEADER: i32 = 68;
 pub const START_CAPTURE: u16 = 202;
+pub const OPEN_CONFIG_FOLDER: u16 = 203;
 pub const PARAMETER_SLIDER: u16 = 420;
 pub const OUTPUT_FORMAT: u16 = 430;
 pub const RESET_CAPTURE: u16 = 431;
@@ -119,6 +120,10 @@ impl Page {
                     "关闭设置后，仍可从任务栏右下角的 kiki 图标开始截图。",
                     Tone::Muted,
                 );
+                p.divider();
+                p.heading("设置文件");
+                p.control(OPEN_CONFIG_FOLDER, 0, 0, 152, 36);
+                p.y += 36;
             }
             1 => {
                 p.heading("截图快捷键");
@@ -234,12 +239,38 @@ impl Page {
                 p.y += 142;
             }
             _ => {
-                p.row("版本", concat!("kiki ", env!("KIKI_VERSION")));
+                p.heading("kiki");
+                p.note(
+                    concat!("版本 ", env!("KIKI_VERSION"), " · Windows 11 x64"),
+                    Tone::Muted,
+                );
                 p.divider();
-                for id in [701, 700, 702] {
-                    p.control(id, 0, 0, 152, 36);
-                    p.y += ROW;
-                }
+                p.heading("使用帮助");
+                let start_capture = if hotkey_active {
+                    format!(
+                        "按 {}，也可从系统托盘或「通用」页开始。",
+                        cfg.hotkey.label()
+                    )
+                } else {
+                    "从系统托盘或「通用」页开始。可在「快捷键」页修改截图快捷键。".into()
+                };
+                p.help_topic("开始截图", &start_capture);
+                p.help_topic(
+                    "框选与标注",
+                    "拖动框选或单击选择窗口，拖动选区边缘调整范围。用工具条添加标注，Ctrl+Z 撤销，Ctrl+Y 重做，Esc 取消。",
+                );
+                p.help_topic(
+                    "复制、保存与贴图",
+                    "Enter 复制，Ctrl+V 粘贴。Ctrl+S 可保存为 PNG 或 JPEG，Ctrl+P 将截图置顶。",
+                );
+                p.help_topic(
+                    "管理贴图",
+                    "拖动移动，滚轮缩放，Ctrl+0 恢复原始比例。Ctrl+C 复制，Ctrl+S 保存，Esc 关闭。",
+                );
+                p.help_topic(
+                    "系统托盘",
+                    "右键单击 kiki 图标，可打开设置、关闭所有贴图或退出。",
+                );
             }
         }
         p.end = p.y + 18;
@@ -273,6 +304,12 @@ impl Page {
             .div_ceil(self.width as u32)
             .max(1) as i32;
         self.y += lines * 20 + 4;
+    }
+
+    fn help_topic(&mut self, title: &str, detail: &str) {
+        self.note(title, Tone::Normal);
+        self.note(detail, Tone::Muted);
+        self.y += 8;
     }
 
     fn row(&mut self, label: &str, value: impl Into<String>) {
@@ -340,5 +377,44 @@ impl Page {
             self.control(id + i, start + i32::from(i) * (size + gap), dy, size, 36);
         }
         self.y += dy + 46;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::config::Key;
+
+    #[test]
+    fn about_embeds_help_and_uses_registered_shortcut() {
+        let mut cfg = Config::default();
+        cfg.hotkey.key = Key::Function(18);
+        let shortcut = cfg.hotkey.label();
+        let startup = Ok(startup::State::Disabled);
+        let active = Page::new(660, 5, &cfg, &startup, true, None);
+        let unavailable = Page::new(660, 5, &cfg, &startup, false, None);
+
+        assert!(
+            active
+                .items
+                .iter()
+                .any(|item| matches!(item, Item::Heading("使用帮助", _)))
+        );
+        assert!(
+            active
+                .items
+                .iter()
+                .any(|item| matches!(item, Item::Text(text, _, _) if text.contains(&shortcut)))
+        );
+        assert!(unavailable.items.iter().any(|item| {
+            matches!(item, Item::Text(text, _, _)
+                if text.contains("系统托盘") && text.contains("「快捷键」") && !text.contains(&shortcut))
+        }));
+        assert!(
+            !active
+                .items
+                .iter()
+                .any(|item| matches!(item, Item::Control(..)))
+        );
     }
 }
