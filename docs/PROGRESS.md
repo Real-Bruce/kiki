@@ -1,6 +1,6 @@
 # 当前进度
 
-更新时间：2026-11-18。当前源码 **v1.0.18**（[VERSION](../VERSION)）。[按模块阅读](README.md) · [实施历史](IMPLEMENTATION_HISTORY.md) · [验证记录](validation/README.md)
+更新时间：2026-11-18。当前源码 **v1.0.19**（[VERSION](../VERSION)）。[按模块阅读](README.md) · [实施历史](IMPLEMENTATION_HISTORY.md) · [验证记录](validation/README.md)
 
 ## 当前状态与下一步
 
@@ -9,6 +9,12 @@ F01–F12 已实现并按下表记录放行；已实现能力不因环境待验�
 1. 继续定位 Codex 内置浏览器 Daily 页面长截图漏段，保留 [v1.0.3 失败样本](validation/long-capture/long-capture-v1.0.3.md)；v1.0.4 的远程显示修复不代表漏段已修复。
 2. 补验普通框选后直接保存和复制至外部应用，以及贴图复制按钮；本次已补验框选后贴图和贴图保存。
 3. 按下方环境遗留补齐实机矩阵；维护者指定任务优先于这些待验项。
+
+## v1.0.19 截图设置排版与交互
+
+- 截图页的工具条预览整行可以直接展开或收起工具复选框。标注尺寸和圆角滑杆常驻，参数标签和范围在左侧，像素读数统一右对齐。圆角预览旁的两行说明调整为居中排列。
+- 格式检查、严格 Clippy、默认与全特性串行测试和便携 ZIP 核对通过。用户负责界面复测。 [验证记录](validation/settings/settings-capture-layout-v1.0.19.md)
+- 本地提交主题为 `fix(settings): edit tools from the toolbar preview`。
 
 ## v1.0.18 截图设置分组折叠
 

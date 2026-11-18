@@ -5,7 +5,6 @@ pub(super) mod render;
 use crate::core::{
     annotation::Tool,
     config::{CaptureParameter, Config, Hotkey, OutputFormat, Theme},
-    geometry::PixelRect,
 };
 use crate::platform::windows::{
     app::hotkey,
@@ -19,9 +18,9 @@ mod layout;
 mod reset_dialog;
 use layout as settings_layout;
 use settings_layout::{
-    ANNOTATION_SIZES, CAPTURE_TOOL, CAPTURE_TOOL_IDS, CORNER_RADIUS, CUSTOMIZE_TOOLS,
-    CaptureSections, FOOTER, HEADER, Item, OPEN_CONFIG_FOLDER, OUTPUT_FORMAT, PARAMETER_LABELS,
-    PARAMETER_SLIDER, Page, RESET_CAPTURE, Rect, START_CAPTURE, Tone,
+    CAPTURE_TOOL, CAPTURE_TOOL_IDS, FOOTER, HEADER, Item, OPEN_CONFIG_FOLDER, OUTPUT_FORMAT,
+    PARAMETER_LABELS, PARAMETER_SLIDER, Page, RESET_CAPTURE, Rect, START_CAPTURE, TOOLBAR_PREVIEW,
+    Tone,
 };
 use std::{cell::Cell, rc::Rc};
 use windows::{
@@ -65,7 +64,7 @@ impl Drop for BufferedPaint {
 struct State {
     life: Rc<Cell<Option<HWND>>>,
     page: usize,
-    capture_sections: CaptureSections,
+    tools_expanded: bool,
     scroll: i32,
     max_scroll: i32,
     page_wheel: Wheel,
@@ -190,7 +189,7 @@ fn open_impl(visible: bool) -> Result<()> {
             page_scroll: [0; 6],
             hover: None,
             keyboard_focus: false,
-            capture_sections: CaptureSections::default(),
+            tools_expanded: false,
             app_icon,
             dpi,
             controls: Vec::new(),
@@ -294,8 +293,7 @@ pub fn route(message: &MSG) -> bool {
             let focused = GetFocus();
             let id = GetDlgCtrlID(focused) as u16;
             if GetParent(focused).ok() == Some(hwnd)
-                && (matches!(id, CUSTOMIZE_TOOLS | ANNOTATION_SIZES | CORNER_RADIUS)
-                    || CAPTURE_TOOL_IDS.contains(&id))
+                && (id == TOOLBAR_PREVIEW || CAPTURE_TOOL_IDS.contains(&id))
                 && IsWindowVisible(focused).as_bool()
             {
                 if message.lParam.0 & (1 << 30) == 0 {
@@ -499,7 +497,7 @@ fn invalidate_parameter_rows(hwnd: HWND, p: *mut State, dirty: [bool; PARAMETER_
                 {
                     rect
                 }
-                Item::CornerPreview(rect) | Item::Control(CORNER_RADIUS, rect) if dirty[4] => rect,
+                Item::CornerPreview(rect) if dirty[4] => rect,
                 _ => continue,
             };
             let bounds = RECT {
@@ -598,16 +596,16 @@ fn font(dpi: u32, size: u32, face: PCWSTR) -> HFONT {
         )
     }
 }
-fn radius_label(radius: u16) -> String {
-    if radius == 0 {
+fn parameter_label(parameter: CaptureParameter, config: &Config) -> String {
+    let value = parameter.value(config);
+    if matches!(parameter, CaptureParameter::CornerRadius) && value == 0 {
         "无（0 px）".into()
     } else {
-        format!("{radius} px")
+        format!("{value} px")
     }
 }
 
 fn caption(id: u16, cfg: &Config, state: &State) -> String {
-    let section_action = |open| if open { "收起" } else { "展开" };
     match id {
         100..=105 => PAGES[(id - 100) as usize].into(),
         200 => match state.startup {
@@ -637,21 +635,12 @@ fn caption(id: u16, cfg: &Config, state: &State) -> String {
         }
         OUTPUT_FORMAT => format!("默认保存格式：{}", cfg.output_format.label()),
         RESET_CAPTURE => "恢复截图默认设置".into(),
-        CUSTOMIZE_TOOLS => if state.capture_sections.tools {
-            "收起"
+        TOOLBAR_PREVIEW => if state.tools_expanded {
+            "收起工具显示选项"
         } else {
-            "自定义…"
+            "展开工具显示选项"
         }
         .into(),
-        ANNOTATION_SIZES => format!(
-            "线宽、字号与颗粒大小：{}",
-            section_action(state.capture_sections.sizes)
-        ),
-        CORNER_RADIUS => format!(
-            "圆角半径：{}，{}",
-            radius_label(cfg.corner_radius),
-            section_action(state.capture_sections.corner)
-        ),
         id if CAPTURE_TOOL_IDS.contains(&id) => {
             let index = usize::from(id - CAPTURE_TOOL);
             let tool = Tool::TOOLBAR[index].label();
@@ -696,9 +685,7 @@ fn create_controls(hwnd: HWND) -> Result<()> {
                 400,
                 OUTPUT_FORMAT,
                 RESET_CAPTURE,
-                CUSTOMIZE_TOOLS,
-                ANNOTATION_SIZES,
-                CORNER_RADIUS,
+                TOOLBAR_PREVIEW,
                 500,
                 800,
             ])
@@ -744,7 +731,7 @@ fn create_controls(hwnd: HWND) -> Result<()> {
 fn page_geometry(state: &State, width: i32) -> Page {
     Page::new(
         width,
-        (state.page, state.capture_sections),
+        (state.page, state.tools_expanded),
         &preferences::current(),
         &state.startup,
         preferences::active(),
@@ -1053,26 +1040,10 @@ fn paint(hwnd: HWND, dc: HDC, p: *mut State) -> Result<()> {
                         dark,
                     );
                 }
-                Item::ToolbarPreview(r)
-                    if r.y - state.scroll < height as i32 - FOOTER
-                        && r.y + r.h - state.scroll > HEADER =>
-                {
-                    c.toolbar_preview(
-                        PixelRect {
-                            left: r.x,
-                            top: r.y - state.scroll,
-                            right: r.x + r.w,
-                            bottom: r.y + r.h - state.scroll,
-                        },
-                        config.capture_tools,
-                        dark,
-                    );
-                }
-                Item::ToolbarPreview(_) => {}
                 Item::ParameterValue(id, r) => {
                     if let Some(parameter) = setting_parameter(*id) {
                         c.value(
-                            &format!("{} px", parameter.value(&config)),
+                            &parameter_label(parameter, &config),
                             r.x as f32,
                             r.y as f32 - offset,
                             r.w as f32,
@@ -1148,19 +1119,10 @@ fn action(hwnd: HWND, id: u16) {
             refresh();
             return;
         }
-        if (*p).page == 2 {
-            let sections = &mut (*p).capture_sections;
-            let expanded = match id {
-                CUSTOMIZE_TOOLS => Some(&mut sections.tools),
-                ANNOTATION_SIZES => Some(&mut sections.sizes),
-                CORNER_RADIUS => Some(&mut sections.corner),
-                _ => None,
-            };
-            if let Some(expanded) = expanded {
-                *expanded = !*expanded;
-                refresh();
-                return;
-            }
+        if (*p).page == 2 && id == TOOLBAR_PREVIEW {
+            (*p).tools_expanded = !(*p).tools_expanded;
+            refresh();
+            return;
         }
         let life = (*p).life.clone();
         (*p).error = None;
@@ -1197,10 +1159,7 @@ fn action(hwnd: HWND, id: u16) {
                 preferences::update(cfg)
             }
             OUTPUT_FORMAT => choose_output_format(hwnd, cfg.output_format),
-            id if (*p).page == 2
-                && (*p).capture_sections.tools
-                && CAPTURE_TOOL_IDS.contains(&id) =>
-            {
+            id if (*p).page == 2 && (*p).tools_expanded && CAPTURE_TOOL_IDS.contains(&id) => {
                 let enabled = &mut cfg.capture_tools[usize::from(id - CAPTURE_TOOL)];
                 *enabled = !*enabled;
                 preferences::update(cfg)
@@ -1396,11 +1355,10 @@ unsafe extern "system" fn button_proc(
                     let state = &*p;
                     let available = state.page == 2
                         && match parameter {
-                            CaptureParameter::CornerRadius => state.capture_sections.corner,
                             CaptureParameter::SequenceSize => Tool::Sequence
                                 .index()
                                 .is_some_and(|index| preferences::current().capture_tools[index]),
-                            _ => state.capture_sections.sizes,
+                            _ => true,
                         };
                     if available
                         && let Some(result) = slider_input(hwnd, parent, msg, wp, lp, parameter)
@@ -1472,6 +1430,29 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                     shapes.rounded(r, dip(12), appearance::hover(dark));
                 }
                 draw_toggle(shapes, r, dip, dark, on, pressed);
+            } else if id == TOOLBAR_PREVIEW {
+                if pressed || hovered {
+                    let fill = if pressed {
+                        appearance::pressed(dark)
+                    } else {
+                        appearance::hover(dark)
+                    };
+                    shapes.rounded(r, dip(12), fill);
+                }
+                shapes.toolbar_preview(r, state.dpi, cfg.capture_tools, dark);
+                let x = r.right - dip(16);
+                let y = (r.top + r.bottom) / 2;
+                shapes.chevron(
+                    RECT {
+                        left: x - dip(4),
+                        top: y - dip(4),
+                        right: x + dip(4),
+                        bottom: y + dip(4),
+                    },
+                    state.tools_expanded,
+                    1.5 * dpi_scale,
+                    fg,
+                );
             } else if CAPTURE_TOOL_IDS.contains(&id) {
                 let index = usize::from(id - CAPTURE_TOOL);
                 let on = cfg.capture_tools[index];
@@ -1672,45 +1653,7 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                         );
                         cfg.output_format.label().to_owned()
                     }
-                    ANNOTATION_SIZES | CORNER_RADIUS => {
-                        let expanded = if id == ANNOTATION_SIZES {
-                            state.capture_sections.sizes
-                        } else {
-                            state.capture_sections.corner
-                        };
-                        let x = r.right - dip(13);
-                        let y = (r.top + r.bottom) / 2;
-                        shapes.chevron(
-                            RECT {
-                                left: x - dip(4),
-                                top: y - dip(4),
-                                right: x + dip(4),
-                                bottom: y + dip(4),
-                            },
-                            expanded,
-                            1.5 * dpi_scale,
-                            text_color,
-                        );
-                        label_bounds.left += dip(4);
-                        if id == CORNER_RADIUS {
-                            labels.push((
-                                state.font,
-                                radius_label(cfg.corner_radius),
-                                RECT {
-                                    left: r.right - dip(160),
-                                    right: r.right - dip(28),
-                                    ..r
-                                },
-                                appearance::muted(dark),
-                                DT_RIGHT,
-                            ));
-                            "圆角半径".into()
-                        } else {
-                            "线宽、字号与颗粒大小".into()
-                        }
-                    }
-                    201 | 301 | OPEN_CONFIG_FOLDER | RESET_CAPTURE | CUSTOMIZE_TOOLS | 500
-                    | 800 => {
+                    201 | 301 | OPEN_CONFIG_FOLDER | RESET_CAPTURE | 500 | 800 => {
                         shapes.focus_ring(r, dip(6) as f32, dpi_scale, appearance::divider(dark));
                         caption(id, &cfg, state)
                     }
@@ -1721,11 +1664,7 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                     label,
                     label_bounds,
                     text_color,
-                    if nav || matches!(id, ANNOTATION_SIZES | CORNER_RADIUS) {
-                        DT_LEFT
-                    } else {
-                        DT_CENTER
-                    },
+                    if nav { DT_LEFT } else { DT_CENTER },
                 ));
             }
             if focused && !disabled {
@@ -2313,12 +2252,7 @@ mod tests {
                 SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(usize::from(id))), None);
                 assert_eq!(preferences::current(), before);
             };
-            assert_eq!(
-                GetWindowLongPtrW(width_slider, GWL_STYLE) & WS_VISIBLE.0 as isize,
-                0
-            );
-            toggle_section(ANNOTATION_SIZES);
-            toggle_section(CORNER_RADIUS);
+            assert!(!(*state).tools_expanded);
             let mut client = RECT::default();
             GetClientRect(hwnd, &mut client).unwrap();
             let dip = |px| (px as f32 * 96. / (*state).dpi as f32).round() as i32;
@@ -2426,7 +2360,7 @@ mod tests {
             assert!(!hotkey_focused());
             // Short logical work areas must scroll; controls outside the viewport must be hidden.
             SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(102)), None);
-            toggle_section(CUSTOMIZE_TOOLS);
+            toggle_section(TOOLBAR_PREVIEW);
             for id in CAPTURE_TOOL_IDS.take(4) {
                 SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(usize::from(id))), None);
             }
@@ -2456,16 +2390,22 @@ mod tests {
             SendMessageW(hwnd, WM_VSCROLL, Some(WPARAM(SB_BOTTOM.0 as usize)), None);
             let end = (*pointer(hwnd)).max_scroll;
             assert_eq!((*pointer(hwnd)).scroll, end);
-            toggle_section(CORNER_RADIUS);
+            toggle_section(TOOLBAR_PREVIEW);
             assert!((*state).max_scroll < end);
             assert_eq!((*state).scroll, (*state).max_scroll);
-            let radius = GetDlgItem(Some(hwnd), i32::from(PARAMETER_SLIDER + 4)).unwrap();
+            let checkbox = GetDlgItem(Some(hwnd), i32::from(CAPTURE_TOOL)).unwrap();
             assert_eq!(
-                GetWindowLongPtrW(radius, GWL_STYLE) & WS_VISIBLE.0 as isize,
+                GetWindowLongPtrW(checkbox, GWL_STYLE) & WS_VISIBLE.0 as isize,
                 0
             );
-            SendMessageW(radius, WM_KEYDOWN, Some(WPARAM(VK_HOME.0 as usize)), None);
-            assert_eq!(preferences::current().corner_radius, 256);
+            let config = preferences::current();
+            SendMessageW(
+                hwnd,
+                WM_COMMAND,
+                Some(WPARAM(usize::from(CAPTURE_TOOL))),
+                None,
+            );
+            assert_eq!(preferences::current(), config);
             let _ = ValidateRect(Some(hwnd), None);
             SendMessageW(hwnd, WM_VSCROLL, Some(WPARAM(SB_LINEDOWN.0 as usize)), None);
             assert!(!GetUpdateRect(hwnd, None, false).as_bool());
@@ -2510,9 +2450,7 @@ mod tests {
             assert!(WINDOW.get().is_none());
             open_impl(false).unwrap();
             let reopened = pointer(WINDOW.get().unwrap());
-            assert!(!(*reopened).capture_sections.tools);
-            assert!(!(*reopened).capture_sections.sizes);
-            assert!(!(*reopened).capture_sections.corner);
+            assert!(!(*reopened).tools_expanded);
             close();
             drop(guard);
             assert_eq!(config_store::Disk::load(path.clone()).config, expected);

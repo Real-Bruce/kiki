@@ -26,6 +26,7 @@ thread_local! {
 struct ControlSurface {
     target: ID2D1DCRenderTarget,
     brush: ID2D1SolidColorBrush,
+    icons: ToolbarIcons,
 }
 
 impl ControlSurface {
@@ -45,7 +46,12 @@ impl ControlSurface {
             })?;
             target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
             let brush = target.CreateSolidColorBrush(&color(0), None)?;
-            Ok(Self { target, brush })
+            let icons = ToolbarIcons::new(&factory)?;
+            Ok(Self {
+                target,
+                brush,
+                icons,
+            })
         }
     }
 }
@@ -150,6 +156,39 @@ impl ControlShapes<'_> {
         }
     }
 
+    pub fn toolbar_preview(
+        &self,
+        bounds: RECT,
+        dpi: u32,
+        capture_tools: [bool; crate::core::annotation::Tool::TOOLBAR.len()],
+        dark: bool,
+    ) {
+        let rect = self.rect(bounds);
+        let dip = |px: f32| (px * 96. / dpi as f32).round() as i32;
+        let layout = Layout::preview(
+            PixelRect {
+                left: 4,
+                top: 4,
+                right: dip(rect.right) - 32,
+                bottom: dip(rect.bottom) - 4,
+            },
+            capture_tools,
+        );
+        // SAFETY: the control owns the bound target during this paint. Restore its
+        // physical-pixel coordinate system before drawing the disclosure and focus ring.
+        unsafe {
+            self.surface.target.SetDpi(dpi as f32, dpi as f32);
+            BarPaint {
+                target: &self.surface.target,
+                brush: &self.surface.brush,
+                icons: &self.surface.icons,
+                dark,
+            }
+            .draw(&layout, PixelPoint { x: 0, y: 0 }, BarState::default());
+            self.surface.target.SetDpi(96., 96.);
+        }
+    }
+
     pub fn chevron_down(&self, bounds: RECT, width: f32, rgb: u32) {
         self.chevron(bounds, true, width, rgb);
     }
@@ -235,7 +274,6 @@ pub struct Canvas {
     target: ID2D1DCRenderTarget,
     brush: ID2D1SolidColorBrush,
     factory: IDWriteFactory,
-    toolbar_icons: ToolbarIcons,
 }
 impl Canvas {
     pub fn new(text_factory: &IDWriteFactory) -> Result<Self> {
@@ -250,12 +288,10 @@ impl Canvas {
                 ..Default::default()
             })?;
             let brush = target.CreateSolidColorBrush(&color(0), None)?;
-            let toolbar_icons = ToolbarIcons::new(&factory)?;
             Ok(Self {
                 target,
                 brush,
                 factory: text_factory.clone(),
-                toolbar_icons,
             })
         }
     }
@@ -288,21 +324,6 @@ impl Canvas {
                 &self.brush,
             );
         }
-    }
-    pub fn toolbar_preview(
-        &self,
-        bounds: PixelRect,
-        capture_tools: [bool; crate::core::annotation::Tool::TOOLBAR.len()],
-        dark: bool,
-    ) {
-        let layout = Layout::preview(bounds, capture_tools);
-        BarPaint {
-            target: &self.target,
-            brush: &self.brush,
-            icons: &self.toolbar_icons,
-            dark,
-        }
-        .draw(&layout, PixelPoint { x: 0, y: 0 }, BarState::default());
     }
     pub fn corner_preview(
         &self,
