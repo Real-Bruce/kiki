@@ -6,9 +6,9 @@
 
 | 检查 | 实测结果 | 界面 |
 | --- | --- | --- |
-| 快捷键页 | 「开始截图」下方的独立分组显示 Ctrl+0、Ctrl+C、Ctrl+S 和 Esc。截图热键录入入口与其恢复默认按钮均可见。 | [浅色](settings-layout-v1.0.5/shortcuts-light.jpg) · [深色](settings-layout-v1.0.5/shortcuts-dark.jpg) |
-| 贴图页 | 显示拖动、滚轮、右键菜单说明和「关闭贴图」按钮。四项键盘操作集中在快捷键页。 | [浅色](settings-layout-v1.0.5/pinned-light.jpg) · [深色](settings-layout-v1.0.5/pinned-dark.jpg) |
-| 截图页 | 无需滚动即可在「截图提示」上方看到「恢复默认」。按钮可打开原生确认框。取消后圆角仍为 18 px、截图提示关闭。确认后圆角归零、截图提示开启，磁盘配置保留深色主题和 Ctrl+Alt+F9。 | [浅色](settings-layout-v1.0.5/capture-light.jpg) · [深色](settings-layout-v1.0.5/capture-dark.jpg) |
+| 快捷键页 | 「开始截图」下方的独立分组显示 Ctrl+0、Ctrl+C、Ctrl+S 和 Esc。截图热键录入入口与其恢复默认按钮均可见。 | [浅色](https://github.com/Real-Bruce/kiki/blob/8d970ea216de7c5a1955162b61a95c3be948be9f/docs/validation/settings/settings-layout-v1.0.5/shortcuts-light.jpg) · [深色](https://github.com/Real-Bruce/kiki/blob/8d970ea216de7c5a1955162b61a95c3be948be9f/docs/validation/settings/settings-layout-v1.0.5/shortcuts-dark.jpg) |
+| 贴图页 | 显示拖动、滚轮、右键菜单说明和「关闭贴图」按钮。四项键盘操作集中在快捷键页。 | [浅色](https://github.com/Real-Bruce/kiki/blob/8d970ea216de7c5a1955162b61a95c3be948be9f/docs/validation/settings/settings-layout-v1.0.5/pinned-light.jpg) · [深色](https://github.com/Real-Bruce/kiki/blob/8d970ea216de7c5a1955162b61a95c3be948be9f/docs/validation/settings/settings-layout-v1.0.5/pinned-dark.jpg) |
+| 截图页 | 无需滚动即可在「截图提示」上方看到「恢复默认」。按钮可打开原生确认框。取消后圆角仍为 18 px、截图提示关闭。确认后圆角归零、截图提示开启，磁盘配置保留深色主题和 Ctrl+Alt+F9。 | [浅色](https://github.com/Real-Bruce/kiki/blob/8d970ea216de7c5a1955162b61a95c3be948be9f/docs/validation/settings/settings-layout-v1.0.5/capture-light.jpg) · [深色](https://github.com/Real-Bruce/kiki/blob/8d970ea216de7c5a1955162b61a95c3be948be9f/docs/validation/settings/settings-layout-v1.0.5/capture-dark.jpg) |
 | 截图输出 | 使用隔离热键开始截图，框定设置窗口后按 Ctrl+P，检查实际贴图中的窗口内容及布局，并以 Esc 关闭贴图。实机 PNG 流程检查至另存为对话框。 | 窗口选区为 1184 × 1012 px |
 
 六张证据为 Windows Graphics Capture 返回的设置窗口截图，记录尺寸为 947 × 810。

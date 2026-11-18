@@ -53,6 +53,6 @@
 
 以上为用户提供的最新浅色截图，来源和环境限制见 [图库](../screenshots/README.md)。
 
-其余面板：[快捷键](../screenshots/settings/shortcuts-light.png)、[截图](../screenshots/settings/capture-light.png)、[贴图](../screenshots/settings/pinned-light.png)、[外观](../screenshots/settings/appearance-light.png)。关于页尚未收录最新截图。
+其余面板：[快捷键](../screenshots/settings/shortcuts-light.png)、[截图](../screenshots/settings/capture-parameters-light.jpg)、[贴图](../screenshots/settings/pinned-light.png)、[外观](../screenshots/settings/appearance-light.png)。关于页尚未收录最新截图。
 
 相关模块：[普通截图与工具条](capture.md) · [标注与参数](annotation.md) · [视觉资源](visuals.md)

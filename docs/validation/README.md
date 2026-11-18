@@ -2,6 +2,8 @@
 
 以下报告保留原测试版本、环境、失败样本和复测结论。报告日期不代表当前源码再次通过；当前放行与缺项见 [PROGRESS.md](../PROGRESS.md)。[验收计划](../ACCEPTANCE_PLAN.md)定义用例，[模板](FEATURE_ACCEPTANCE_TEMPLATE.md)用于新报告。
 
+当前版本验收见 [v1.0.21 马赛克颗粒大小](settings/settings-mosaic-parameter-v1.0.21.md)。旧设置页通过样张可从对应报告中的 Git 历史链接查看，失败对照图保留在报告旁。
+
 最新工程验证：[v1.0.17 便携包许可合并](engineering/package-v1.0.17.md)。
 
 ## 普通截图与工具条
@@ -73,6 +75,10 @@
 - [v1.0.14 截图设置滑杆与只读像素值](settings/settings-sliders-v1.0.14.md)
 - [v1.0.15 关于页与设置文件入口](settings/settings-about-v1.0.15.md)
 - [v1.0.16 关于页帮助间距](settings/settings-about-spacing-v1.0.16.md)
+- [v1.0.18 截图设置分组](settings/settings-capture-sections-v1.0.18.md)
+- [v1.0.19 截图设置排版](settings/settings-capture-layout-v1.0.19.md)
+- [v1.0.20 按工具显示尺寸](settings/settings-capture-tool-parameters-v1.0.20.md)
+- [v1.0.21 马赛克颗粒大小](settings/settings-mosaic-parameter-v1.0.21.md)
 
 ## 工程、性能与交付
 

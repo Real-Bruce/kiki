@@ -51,8 +51,8 @@
 
 ## 真实界面
 
-![标注与参数相关界面](../screenshots/settings/capture-light.png)
+![标注与参数相关界面](../screenshots/settings/capture-parameters-light.jpg)
 
-以上为用户提供的最新浅色截图，来源和环境限制见 [图库](../screenshots/README.md)。
+上图采自 v1.0.14 Release 诊断实例，来源和环境限制见 [图库](../screenshots/README.md)。
 
 相关模块：[普通截图与工具条](capture.md) · [输出与圆角](output.md) · [设置与运行入口](settings.md)

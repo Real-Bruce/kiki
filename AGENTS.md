@@ -5,7 +5,7 @@
 ## 开始工作前
 
 1. 阅读 README.md、docs/PRODUCT_SPEC.md、docs/DESIGN_SPEC.md、docs/IMPLEMENTATION_PLAN.md、docs/FEATURE_PLAN.md、docs/ACCEPTANCE_PLAN.md 和 docs/PROGRESS.md。
-2. 涉及视觉修改时，实际查看 docs/screenshots 当前界面、docs/design 中 01、02、04、05 参考图及 docs/design/next 对应功能草图；03 为历史稿。
+2. 涉及视觉修改时，实际查看 docs/screenshots 当前界面、docs/design 中 01、02、04、05 参考图及 docs/design/next 对应功能草图。
 3. 执行 git status --short --branch，检查已有修改和最近提交。保留用户及其他会话的工作。
 4. 优先完成用户本次明确任务；未指定任务时按 PROGRESS.md 下一步推进。环境待验不代表功能未实现，不重复搭建。
 

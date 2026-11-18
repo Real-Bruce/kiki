@@ -1,6 +1,6 @@
 # 当前界面与功能面板
 
-下表六张浅色界面截图收录于 2026-11-13，由用户提供。收录时仓库源码为 v1.0.9；附件没有关于页、EXE 哈希、构建模式或环境元数据，不能独立确认截图二进制版本。Windows build、硬件、分辨率、显示缩放及采集方式均未提供，不套用历史报告环境。v1.0.11 新增的贴图实拍单独记录于下方。
+下表五张浅色界面截图收录于 2026-11-13，由用户提供。收录时仓库源码为 v1.0.9；附件没有关于页、EXE 哈希、构建模式或环境元数据，不能独立确认截图二进制版本。Windows build、硬件、分辨率、显示缩放及采集方式均未提供，不套用历史报告环境。v1.0.11 新增的贴图实拍单独记录于下方。
 
 原始 PNG 按字节复制，未缩放、裁剪或重新编码。以下 SHA-256 均与附件核对一致；像素尺寸来自 PNG 文件头。
 
@@ -9,7 +9,6 @@
 | [截图选区与全部工具](capture/toolbar-light.png) | 889 × 254 | `e6523c9e1f70bd5814f08926bdf38dedf18ce4259dddc191582a0bdfa2f3e6e6` |
 | [通用](settings/general-light.png) | 1182 × 973 | `2d26ac89c98da87884ced4e5aa627e71d0340143fa44982dc7829862a60cb23f` |
 | [快捷键](settings/shortcuts-light.png) | 1182 × 973 | `592dbf68bf4814c3a60a47f31caf66d16565344acb2162fc386e830af4a2ba10` |
-| [截图](settings/capture-light.png) | 1161 × 973 | `118d2e7045d1b02e6c8cb288c98db60b8fa7e80aa05c3e188d8a0daa42052119` |
 | [贴图](settings/pinned-light.png) | 1182 × 973 | `1cd1a34fd1927af588ba4ca2e133b265fb87ed1f7faa463146bb2f8983b209ac` |
 | [外观](settings/appearance-light.png) | 1182 × 973 | `051bd87626ba7d1e651261f532211e4a2f85b85eb35b8cdcc32033ebb2e8b335` |
 
@@ -35,7 +34,7 @@
 
 浅色与[深色截图设置](settings/capture-parameters-dark.jpg)采自 v1.0.14 Release 诊断实例。Windows 11 build 26300.9974，单屏 1920 × 1080、125% 缩放。两张 947 × 810 窗口实拍展示默认标注样式和圆角区域。 [验证记录](../validation/settings/settings-sliders-v1.0.14.md)
 
-[2026-11-13 截图页原图](settings/capture-light.png)保留当时的工具开关、实时预览与数值框布局。
+v1.0.21 的设置页已按工具启用状态显示尺寸参数，尚无该版本的公开实拍。
 
 ## 贴图
 
@@ -49,7 +48,6 @@
 
 ## 历史图与证据边界
 
-- [2026-11-10 三张原始公开截图](archive/2026-11-10/README.md)保留在归档目录，不再作为当前界面主图。
 - 旧版浅深主题实拍见 [v1.0.5](../validation/settings/settings-layout-v1.0.5.md)、[v1.0.7](../validation/settings/settings-flicker-v1.0.7.md)、[v1.0.8](../validation/settings/settings-slider-v1.0.8.md)。它们保留各自测试版本，不冒充最新截图。
 - 深色截图工具条、关于页及长截图采集未纳入此图库。
 - [设计稿](../design/README.md)用于解释交互方向，与真实界面截图分开管理。

@@ -7,7 +7,7 @@
 ## 逐帧与原生回归
 
 - Release 诊断副本使用独立配置，打开所有截图工具。约 5 秒内向真实窗口交替发送正负滚轮消息，每条相当于两格。Windows Graphics Capture 同时采集 912 × 770 的设置内容区域，跳过窗口初次显示阶段。
-- 深色发送 166 条消息，208 帧中未检出白块。浅色发送 164 条消息，204 帧中未检出白块。检测按至少连续 90 个近白像素的水平带计数，浅色采用更高亮度阈值以区分主题底色。另查看采样帧中的滑杆、数字输入、输出格式和工具显示。 [深色滚动帧](settings-scroll-v1.0.6/dark.png) · [浅色滚动帧](settings-scroll-v1.0.6/light.png)
+- 深色发送 166 条消息，208 帧中未检出白块。浅色发送 164 条消息，204 帧中未检出白块。检测按至少连续 90 个近白像素的水平带计数，浅色采用更高亮度阈值以区分主题底色。另查看采样帧中的滑杆、数字输入、输出格式和工具显示。 [深色滚动帧](https://github.com/Real-Bruce/kiki/blob/8d970ea216de7c5a1955162b61a95c3be948be9f/docs/validation/settings/settings-scroll-v1.0.6/dark.png) · [浅色滚动帧](https://github.com/Real-Bruce/kiki/blob/8d970ea216de7c5a1955162b61a95c3be948be9f/docs/validation/settings/settings-scroll-v1.0.6/light.png)
 - rustfmt 和全特性 Clippy 通过。默认与全特性串行测试各通过 82 项、跳过 6 项，覆盖原生设置窗口布局、数值输入、截图输出和贴图。录屏中的中键手势未单独复测，逐帧采样覆盖应用接收的快速滚轮消息。
 
 ## 便携包
