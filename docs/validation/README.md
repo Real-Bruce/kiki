@@ -2,7 +2,7 @@
 
 以下报告保留原测试版本、环境、失败样本和复测结论。报告日期不代表当前源码再次通过；当前放行与缺项见 [PROGRESS.md](../PROGRESS.md)。[验收计划](../ACCEPTANCE_PLAN.md)定义用例，[模板](FEATURE_ACCEPTANCE_TEMPLATE.md)用于新报告。
 
-最新工程验证：[Windows 源码按功能分目录](engineering/windows-modules-2026-11-17.md)。
+最新工程验证：[v1.0.17 便携包许可合并](engineering/package-v1.0.17.md)。
 
 ## 普通截图与工具条
 
@@ -87,6 +87,7 @@
 - [STARTUP.md](engineering/STARTUP.md)
 - [docs-organization-2026-11-13.md](engineering/docs-organization-2026-11-13.md)
 - [open-source-audit-2026-11-13.md](engineering/open-source-audit-2026-11-13.md)
+- [v1.0.17 便携包许可合并](engineering/package-v1.0.17.md)
 - [release-v1.0.10.md](engineering/release-v1.0.10.md)
 
 ## 维护约定

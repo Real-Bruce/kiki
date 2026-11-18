@@ -1,6 +1,6 @@
 # 当前进度
 
-更新时间：2026-11-18。当前源码 **v1.0.16**（[VERSION](../VERSION)）。[按模块阅读](README.md) · [实施历史](IMPLEMENTATION_HISTORY.md) · [验证记录](validation/README.md)
+更新时间：2026-11-18。当前源码 **v1.0.17**（[VERSION](../VERSION)）。[按模块阅读](README.md) · [实施历史](IMPLEMENTATION_HISTORY.md) · [验证记录](validation/README.md)
 
 ## 当前状态与下一步
 
@@ -9,6 +9,12 @@ F01–F12 已实现并按下表记录放行；已实现能力不因环境待验�
 1. 继续定位 Codex 内置浏览器 Daily 页面长截图漏段，保留 [v1.0.3 失败样本](validation/long-capture/long-capture-v1.0.3.md)；v1.0.4 的远程显示修复不代表漏段已修复。
 2. 补验普通框选后直接保存和复制至外部应用，以及贴图复制按钮；本次已补验框选后贴图和贴图保存。
 3. 按下方环境遗留补齐实机矩阵；维护者指定任务优先于这些待验项。
+
+## v1.0.17 便携包许可合并
+
+- 便携 ZIP 仅含 `kiki.exe`、`README.txt` 和 `LICENSE.txt`。合并许可包含项目 MIT、第三方依赖许可、Rust 标准库版权声明和工具链许可文本。
+- 正式 Release 构建、ZIP 解压清单、许可内容、EXE 版本和 SHA-256 核对通过。桌面已有 kiki 实例，解压包独立启动待补验。 [打包验证](validation/engineering/package-v1.0.17.md)
+- 本地提交主题为 `chore(package): consolidate portable ZIP licenses`。
 
 ## v1.0.16 关于页帮助间距
 
