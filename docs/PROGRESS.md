@@ -13,8 +13,8 @@ F01–F12 已实现并按下表记录放行；已实现能力不因环境待验�
 ## v1.0.21 按工具显示马赛克颗粒大小
 
 - 「样式调整」中的马赛克颗粒大小随马赛克工具启用或隐藏，隐藏时保留已保存值。
-- 设置专项 8 项通过，默认与全特性串行测试各 84 项通过、6 项跳过。便携包已解压核对，界面实机待用户复测。 [验证记录](validation/settings/settings-mosaic-parameter-v1.0.21.md)
-- 本地提交主题为 `fix(settings): show mosaic size only when enabled`。
+- 设置专项 8 项通过，默认与全特性串行测试各 84 项通过、6 项跳过。便携包已解压核对，用户确认 v1.0.21 验证通过。 [验证记录](validation/settings/settings-mosaic-parameter-v1.0.21.md)
+- 应用实现提交为 `de9b070`，验收随本地 `main` 的 `v1.0.21` 标签记录。
 
 ## v1.0.20 截图设置按工具显示尺寸
 
