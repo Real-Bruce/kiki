@@ -53,7 +53,7 @@ Customize the capture hotkey and find shortcuts for pinned images.
 
 Choose toolbar tools and adjust default annotation styles.
 
-![Capture settings: tool switches, toolbar preview, and annotation defaults](docs/screenshots/settings/capture-light.png)
+![Capture settings: sliders for annotation defaults and corner radius](docs/screenshots/settings/capture-parameters-light.jpg)
 
 ### Pinned images
 

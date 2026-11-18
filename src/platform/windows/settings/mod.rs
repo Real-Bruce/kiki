@@ -19,8 +19,8 @@ mod layout;
 mod reset_dialog;
 use layout as settings_layout;
 use settings_layout::{
-    CAPTURE_TOOL, CAPTURE_TOOL_IDS, FOOTER, HEADER, Item, OUTPUT_FORMAT, PARAMETER_EDIT,
-    PARAMETER_LABELS, PARAMETER_SLIDER, Page, RESET_CAPTURE, Rect, START_CAPTURE, Tone,
+    CAPTURE_TOOL, CAPTURE_TOOL_IDS, FOOTER, HEADER, Item, OUTPUT_FORMAT, PARAMETER_LABELS,
+    PARAMETER_SLIDER, Page, RESET_CAPTURE, Rect, START_CAPTURE, Tone,
 };
 use std::{cell::Cell, rc::Rc};
 use windows::{
@@ -433,10 +433,6 @@ fn apply_window_theme(hwnd: HWND, dark: bool) {
 }
 
 pub fn refresh_parameters() {
-    sync_parameters(None);
-}
-
-fn sync_parameters(active_edit: Option<HWND>) {
     let Some(hwnd) = WINDOW.get() else { return };
     // SAFETY: the live settings window and its children belong to this thread.
     unsafe {
@@ -445,53 +441,19 @@ fn sync_parameters(active_edit: Option<HWND>) {
             return;
         }
         let config = preferences::current();
-        let focus = GetFocus();
         let mut dirty = [false; PARAMETER_LABELS.len()];
         for (index, dirty) in dirty.iter_mut().enumerate() {
-            let id = PARAMETER_EDIT + index as u16;
-            let Some(parameter) = setting_parameter(id, PARAMETER_EDIT) else {
+            let Some(parameter) = setting_parameter(PARAMETER_SLIDER + index as u16) else {
                 continue;
             };
             let value = parameter.value(&config);
             *dirty = (*p).parameter_values[index].replace(value) != Some(value);
-            if let Ok(edit) = GetDlgItem(Some(hwnd), i32::from(id))
-                && (*dirty && focus != edit || active_edit == Some(edit))
-            {
-                *dirty |= update_parameter_text(edit, value);
-                if active_edit == Some(edit) {
-                    SendMessageW(edit, EM_SETSEL, Some(WPARAM(0)), Some(LPARAM(-1)));
-                }
-            }
         }
         if (*p).page == 2 && dirty.contains(&true) {
             invalidate_parameter_rows(hwnd, p, dirty);
         }
     }
     refresh_save_status();
-}
-
-fn update_parameter_text(edit: HWND, value: u16) -> bool {
-    let text: Vec<_> = value.to_string().encode_utf16().chain(Some(0)).collect();
-    let mut current = [0u16; 17];
-    // SAFETY: the live edit belongs to this UI thread and the text is NUL-terminated.
-    unsafe {
-        let len = GetWindowTextW(edit, &mut current) as usize;
-        if current[..=len] == text {
-            return false;
-        }
-        // Native EDIT can paint synchronously during WM_SETTEXT. Hold its pixels
-        // until the parent paints the new text and slider together. Leave hidden
-        // controls alone, since enabling redraw adds WS_VISIBLE.
-        let visible = GetWindowLongPtrW(edit, GWL_STYLE) & WS_VISIBLE.0 as isize != 0;
-        if visible {
-            SendMessageW(edit, WM_SETREDRAW, Some(WPARAM(0)), None);
-        }
-        let changed = SetWindowTextW(edit, PCWSTR(text.as_ptr())).is_ok();
-        if visible {
-            SendMessageW(edit, WM_SETREDRAW, Some(WPARAM(1)), None);
-        }
-        changed
-    }
 }
 
 fn invalidate_parameter_rows(hwnd: HWND, p: *mut State, dirty: [bool; PARAMETER_LABELS.len()]) {
@@ -508,16 +470,12 @@ fn invalidate_parameter_rows(hwnd: HWND, p: *mut State, dirty: [bool; PARAMETER_
         let bottom = px((client.bottom as f32 / scale).round() as i32 - FOOTER);
         for item in &page.items {
             let rect = match item {
-                Item::Control(id, rect) => {
-                    let changed = [PARAMETER_SLIDER, PARAMETER_EDIT].into_iter().any(|first| {
-                        id.checked_sub(first)
-                            .and_then(|index| dirty.get(usize::from(index)))
-                            .copied()
-                            .unwrap_or(false)
-                    });
-                    if !changed {
-                        continue;
-                    }
+                Item::Control(id, rect) | Item::ParameterValue(id, rect)
+                    if id
+                        .checked_sub(PARAMETER_SLIDER)
+                        .and_then(|index| dirty.get(usize::from(index)))
+                        .is_some_and(|changed| *changed) =>
+                {
                     rect
                 }
                 Item::CornerPreview(rect) if dirty[4] => rect,
@@ -582,8 +540,8 @@ fn invalidate_area(hwnd: HWND, bounds: &RECT) {
     }
 }
 
-fn setting_parameter(id: u16, first: u16) -> Option<CaptureParameter> {
-    match id.checked_sub(first)? {
+fn setting_parameter(id: u16) -> Option<CaptureParameter> {
+    match id.checked_sub(PARAMETER_SLIDER)? {
         index @ 0..=2 => Some(CaptureParameter::Stroke(usize::from(index))),
         3 => Some(CaptureParameter::TextSize),
         4 => Some(CaptureParameter::CornerRadius),
@@ -643,7 +601,7 @@ fn caption(id: u16, cfg: &Config, start: &std::result::Result<startup::State, St
                 if cfg.color == COLORS[i] { " ✓" } else { "" }
             )
         }
-        id if setting_parameter(id, PARAMETER_SLIDER).is_some() => {
+        id if setting_parameter(id).is_some() => {
             PARAMETER_LABELS[usize::from(id - PARAMETER_SLIDER)].into()
         }
         OUTPUT_FORMAT => format!("默认保存格式：{}", cfg.output_format.label()),
@@ -703,14 +661,8 @@ fn create_controls(hwnd: HWND) -> Result<()> {
             .chain(410..=417)
             .chain(CAPTURE_TOOL_IDS)
             .chain(PARAMETER_SLIDER..PARAMETER_SLIDER + PARAMETER_LABELS.len() as u16)
-            .chain(PARAMETER_EDIT..PARAMETER_EDIT + PARAMETER_LABELS.len() as u16)
             .chain(600..=602);
         for id in ids {
-            if setting_parameter(id, PARAMETER_EDIT).is_some() {
-                let child = parameter_control::create_edit(hwnd, id, (*p).font)?;
-                (*p).controls.push(Control { hwnd: child, id });
-                continue;
-            }
             let (class, style) = match id {
                 // SS_OWNERDRAW (WinUser.h) is not exported by the current bindings.
                 BRAND => (w!("STATIC"), WINDOW_STYLE(0x000d)),
@@ -836,19 +788,7 @@ fn layout(hwnd: HWND) {
                     _ => None,
                 }),
             };
-            if let Some(Rect {
-                mut x,
-                mut y,
-                mut w,
-                mut h,
-            }) = bounds
-            {
-                if setting_parameter(id, PARAMETER_EDIT).is_some() {
-                    x += 5;
-                    w -= 10;
-                    y += 4;
-                    h -= 8;
-                }
+            if let Some(Rect { x, y, w, h }) = bounds {
                 positions.push((
                     child,
                     px(x),
@@ -947,7 +887,7 @@ fn paint_frame_to_dc(hwnd: HWND, paint_dc: HDC, dc: HDC, p: *mut State) -> Resul
             }
             let _ = IntersectClipRect(dc, rect.left, rect.top, rect.right, rect.bottom);
             let _ = OffsetViewportOrgEx(dc, rect.left, rect.top, None);
-            if id == 300 || setting_parameter(id, PARAMETER_EDIT).is_some() {
+            if id == 300 {
                 SendMessageW(
                     child,
                     WM_PRINTCLIENT,
@@ -1014,6 +954,7 @@ fn paint(hwnd: HWND, dc: HDC, p: *mut State) -> Result<()> {
         let fg = appearance::foreground(dark);
         let sub = appearance::muted(dark);
         let bg = appearance::background(dark);
+        let config = preferences::current();
 
         c.begin(dc, &rect, state.dpi, dark)?;
         c.fill(
@@ -1047,12 +988,11 @@ fn paint(hwnd: HWND, dc: HDC, p: *mut State) -> Result<()> {
                 }
                 Item::Divider(y) => c.fill(x, *y as f32 - offset, w, 1., appearance::divider(dark)),
                 Item::CornerPreview(r) => {
-                    let cfg = preferences::current();
                     c.corner_preview(
                         r.x as f32,
                         r.y as f32 - offset,
-                        cfg.corner_radius,
-                        cfg.output_format,
+                        config.corner_radius,
+                        config.output_format,
                         dark,
                     );
                 }
@@ -1067,31 +1007,21 @@ fn paint(hwnd: HWND, dc: HDC, p: *mut State) -> Result<()> {
                             right: r.x + r.w,
                             bottom: r.y + r.h - state.scroll,
                         },
-                        preferences::current().capture_tools,
+                        config.capture_tools,
                         dark,
                     );
                 }
                 Item::ToolbarPreview(_) => {}
-                Item::Control(id, r)
-                    if setting_parameter(*id, PARAMETER_EDIT).is_some()
-                        && r.y - state.scroll >= HEADER
-                        && r.y + r.h - state.scroll <= height as i32 - FOOTER =>
-                {
-                    let focused = state
-                        .controls
-                        .iter()
-                        .any(|c| c.id == *id && c.hwnd == GetFocus());
-                    c.input_frame(
-                        r.x as f32,
-                        r.y as f32 - offset,
-                        r.w as f32,
-                        r.h as f32,
-                        if focused {
-                            appearance::accent(dark)
-                        } else {
-                            appearance::divider(dark)
-                        },
-                    );
+                Item::ParameterValue(id, r) => {
+                    if let Some(parameter) = setting_parameter(*id) {
+                        c.value(
+                            &format!("{} px", parameter.value(&config)),
+                            r.x as f32,
+                            r.y as f32 - offset,
+                            r.w as f32,
+                            sub,
+                        );
+                    }
                 }
                 Item::Control(..) => {}
             }
@@ -1287,33 +1217,7 @@ fn choose_output_format(hwnd: HWND, selected: OutputFormat) -> std::result::Resu
     config.output_format = format;
     preferences::update(config)
 }
-fn commit_parameter_edit(parent: HWND, edit: HWND, parameter: CaptureParameter, commit: bool) {
-    // SAFETY: the settings window owns the edit and the preference change is UI-thread-only.
-    unsafe {
-        let p = pointer(parent);
-        if p.is_null() || (*p).suppress {
-            return;
-        }
-        if commit {
-            match parameter_control::read_edit(edit, parameter) {
-                Ok(value) => {
-                    set_parameter_value(parent, parameter, value, Some(edit));
-                    return;
-                }
-                Err(error) => (*p).error = Some(error.to_owned()),
-            }
-        }
-        sync_parameters(Some(edit));
-        invalidate_footer(parent, (*p).dpi);
-    }
-}
-
-fn set_parameter_value(
-    parent: HWND,
-    parameter: CaptureParameter,
-    value: u16,
-    active_edit: Option<HWND>,
-) {
+fn set_parameter_value(parent: HWND, parameter: CaptureParameter, value: u16) {
     // SAFETY: this function is called by live settings controls on the window thread.
     unsafe {
         let p = pointer(parent);
@@ -1329,11 +1233,11 @@ fn set_parameter_value(
             }
         } else if (*p).error.take().is_some() {
             invalidate_footer(parent, (*p).dpi);
-        } else if active_edit.is_none() {
+        } else {
             return;
         }
     }
-    sync_parameters(active_edit);
+    refresh_parameters();
 }
 
 fn slider_input(
@@ -1358,7 +1262,7 @@ fn slider_input(
                     36 => min,
                     _ => return None,
                 };
-                set_parameter_value(parent, parameter, next, None);
+                set_parameter_value(parent, parameter, next);
                 return Some(LRESULT(0));
             }
             WM_MOUSEWHEEL => return Some(SendMessageW(parent, msg, Some(wp), Some(lp))),
@@ -1378,7 +1282,7 @@ fn slider_input(
                 inset,
                 rect.right as f32 - inset,
             );
-            set_parameter_value(parent, parameter, value, None);
+            set_parameter_value(parent, parameter, value);
         }
         if msg == WM_LBUTTONUP {
             let _ = ReleaseCapture();
@@ -1425,7 +1329,7 @@ unsafe extern "system" fn button_proc(
                     let _ = InvalidateRect(Some(hwnd), None, false);
                 }
             }
-            if let Some(parameter) = setting_parameter(id as u16, PARAMETER_SLIDER)
+            if let Some(parameter) = setting_parameter(id as u16)
                 && let Some(result) = slider_input(hwnd, parent, msg, wp, lp, parameter)
             {
                 return result;
@@ -1564,7 +1468,7 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                     };
                     labels.push((state.icon_font, "\u{e73e}".to_owned(), r, mark, DT_CENTER));
                 }
-            } else if let Some(parameter) = setting_parameter(id, PARAMETER_SLIDER) {
+            } else if let Some(parameter) = setting_parameter(id) {
                 let left = r.left + dip(6);
                 let right = r.right - dip(6);
                 let y = (r.top + r.bottom) / 2;
@@ -1921,24 +1825,8 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             WM_COMMAND => {
                 let id = (wp.0 & 65535) as u16;
                 let code = (wp.0 >> 16) as u32;
-                if let Some(parameter) = setting_parameter(id, PARAMETER_EDIT) {
-                    let child = HWND(lp.0 as *mut _);
-                    if code == EN_KILLFOCUS && !child.is_invalid() {
-                        commit_parameter_edit(hwnd, child, parameter, true);
-                    } else if code == EN_SETFOCUS {
-                        let _ = InvalidateRect(Some(hwnd), None, false);
-                    }
-                } else if code == BN_CLICKED || id == 300 && code == EN_CHANGE {
+                if code == BN_CLICKED || id == 300 && code == EN_CHANGE {
                     action(hwnd, id);
-                }
-                LRESULT(0)
-            }
-            parameter_control::EDIT_KEY => {
-                let edit = HWND(lp.0 as *mut _);
-                let id = GetDlgCtrlID(edit) as u16;
-                if let Some(parameter) = setting_parameter(id, PARAMETER_EDIT) {
-                    commit_parameter_edit(hwnd, edit, parameter, wp.0 != 27);
-                    SendMessageW(edit, EM_SETSEL, Some(WPARAM(0)), Some(LPARAM(-1)));
                 }
                 LRESULT(0)
             }
@@ -1979,35 +1867,25 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 LRESULT(0)
             }
             WM_MOUSEWHEEL => {
-                let focus = GetFocus();
-                let mut point = POINT::default();
-                let hovered = GetCursorPos(&mut point)
-                    .is_ok()
-                    .then(|| WindowFromPoint(point));
-                let id = if hovered == Some(focus) && GetAncestor(focus, GA_ROOT) == hwnd {
-                    GetDlgCtrlID(focus) as u16
-                } else {
-                    0
+                let point = POINT {
+                    x: i32::from(lp.0 as i16),
+                    y: i32::from((lp.0 >> 16) as i16),
                 };
-                let edit = setting_parameter(id, PARAMETER_EDIT);
-                if let Some(parameter) = edit.or_else(|| setting_parameter(id, PARAMETER_SLIDER)) {
-                    if (*p).parameter_wheel.0 != Some(focus) {
-                        (*p).parameter_wheel = (Some(focus), Wheel::default());
+                let hovered = WindowFromPoint(point);
+                if GetParent(hovered).ok() == Some(hwnd)
+                    && let Some(parameter) = setting_parameter(GetDlgCtrlID(hovered) as u16)
+                {
+                    if (*p).parameter_wheel.0 != Some(hovered) {
+                        (*p).parameter_wheel = (Some(hovered), Wheel::default());
                     }
                     let steps = (*p).parameter_wheel.1.steps(wp);
                     if steps != 0 {
-                        if edit.is_some() {
-                            commit_parameter_edit(hwnd, focus, parameter, true);
-                            if (*p).error.is_some() {
-                                return LRESULT(0);
-                            }
-                        }
-                        let width = parameter_control::step(
+                        let value = parameter_control::step(
                             parameter,
                             parameter.value(&preferences::current()),
                             steps,
                         );
-                        set_parameter_value(hwnd, parameter, width, edit.map(|_| focus));
+                        set_parameter_value(hwnd, parameter, value);
                     }
                     return LRESULT(0);
                 }
@@ -2231,7 +2109,7 @@ mod tests {
             let hwnd = WINDOW.get().unwrap();
             let life = (*pointer(hwnd)).life.clone();
             // Entering a page that first shows the scrollbar must lay out against
-            // the resulting client width, including native EDIT text and painted frames.
+            // the resulting client width, including the parameter sliders.
             SetWindowPos(hwnd, None, 0, 0, 1000, 700, SWP_NOZORDER | SWP_NOACTIVATE).unwrap();
             for page in [2, 0, 2] {
                 SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(100 + page)), None);
@@ -2252,11 +2130,6 @@ mod tests {
                     {
                         continue;
                     }
-                    let inset = if setting_parameter(*id, PARAMETER_EDIT).is_some() {
-                        (5, 4)
-                    } else {
-                        (0, 0)
-                    };
                     let mut actual = RECT::default();
                     GetWindowRect(child, &mut actual).unwrap();
                     let mut origin = POINT {
@@ -2266,17 +2139,13 @@ mod tests {
                     assert!(ScreenToClient(hwnd, &mut origin).as_bool());
                     assert_eq!(
                         origin.x,
-                        px(bounds.x + inset.0),
+                        px(bounds.x),
                         "control {id} left after page {page}"
                     );
-                    assert_eq!(
-                        origin.y,
-                        px(top + inset.1),
-                        "control {id} top after page {page}"
-                    );
+                    assert_eq!(origin.y, px(top), "control {id} top after page {page}");
                     assert_eq!(
                         actual.right - actual.left,
-                        px(bounds.x + bounds.w - inset.0) - origin.x,
+                        px(bounds.x + bounds.w) - origin.x,
                         "control {id} width"
                     );
                 }
@@ -2313,7 +2182,6 @@ mod tests {
             SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(400)), None);
             assert!(!preferences::hints());
             SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(414)), None);
-            let width_edit = GetDlgItem(Some(hwnd), i32::from(PARAMETER_EDIT)).unwrap();
             let width_slider = GetDlgItem(Some(hwnd), i32::from(PARAMETER_SLIDER)).unwrap();
             let state = pointer(hwnd);
             let mut client = RECT::default();
@@ -2331,10 +2199,7 @@ mod tests {
             SendMessageW(width_slider, WM_LBUTTONDOWN, Some(WPARAM(1)), Some(right));
             assert_eq!(GetCapture(), width_slider);
             assert_eq!(preferences::current().stroke_widths, [64, 3, 3]);
-            assert_eq!(
-                parameter_control::read_edit(width_edit, CaptureParameter::Stroke(0)),
-                Ok(64)
-            );
+            assert_eq!((*state).parameter_values[0], Some(64));
             let _ = ValidateRect(Some(hwnd), None);
             let _ = ValidateRect(Some(width_slider), None);
             SendMessageW(width_slider, WM_MOUSEMOVE, Some(WPARAM(1)), Some(right));
@@ -2343,23 +2208,14 @@ mod tests {
             assert!(!GetUpdateRect(width_slider, None, false).as_bool());
             SendMessageW(width_slider, WM_LBUTTONUP, Some(WPARAM(0)), Some(LPARAM(0)));
             assert_ne!(GetCapture(), width_slider);
-            assert_eq!(
-                parameter_control::read_edit(width_edit, CaptureParameter::Stroke(0)),
-                Ok(1)
-            );
+            assert_eq!((*state).parameter_values[0], Some(1));
             assert!(!GetUpdateRect(width_slider, None, false).as_bool());
-            parameter_control::set_edit(width_edit, 8);
-            SendMessageW(width_edit, WM_KEYDOWN, Some(WPARAM(13)), None);
-            let size_edit = GetDlgItem(Some(hwnd), i32::from(PARAMETER_EDIT + 3)).unwrap();
-            parameter_control::set_edit(size_edit, 256);
-            SendMessageW(size_edit, WM_KEYDOWN, Some(WPARAM(13)), None);
-            let radius_edit = GetDlgItem(Some(hwnd), i32::from(PARAMETER_EDIT + 4)).unwrap();
-            assert_eq!(preferences::current().corner_radius, 0);
-            parameter_control::set_edit(radius_edit, 256);
-            SendMessageW(radius_edit, WM_KEYDOWN, Some(WPARAM(13)), None);
-            parameter_control::set_edit(radius_edit, 257);
-            SendMessageW(radius_edit, WM_KEYDOWN, Some(WPARAM(13)), None);
-            assert!((*pointer(hwnd)).error.is_some());
+            for index in [3, 4] {
+                let slider = GetDlgItem(Some(hwnd), i32::from(PARAMETER_SLIDER + index)).unwrap();
+                SendMessageW(slider, WM_KEYDOWN, Some(WPARAM(VK_END.0 as usize)), None);
+                assert_eq!((*state).parameter_values[usize::from(index)], Some(256));
+            }
+            assert!((*state).error.is_none());
             assert_eq!(preferences::current().corner_radius, 256);
             assert_eq!(
                 (
@@ -2367,7 +2223,7 @@ mod tests {
                     preferences::current().stroke_widths,
                     preferences::current().text_size
                 ),
-                (COLORS[4], [8, 3, 3], 256)
+                (COLORS[4], [1, 3, 3], 256)
             );
             let blocked = CreateWindowExW(
                 WINDOW_EX_STYLE::default(),
@@ -2440,7 +2296,7 @@ mod tests {
             }
             let hidden = preferences::current();
             assert_eq!(hidden.capture_tools, [false; Tool::TOOLBAR.len()]);
-            assert_eq!(hidden.stroke_widths, [8, 3, 3]);
+            assert_eq!(hidden.stroke_widths, [1, 3, 3]);
             for id in CAPTURE_TOOL_IDS.take(4) {
                 SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(usize::from(id))), None);
             }
@@ -2454,10 +2310,9 @@ mod tests {
                 SendMessageW(hwnd, WM_COMMAND, Some(WPARAM(usize::from(id))), None);
                 assert!(preferences::current().capture_tools[index]);
             }
-            let diameter = GetDlgItem(Some(hwnd), i32::from(PARAMETER_EDIT + 6)).unwrap();
-            SetWindowTextW(diameter, w!("64")).unwrap();
-            SendMessageW(diameter, WM_KEYDOWN, Some(WPARAM(13)), None);
-            assert_eq!(preferences::current().sequence_size, 64);
+            let diameter = GetDlgItem(Some(hwnd), i32::from(PARAMETER_SLIDER + 6)).unwrap();
+            SendMessageW(diameter, WM_KEYDOWN, Some(WPARAM(VK_END.0 as usize)), None);
+            assert_eq!(preferences::current().sequence_size, 128);
             SetWindowPos(hwnd, None, 0, 0, 860, 480, SWP_NOZORDER | SWP_NOACTIVATE).unwrap();
             SendMessageW(hwnd, WM_VSCROLL, Some(WPARAM(SB_PAGEDOWN.0 as usize)), None);
             assert!((*pointer(hwnd)).scroll > 0);

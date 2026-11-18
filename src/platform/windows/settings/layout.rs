@@ -6,7 +6,6 @@ use crate::platform::windows::app::startup;
 pub const HEADER: i32 = 68;
 pub const START_CAPTURE: u16 = 202;
 pub const PARAMETER_SLIDER: u16 = 420;
-pub const PARAMETER_EDIT: u16 = 440;
 pub const OUTPUT_FORMAT: u16 = 430;
 pub const RESET_CAPTURE: u16 = 431;
 pub const CAPTURE_TOOL: u16 = 432;
@@ -36,6 +35,7 @@ pub enum Item {
     Heading(&'static str, i32),
     Text(String, Rect, Tone),
     Value(String, Rect),
+    ParameterValue(u16, Rect),
     Divider(i32),
     CornerPreview(Rect),
     ToolbarPreview(Rect),
@@ -303,14 +303,12 @@ impl Page {
             PARAMETER_SLIDER + index,
             start,
             5,
-            self.width - start - 83,
+            self.width - start - 58,
             28,
         );
-        self.control(PARAMETER_EDIT + index, self.width - 74, 5, 49, 28);
-        self.items.push(Item::Text(
-            "px".into(),
-            self.rect(self.width - 18, 10, 18, 18),
-            Tone::Muted,
+        self.items.push(Item::ParameterValue(
+            PARAMETER_SLIDER + index,
+            self.rect(self.width - 52, 9, 52, 22),
         ));
         self.y += 48;
     }

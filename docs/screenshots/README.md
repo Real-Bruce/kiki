@@ -31,9 +31,11 @@
 
 ## 截图
 
-![截图设置：工具开关、预览与默认标注样式](settings/capture-light.png)
+![截图设置：默认标注样式与圆角滑杆](settings/capture-parameters-light.jpg)
 
-此图仅覆盖截图页上部；“保存与圆角”和页尾恢复默认入口未出现在附件中，不能据此认定已移除。
+浅色与[深色截图设置](settings/capture-parameters-dark.jpg)采自 v1.0.14 Release 诊断实例。Windows 11 build 26300.9974，单屏 1920 × 1080、125% 缩放。两张 947 × 810 窗口实拍展示默认标注样式和圆角区域。 [验证记录](../validation/settings/settings-sliders-v1.0.14.md)
+
+[2026-11-13 截图页原图](settings/capture-light.png)保留当时的工具开关、实时预览与数值框布局。
 
 ## 贴图
 
@@ -49,5 +51,5 @@
 
 - [2026-11-10 三张原始公开截图](archive/2026-11-10/README.md)保留在归档目录，不再作为当前界面主图。
 - 旧版浅深主题实拍见 [v1.0.5](../validation/settings/settings-layout-v1.0.5.md)、[v1.0.7](../validation/settings/settings-flicker-v1.0.7.md)、[v1.0.8](../validation/settings/settings-slider-v1.0.8.md)。它们保留各自测试版本，不冒充最新截图。
-- 深色截图工具条和设置面板、关于页及长截图采集未纳入此图库。
+- 深色截图工具条、关于页及长截图采集未纳入此图库。
 - [设计稿](../design/README.md)用于解释交互方向，与真实界面截图分开管理。

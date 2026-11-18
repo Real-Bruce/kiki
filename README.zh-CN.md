@@ -53,7 +53,7 @@
 
 选择工具条显示的工具，调整默认标注样式。
 
-![截图设置：工具开关、实时预览与默认标注样式](docs/screenshots/settings/capture-light.png)
+![截图设置：默认标注样式与圆角滑杆](docs/screenshots/settings/capture-parameters-light.jpg)
 
 ### 贴图
 
