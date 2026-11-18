@@ -26,7 +26,7 @@ use std::{cell::Cell, rc::Rc};
 use windows::{
     Win32::{
         Foundation::*,
-        Graphics::{Dwm::*, Gdi::*},
+        Graphics::{DirectWrite::IDWriteFactory, Dwm::*, Gdi::*},
         System::LibraryLoader::GetModuleHandleW,
         UI::{Controls::*, HiDpi::*, Input::KeyboardAndMouse::*, Shell::*, WindowsAndMessaging::*},
     },
@@ -74,6 +74,7 @@ struct State {
     dpi: u32,
     controls: Vec<Control>,
     canvas: Option<Canvas>,
+    text_factory: IDWriteFactory,
     _buffered_paint: BufferedPaint,
     font: HFONT,
     icon_font: HFONT,
@@ -143,6 +144,7 @@ fn open_impl(visible: bool) -> Result<()> {
         let width = width.min(work.right - work.left);
         let height = height.min(work.bottom - work.top);
         let buffered_paint = BufferedPaint::new()?;
+        let text_factory = appearance::text_factory()?;
         let hwnd = CreateWindowExW(
             WS_EX_CONTROLPARENT,
             class.lpszClassName,
@@ -190,6 +192,7 @@ fn open_impl(visible: bool) -> Result<()> {
             dpi,
             controls: Vec::new(),
             canvas: None,
+            text_factory,
             _buffered_paint: buffered_paint,
             font,
             icon_font: font_for_icons(dpi),
@@ -701,6 +704,7 @@ fn page_geometry(state: &State, width: i32) -> Page {
         &state.startup,
         preferences::active(),
         state.error.as_deref(),
+        &state.text_factory,
     )
 }
 
@@ -934,7 +938,7 @@ fn paint(hwnd: HWND, dc: HDC, p: *mut State) -> Result<()> {
         }
         let state = &mut *p;
         if state.canvas.is_none() {
-            state.canvas = Some(Canvas::new()?);
+            state.canvas = Some(Canvas::new(&state.text_factory)?);
         }
         let Some(c) = state.canvas.as_ref() else {
             return Ok(());
@@ -981,6 +985,10 @@ fn paint(hwnd: HWND, dc: HDC, p: *mut State) -> Result<()> {
                 }
                 Item::Value(label, r) => {
                     c.value(label, r.x as f32, r.y as f32 - offset, r.w as f32, sub)
+                }
+                Item::Paragraph(paragraph, r, tone) => {
+                    let color = if matches!(tone, Tone::Muted) { sub } else { fg };
+                    c.paragraph(paragraph, r.x as f32, r.y as f32 - offset, color);
                 }
                 Item::Divider(y) => c.fill(x, *y as f32 - offset, w, 1., appearance::divider(dark)),
                 Item::CornerPreview(r) => {

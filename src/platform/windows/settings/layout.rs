@@ -1,7 +1,9 @@
 //! Settings page geometry shared by native control positioning and canvas painting.
+use super::render::Paragraph;
 use crate::core::annotation::Tool;
 use crate::core::config::{CaptureParameter, Config, OutputFormat};
 use crate::platform::windows::app::startup;
+use windows::Win32::Graphics::DirectWrite::IDWriteFactory;
 
 pub const HEADER: i32 = 68;
 pub const START_CAPTURE: u16 = 202;
@@ -35,6 +37,7 @@ pub struct Rect {
 pub enum Item {
     Heading(&'static str, i32),
     Text(String, Rect, Tone),
+    Paragraph(Paragraph, Rect, Tone),
     Value(String, Rect),
     ParameterValue(u16, Rect),
     Divider(i32),
@@ -67,6 +70,7 @@ impl Page {
         start: &Result<startup::State, String>,
         hotkey_active: bool,
         shortcut_error: Option<&str>,
+        text_factory: &IDWriteFactory,
     ) -> Self {
         let sidebar = if width >= 790 { 176 } else { 148 };
         let margin = if width >= 790 { 36 } else { 24 };
@@ -246,28 +250,24 @@ impl Page {
                 );
                 p.divider();
                 p.heading("使用帮助");
-                let start_capture = if hotkey_active {
-                    format!(
-                        "按 {}，也可从系统托盘或「通用」页开始。",
-                        cfg.hotkey.label()
-                    )
-                } else {
-                    "从系统托盘或「通用」页开始。可在「快捷键」页修改截图快捷键。".into()
-                };
-                p.help_topic("开始截图", &start_capture);
+                p.help_topic(text_factory, "开始截图", &capture_help(cfg, hotkey_active));
                 p.help_topic(
+                    text_factory,
                     "框选与标注",
                     "拖动框选或单击选择窗口，拖动选区边缘调整范围。用工具条添加标注，Ctrl+Z 撤销，Ctrl+Y 重做，Esc 取消。",
                 );
                 p.help_topic(
+                    text_factory,
                     "复制、保存与贴图",
                     "Enter 复制，Ctrl+V 粘贴。Ctrl+S 可保存为 PNG 或 JPEG，Ctrl+P 将截图置顶。",
                 );
                 p.help_topic(
+                    text_factory,
                     "管理贴图",
                     "拖动移动，滚轮缩放，Ctrl+0 恢复原始比例。Ctrl+C 复制，Ctrl+S 保存，Esc 关闭。",
                 );
                 p.help_topic(
+                    text_factory,
                     "系统托盘",
                     "右键单击 kiki 图标，可打开设置、关闭所有贴图或退出。",
                 );
@@ -306,10 +306,30 @@ impl Page {
         self.y += lines * 20 + 4;
     }
 
-    fn help_topic(&mut self, title: &str, detail: &str) {
-        self.note(title, Tone::Normal);
-        self.note(detail, Tone::Muted);
-        self.y += 8;
+    fn help_topic(&mut self, factory: &IDWriteFactory, title: &str, detail: &str) {
+        self.paragraph(factory, title, Tone::Normal);
+        self.y += 4;
+        self.paragraph(factory, detail, Tone::Muted);
+        self.y += 16;
+    }
+
+    fn paragraph(&mut self, factory: &IDWriteFactory, text: &str, tone: Tone) {
+        let size = if matches!(tone, Tone::Normal) {
+            14.
+        } else {
+            12.
+        };
+        if let Ok(paragraph) = Paragraph::new(factory, text, size, self.width) {
+            let height = paragraph.height;
+            self.items.push(Item::Paragraph(
+                paragraph,
+                self.rect(0, 0, self.width, height),
+                tone,
+            ));
+            self.y += height;
+        } else {
+            self.note(text, tone);
+        }
     }
 
     fn row(&mut self, label: &str, value: impl Into<String>) {
@@ -380,6 +400,17 @@ impl Page {
     }
 }
 
+fn capture_help(cfg: &Config, hotkey_active: bool) -> String {
+    if hotkey_active {
+        format!(
+            "按 {}，也可从系统托盘或「通用」页开始。",
+            cfg.hotkey.label()
+        )
+    } else {
+        "从系统托盘或「通用」页开始。可在「快捷键」页修改截图快捷键。".into()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -391,8 +422,9 @@ mod tests {
         cfg.hotkey.key = Key::Function(18);
         let shortcut = cfg.hotkey.label();
         let startup = Ok(startup::State::Disabled);
-        let active = Page::new(660, 5, &cfg, &startup, true, None);
-        let unavailable = Page::new(660, 5, &cfg, &startup, false, None);
+        let factory = super::super::render::text_factory().unwrap();
+        let active = Page::new(660, 5, &cfg, &startup, true, None, &factory);
+        let unavailable = capture_help(&cfg, false);
 
         assert!(
             active
@@ -400,21 +432,44 @@ mod tests {
                 .iter()
                 .any(|item| matches!(item, Item::Heading("使用帮助", _)))
         );
-        assert!(
-            active
-                .items
-                .iter()
-                .any(|item| matches!(item, Item::Text(text, _, _) if text.contains(&shortcut)))
-        );
-        assert!(unavailable.items.iter().any(|item| {
-            matches!(item, Item::Text(text, _, _)
-                if text.contains("系统托盘") && text.contains("「快捷键」") && !text.contains(&shortcut))
-        }));
+        assert!(capture_help(&cfg, true).contains(&shortcut));
+        assert!(unavailable.contains("系统托盘") && unavailable.contains("「快捷键」"));
+        assert!(!unavailable.contains(&shortcut));
         assert!(
             !active
                 .items
                 .iter()
                 .any(|item| matches!(item, Item::Control(..)))
         );
+    }
+
+    #[test]
+    fn about_spacing_follows_wrapped_text_height() {
+        let cfg = Config::default();
+        let startup = Ok(startup::State::Disabled);
+        let factory = super::super::render::text_factory().unwrap();
+        let paragraphs = |width| {
+            Page::new(width, 5, &cfg, &startup, true, None, &factory)
+                .items
+                .into_iter()
+                .filter_map(|item| match item {
+                    Item::Paragraph(_, bounds, _) => Some(bounds),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let wide = paragraphs(944);
+        let narrow = paragraphs(660);
+        for blocks in [&wide, &narrow] {
+            assert_eq!(blocks.len(), 10);
+            for topic in blocks.chunks_exact(2) {
+                assert_eq!(topic[1].y - (topic[0].y + topic[0].h), 4);
+            }
+            for topics in blocks.windows(2).skip(1).step_by(2) {
+                assert_eq!(topics[1].y - (topics[0].y + topics[0].h), 16);
+            }
+        }
+        assert_eq!(wide[3].h, wide[1].h);
+        assert!(narrow[3].h > wide[3].h);
     }
 }

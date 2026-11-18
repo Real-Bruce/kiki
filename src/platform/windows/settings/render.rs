@@ -212,6 +212,41 @@ impl ControlShapes<'_> {
     }
 }
 
+pub fn text_factory() -> Result<IDWriteFactory> {
+    // SAFETY: the shared DirectWrite factory is used on the settings UI thread.
+    unsafe { DWriteCreateFactory::<IDWriteFactory>(DWRITE_FACTORY_TYPE_SHARED) }
+}
+
+pub struct Paragraph {
+    layout: IDWriteTextLayout,
+    pub height: i32,
+}
+
+impl Paragraph {
+    pub fn new(factory: &IDWriteFactory, text: &str, size: f32, width: i32) -> Result<Self> {
+        // SAFETY: DirectWrite copies the input text. The metrics buffer lives through the call.
+        unsafe {
+            let format = factory.CreateTextFormat(
+                text_font(text),
+                None,
+                DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL,
+                size,
+                w!("zh-CN"),
+            )?;
+            let wide: Vec<_> = text.encode_utf16().collect();
+            let layout = factory.CreateTextLayout(&wide, &format, width as f32, 10_000_000.)?;
+            let mut metrics = DWRITE_TEXT_METRICS::default();
+            layout.GetMetrics(&mut metrics)?;
+            Ok(Self {
+                layout,
+                height: metrics.height.ceil() as i32,
+            })
+        }
+    }
+}
+
 pub struct Canvas {
     target: ID2D1DCRenderTarget,
     brush: ID2D1SolidColorBrush,
@@ -219,7 +254,7 @@ pub struct Canvas {
     toolbar_icons: ToolbarIcons,
 }
 impl Canvas {
-    pub fn new() -> Result<Self> {
+    pub fn new(text_factory: &IDWriteFactory) -> Result<Self> {
         // SAFETY: the factory, target and brush are used exclusively on the settings UI thread.
         unsafe {
             let factory: ID2D1Factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
@@ -232,11 +267,10 @@ impl Canvas {
             })?;
             let brush = target.CreateSolidColorBrush(&color(0), None)?;
             let toolbar_icons = ToolbarIcons::new(&factory)?;
-            let factory = DWriteCreateFactory::<IDWriteFactory>(DWRITE_FACTORY_TYPE_SHARED)?;
             Ok(Self {
                 target,
                 brush,
-                factory,
+                factory: text_factory.clone(),
                 toolbar_icons,
             })
         }
@@ -373,6 +407,18 @@ impl Canvas {
             DWRITE_TEXT_ALIGNMENT_LEADING,
             text_font(text),
         );
+    }
+    pub fn paragraph(&self, paragraph: &Paragraph, x: f32, y: f32, rgb: u32) {
+        // SAFETY: the layout and brush are live throughout this settings paint pass.
+        unsafe {
+            self.brush.SetColor(&color(rgb));
+            self.target.DrawTextLayout(
+                Vector2 { X: x, Y: y },
+                &paragraph.layout,
+                &self.brush,
+                D2D1_DRAW_TEXT_OPTIONS_NONE,
+            );
+        }
     }
     fn write(
         &self,

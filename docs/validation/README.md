@@ -72,6 +72,7 @@
 - [v1.0.13 设置页截图残影](settings/settings-capture-v1.0.13.md)
 - [v1.0.14 截图设置滑杆与只读像素值](settings/settings-sliders-v1.0.14.md)
 - [v1.0.15 关于页与设置文件入口](settings/settings-about-v1.0.15.md)
+- [v1.0.16 关于页帮助间距](settings/settings-about-spacing-v1.0.16.md)
 
 ## 工程、性能与交付
 
