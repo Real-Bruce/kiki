@@ -1,6 +1,6 @@
 # 当前进度
 
-更新时间：2026-11-18。当前源码 **v1.0.20**（[VERSION](../VERSION)）。[按模块阅读](README.md) · [实施历史](IMPLEMENTATION_HISTORY.md) · [验证记录](validation/README.md)
+更新时间：2026-11-18。当前源码 **v1.0.21**（[VERSION](../VERSION)）。[按模块阅读](README.md) · [实施历史](IMPLEMENTATION_HISTORY.md) · [验证记录](validation/README.md)
 
 ## 当前状态与下一步
 
@@ -9,6 +9,12 @@ F01–F12 已实现并按下表记录放行；已实现能力不因环境待验�
 1. 继续定位 Codex 内置浏览器 Daily 页面长截图漏段，保留 [v1.0.3 失败样本](validation/long-capture/long-capture-v1.0.3.md)；v1.0.4 的远程显示修复不代表漏段已修复。
 2. 补验普通框选后直接保存和复制至外部应用，以及贴图复制按钮；本次已补验框选后贴图和贴图保存。
 3. 按下方环境遗留补齐实机矩阵；维护者指定任务优先于这些待验项。
+
+## v1.0.21 按工具显示马赛克颗粒大小
+
+- 「样式调整」中的马赛克颗粒大小随马赛克工具启用或隐藏，隐藏时保留已保存值。
+- 设置专项 8 项通过，默认与全特性串行测试各 84 项通过、6 项跳过。便携包已解压核对，界面实机待用户复测。 [验证记录](validation/settings/settings-mosaic-parameter-v1.0.21.md)
+- 本地提交主题为 `fix(settings): show mosaic size only when enabled`。
 
 ## v1.0.20 截图设置按工具显示尺寸
 

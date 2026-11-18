@@ -34,6 +34,7 @@ pub fn parameter_visible(parameter: CaptureParameter, cfg: &Config) -> bool {
         CaptureParameter::Stroke(1) => Tool::Arrow,
         CaptureParameter::Stroke(2) => Tool::Pen,
         CaptureParameter::TextSize => Tool::Text,
+        CaptureParameter::MosaicSize => Tool::Mosaic,
         CaptureParameter::SequenceSize => Tool::Sequence,
         _ => return true,
     };
@@ -425,7 +426,10 @@ mod tests {
 
     #[test]
     fn capture_preview_moves_only_following_content_and_keeps_parameter_rows() {
-        let cfg = Config::default();
+        let mut cfg = Config::default();
+        let mosaic = Tool::Mosaic.index().unwrap();
+        assert!(!parameter_visible(CaptureParameter::MosaicSize, &cfg));
+        cfg.capture_tools[mosaic] = true;
         let startup = Ok(startup::State::Disabled);
         let factory = super::super::render::text_factory().unwrap();
         let bounds = |page: &Page, id| {
@@ -463,6 +467,7 @@ mod tests {
                 (Tool::Arrow, 1),
                 (Tool::Pen, 2),
                 (Tool::Text, 3),
+                (Tool::Mosaic, 5),
             ] {
                 let mut config = cfg.clone();
                 config.capture_tools[tool.index().unwrap()] = false;
