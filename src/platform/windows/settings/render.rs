@@ -26,7 +26,6 @@ thread_local! {
 struct ControlSurface {
     target: ID2D1DCRenderTarget,
     brush: ID2D1SolidColorBrush,
-    icons: ToolbarIcons,
 }
 
 impl ControlSurface {
@@ -46,12 +45,7 @@ impl ControlSurface {
             })?;
             target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
             let brush = target.CreateSolidColorBrush(&color(0), None)?;
-            let icons = ToolbarIcons::new(&factory)?;
-            Ok(Self {
-                target,
-                brush,
-                icons,
-            })
+            Ok(Self { target, brush })
         }
     }
 }
@@ -106,23 +100,6 @@ impl ControlShapes<'_> {
         }
     }
 
-    pub fn tool_icon(&self, id: usize, x: i32, y: i32, scale: f32, rgb: u32) {
-        // SAFETY: the active DC target and its icon geometry are on the settings UI thread.
-        unsafe {
-            self.surface.brush.SetColor(&color(rgb));
-            self.surface.icons.draw(
-                &self.surface.target,
-                &self.surface.brush,
-                id,
-                Vector2 {
-                    X: (x - self.origin[0]) as f32,
-                    Y: (y - self.origin[1]) as f32,
-                },
-                scale,
-            );
-        }
-    }
-
     pub fn rounded(&self, bounds: RECT, diameter: i32, rgb: u32) {
         let rect = self.rect(bounds);
         let radius =
@@ -174,20 +151,27 @@ impl ControlShapes<'_> {
     }
 
     pub fn chevron_down(&self, bounds: RECT, width: f32, rgb: u32) {
-        use windows_numerics::Vector2;
+        self.chevron(bounds, true, width, rgb);
+    }
+
+    pub fn chevron(&self, bounds: RECT, down: bool, width: f32, rgb: u32) {
         let rect = self.rect(bounds);
-        let left = Vector2 {
-            X: rect.left,
-            Y: rect.top,
+        let point = |x, y| {
+            let (left, top) = if down {
+                (rect.left + x, rect.top + y)
+            } else {
+                (rect.left + y, rect.top + x)
+            };
+            Vector2 { X: left, Y: top }
         };
-        let middle = Vector2 {
-            X: (rect.left + rect.right) / 2.,
-            Y: rect.bottom,
+        let (w, h) = if down {
+            (rect.right - rect.left, rect.bottom - rect.top)
+        } else {
+            (rect.bottom - rect.top, rect.right - rect.left)
         };
-        let right = Vector2 {
-            X: rect.right,
-            Y: rect.top,
-        };
+        let left = point(0., 0.);
+        let middle = point(w / 2., h);
+        let right = point(w, 0.);
         // SAFETY: the target and brush belong to the active control paint.
         unsafe {
             self.surface.brush.SetColor(&color(rgb));

@@ -14,6 +14,17 @@ pub const RESET_CAPTURE: u16 = 431;
 pub const CAPTURE_TOOL: u16 = 432;
 pub const CAPTURE_TOOL_IDS: std::ops::Range<u16> =
     CAPTURE_TOOL..CAPTURE_TOOL + Tool::TOOLBAR.len() as u16;
+pub const CUSTOMIZE_TOOLS: u16 = 440;
+pub const ANNOTATION_SIZES: u16 = 441;
+pub const CORNER_RADIUS: u16 = 442;
+
+#[derive(Clone, Copy, Default)]
+pub struct CaptureSections {
+    pub tools: bool,
+    pub sizes: bool,
+    pub corner: bool,
+}
+
 pub const PARAMETER_LABELS: [&str; 7] = [
     "矩形线宽",
     "箭头线宽",
@@ -65,7 +76,7 @@ pub struct Page {
 impl Page {
     pub fn new(
         width: i32,
-        page: usize,
+        (page, sections): (usize, CaptureSections),
         cfg: &Config,
         start: &Result<startup::State, String>,
         hotkey_active: bool,
@@ -155,37 +166,33 @@ impl Page {
                 p.row("关闭当前贴图", "Esc");
             }
             2 => {
+                p.control(CUSTOMIZE_TOOLS, p.width - 104, -3, 104, 32);
                 p.heading("截图工具条");
-                let columns = if p.width >= 576 { 4 } else { 2 };
-                let gap = 12;
-                let cell = (p.width - (columns - 1) * gap) / columns;
-                for i in 0..Tool::TOOLBAR.len() {
-                    let x = (i as i32 % columns) * (cell + gap);
-                    p.control(CAPTURE_TOOL + i as u16, x, 0, cell, 36);
-                    if i as i32 % columns == columns - 1 {
-                        p.y += 38;
-                    }
-                }
-                p.y += 6;
-                p.note("工具条预览", Tone::Muted);
                 let preview_height = crate::platform::windows::editor::toolbar::BAR_HEIGHT as i32;
                 p.items
                     .push(Item::ToolbarPreview(p.rect(0, 0, p.width, preview_height)));
                 p.y += preview_height + 16;
+                if sections.tools {
+                    let cell = (p.width - 12) / 2;
+                    for index in 0..4 {
+                        p.control(CAPTURE_TOOL + index, 0, 0, cell, 34);
+                        p.control(CAPTURE_TOOL + index + 4, cell + 12, 0, cell, 34);
+                        p.y += 36;
+                    }
+                    p.divider();
+                }
                 p.toggle_row("截图时显示操作提示", 400);
                 p.divider();
                 p.heading("默认标注样式");
                 p.note("用于新标注。尺寸按截图的实际像素计算。", Tone::Muted);
                 p.text("标注颜色", 0, 86, Tone::Normal);
                 p.choices(410, 8);
-                for index in 0..3 {
-                    p.parameter_row(index, CaptureParameter::Stroke(usize::from(index)));
-                }
-                p.parameter_row(3, CaptureParameter::TextSize);
-                if Tool::Mosaic
-                    .index()
-                    .is_some_and(|index| cfg.capture_tools[index])
-                {
+                p.disclosure(ANNOTATION_SIZES);
+                if sections.sizes {
+                    for index in 0..3 {
+                        p.parameter_row(index, CaptureParameter::Stroke(usize::from(index)));
+                    }
+                    p.parameter_row(3, CaptureParameter::TextSize);
                     p.parameter_row(5, CaptureParameter::MosaicSize);
                 }
                 if Tool::Sequence
@@ -199,26 +206,36 @@ impl Page {
                 p.text("默认保存格式", 0, p.width - 126, Tone::Normal);
                 p.control(OUTPUT_FORMAT, p.width - 116, -8, 116, 36);
                 p.y += ROW;
-                p.parameter_row(4, CaptureParameter::CornerRadius);
-                p.y += 8;
-                p.items.push(Item::CornerPreview(p.rect(0, 0, 108, 72)));
-                p.text(
-                    match cfg.output_format {
-                        OutputFormat::Png => "保存为 PNG 时，圆角外透明。",
-                        OutputFormat::Jpeg => "保存为 JPEG 时，圆角外填白。",
-                    },
-                    122,
-                    p.width - 122,
-                    Tone::Normal,
-                );
-                p.y += 26;
-                p.text(
-                    "圆角半径最多为截图短边的一半。",
-                    122,
-                    p.width - 122,
-                    Tone::Muted,
-                );
-                p.y += 46;
+                p.disclosure(CORNER_RADIUS);
+                if sections.corner {
+                    let (min, max) = CaptureParameter::CornerRadius.bounds();
+                    p.control(PARAMETER_SLIDER + 4, 6, 0, p.width - 12, 28);
+                    p.y += 28;
+                    p.text(format!("{min} px"), 6, 64, Tone::Muted);
+                    p.items.push(Item::Value(
+                        format!("{max} px"),
+                        p.rect(p.width - 70, 0, 64, 22),
+                    ));
+                    p.y += 36;
+                    p.items.push(Item::CornerPreview(p.rect(0, 0, 108, 72)));
+                    p.text(
+                        match cfg.output_format {
+                            OutputFormat::Png => "保存为 PNG 时，圆角外透明。",
+                            OutputFormat::Jpeg => "保存为 JPEG 时，圆角外填白。",
+                        },
+                        122,
+                        p.width - 122,
+                        Tone::Normal,
+                    );
+                    p.y += 26;
+                    p.text(
+                        "圆角半径最多为截图短边的一半。",
+                        122,
+                        p.width - 122,
+                        Tone::Muted,
+                    );
+                    p.y += 46;
+                }
                 p.divider();
                 p.control(RESET_CAPTURE, 0, 0, 152, 36);
                 p.y += 36;
@@ -382,6 +399,13 @@ impl Page {
         self.y += 32;
     }
 
+    fn disclosure(&mut self, id: u16) {
+        self.items.push(Item::Divider(self.y));
+        self.y += 2;
+        self.control(id, 0, 0, self.width, 38);
+        self.y += 40;
+    }
+
     fn control(&mut self, id: u16, x: i32, dy: i32, w: i32, h: i32) {
         self.items.push(Item::Control(id, self.rect(x, dy, w, h)));
     }
@@ -423,7 +447,15 @@ mod tests {
         let shortcut = cfg.hotkey.label();
         let startup = Ok(startup::State::Disabled);
         let factory = super::super::render::text_factory().unwrap();
-        let active = Page::new(660, 5, &cfg, &startup, true, None, &factory);
+        let active = Page::new(
+            660,
+            (5, CaptureSections::default()),
+            &cfg,
+            &startup,
+            true,
+            None,
+            &factory,
+        );
         let unavailable = capture_help(&cfg, false);
 
         assert!(
@@ -449,14 +481,22 @@ mod tests {
         let startup = Ok(startup::State::Disabled);
         let factory = super::super::render::text_factory().unwrap();
         let paragraphs = |width| {
-            Page::new(width, 5, &cfg, &startup, true, None, &factory)
-                .items
-                .into_iter()
-                .filter_map(|item| match item {
-                    Item::Paragraph(_, bounds, _) => Some(bounds),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
+            Page::new(
+                width,
+                (5, CaptureSections::default()),
+                &cfg,
+                &startup,
+                true,
+                None,
+                &factory,
+            )
+            .items
+            .into_iter()
+            .filter_map(|item| match item {
+                Item::Paragraph(_, bounds, _) => Some(bounds),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
         };
         let wide = paragraphs(944);
         let narrow = paragraphs(660);

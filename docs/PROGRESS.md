@@ -1,6 +1,6 @@
 # 当前进度
 
-更新时间：2026-11-18。当前源码 **v1.0.17**（[VERSION](../VERSION)）。[按模块阅读](README.md) · [实施历史](IMPLEMENTATION_HISTORY.md) · [验证记录](validation/README.md)
+更新时间：2026-11-18。当前源码 **v1.0.18**（[VERSION](../VERSION)）。[按模块阅读](README.md) · [实施历史](IMPLEMENTATION_HISTORY.md) · [验证记录](validation/README.md)
 
 ## 当前状态与下一步
 
@@ -9,6 +9,12 @@ F01–F12 已实现并按下表记录放行；已实现能力不因环境待验�
 1. 继续定位 Codex 内置浏览器 Daily 页面长截图漏段，保留 [v1.0.3 失败样本](validation/long-capture/long-capture-v1.0.3.md)；v1.0.4 的远程显示修复不代表漏段已修复。
 2. 补验普通框选后直接保存和复制至外部应用，以及贴图复制按钮；本次已补验框选后贴图和贴图保存。
 3. 按下方环境遗留补齐实机矩阵；维护者指定任务优先于这些待验项。
+
+## v1.0.18 截图设置分组折叠
+
+- 工具自定义、标注尺寸和圆角分组可以独立展开，重新打开设置窗口时默认收起。工具开关实时更新原有预览，操作提示、标注颜色和保存格式保持可直接操作。编号开启时仍显示独立的编号直径设置。
+- 格式、严格 Clippy、默认及全特性串行测试通过，两套均为 83 项通过、6 项跳过。正式便携 ZIP 已解压核对。用户接手界面和实际导出验收。 [验证记录](validation/settings/settings-capture-sections-v1.0.18.md)
+- 本地提交主题为 `fix(settings): group capture controls into disclosures`。下一步为用户使用便携包复测，公开截图待验收后更新。
 
 ## v1.0.17 便携包许可合并
 
