@@ -935,6 +935,16 @@ fn cross_screen_long_capture_requests_reselection_and_next_preview_is_ordinary()
 #[test]
 #[ignore = "uses a visible native source and the real Windows preview"]
 fn long_capture_toolbar_preserves_viewport_and_leaves_a_recoverable_session() {
+    verify_long_capture_toolbar(false);
+}
+
+#[test]
+#[ignore = "uses a visible native source and the real Windows preview"]
+fn long_capture_reference_toolbar_keeps_the_original_output() {
+    verify_long_capture_toolbar(true);
+}
+
+fn verify_long_capture_toolbar(reference: bool) {
     use long_capture::tests::{native_document, route_test_wheel};
 
     let _com = prepare_windows();
@@ -951,13 +961,29 @@ fn long_capture_toolbar_preserves_viewport_and_leaves_a_recoverable_session() {
         })
         .expect("requires a real SDR display");
     println!("display={screen:?}");
-    let (source, _, area, _) = native_document(&screen);
+    let (source, _, reference_area, _) = native_document(&screen);
+    let area = if reference {
+        PixelRect {
+            top: reference_area.top + 48,
+            bottom: reference_area.bottom - 48,
+            ..reference_area
+        }
+    } else {
+        reference_area
+    };
     #[cfg(feature = "diagnostics")]
     let desktop_capture = || {
         std::thread::spawn(crate::platform::windows::capture::desktop)
             .join()
             .unwrap()
             .unwrap()
+    };
+    #[cfg(feature = "diagnostics")]
+    let save_evidence = |name: &str, image: &Image| {
+        if reference && let Some(folder) = std::env::var_os("KIKI_LONG_REFERENCE_EVIDENCE") {
+            let path = std::path::PathBuf::from(folder).join(name);
+            output::encode::save(image, &path, OutputFormat::Png).unwrap();
+        }
     };
     #[cfg(feature = "diagnostics")]
     let source_pixels = desktop_capture().image.region(area).unwrap();
@@ -970,6 +996,9 @@ fn long_capture_toolbar_preserves_viewport_and_leaves_a_recoverable_session() {
     };
     // SAFETY: the test owns these native windows and dispatches messages on their UI thread.
     unsafe {
+        if reference && std::env::var_os("KIKI_LONG_REFERENCE_DARK").is_some() {
+            (*state).canvas.dark = true;
+        }
         (*state).capture_tools[Tool::LongCapture.index().unwrap()] = true;
         (*state).selection.rect = Some(area);
         let button = (*state)
@@ -980,16 +1009,44 @@ fn long_capture_toolbar_preserves_viewport_and_leaves_a_recoverable_session() {
             .unwrap()
             .bounds;
         let _ = ShowWindow(hwnd, SW_SHOW);
+        let mut keyboard = [0; 256];
+        GetKeyboardState(&mut keyboard).unwrap();
+        if reference {
+            let mut shifted = keyboard;
+            shifted[VK_SHIFT.0 as usize] |= 0x80;
+            SetKeyboardState(&shifted).unwrap();
+        }
         click(
             hwnd,
             bounds,
             point((button.left + button.right) / 2, button.top + 5),
         );
+        if reference {
+            SetKeyboardState(&keyboard).unwrap();
+            assert_eq!((*state).long_reference_output, Some(area));
+            assert!((*state).long_capture.is_none());
+            #[cfg(feature = "diagnostics")]
+            if std::env::var_os("KIKI_LONG_REFERENCE_EVIDENCE").is_some() {
+                let _ = UpdateWindow(hwnd);
+                windows::Win32::Graphics::Dwm::DwmFlush().unwrap();
+                let hint_and_selection =
+                    rect(bounds.left, bounds.top, area.right + 15, bounds.bottom - 60);
+                save_evidence(
+                    "reference-selection.png",
+                    &desktop_capture().image.region(hint_and_selection).unwrap(),
+                );
+            }
+            let start = point(reference_area.left, reference_area.top);
+            let end = point(reference_area.right, reference_area.bottom);
+            send_mouse(hwnd, bounds, WM_LBUTTONDOWN, start);
+            send_mouse(hwnd, bounds, WM_MOUSEMOVE, end);
+            send_mouse(hwnd, bounds, WM_LBUTTONUP, end);
+        }
         assert_eq!(
             (*state).long_capture.as_ref().map(|capture| capture.area),
-            Some(area)
+            Some(reference_area)
         );
-        assert_eq!((*state).selection.rect, Some(area));
+        assert_eq!((*state).selection.rect, Some(reference_area));
         assert_eq!(GetAncestor(WindowFromPoint(center), GA_ROOT), source.0);
         let capture = (*state).long_capture.as_ref().unwrap();
         assert!(capture.panel.bounds.intersection(area).is_none());
@@ -1063,15 +1120,28 @@ fn long_capture_toolbar_preserves_viewport_and_leaves_a_recoverable_session() {
                 "preview_height={height}->{grown}, wheel_to_preview_ms={:.1}",
                 start.elapsed().as_secs_f64() * 1000.
             );
+            #[cfg(feature = "diagnostics")]
+            if reference && std::env::var_os("KIKI_LONG_REFERENCE_EVIDENCE").is_some() {
+                let panel = (*state).long_capture.as_ref().unwrap().panel.bounds;
+                let _ = UpdateWindow(hwnd);
+                windows::Win32::Graphics::Dwm::DwmFlush().unwrap();
+                save_evidence(
+                    "reference-preview.png",
+                    &desktop_capture().image.region(panel).unwrap(),
+                );
+            }
             click(hwnd, bounds, point(finish.left + 2, finish.top + 2));
             pump_until(|| (*state).long_document.is_some());
             let image = (*state).canvas.source();
             #[cfg(feature = "diagnostics")]
-            assert_eq!(
-                &image.pixels()[..source_pixels.pixels().len()],
-                source_pixels.pixels(),
-                "the first captured viewport must exclude the previous screenshot UI"
-            );
+            {
+                assert_eq!(
+                    &image.pixels()[..source_pixels.pixels().len()],
+                    source_pixels.pixels(),
+                    "the first captured viewport must exclude the previous screenshot UI"
+                );
+                save_evidence("reference-output.png", &image);
+            }
             let path =
                 std::env::temp_dir().join(format!("kiki-long-toolbar-{}.png", std::process::id()));
             let target = output::SaveTarget::new(path.clone(), OutputFormat::Png).unwrap();

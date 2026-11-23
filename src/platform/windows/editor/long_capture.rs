@@ -2,7 +2,7 @@ use crate::core::{
     display::DisplayInfo,
     geometry::PixelRect,
     image::Image,
-    long_image::{self, Step, Stitcher, View},
+    long_image::{Step, Stitcher, View},
     selection::{PixelPoint, contains},
 };
 use std::{
@@ -22,7 +22,8 @@ use windows::{
 pub const SCROLLED: u32 = WM_APP + 73;
 pub const TIMER: usize = 8;
 static WORKERS: AtomicUsize = AtomicUsize::new(0);
-const PAUSED: &str = "未找到可靠接缝，已保留已拼接部分。请缓慢滚回已捕获内容，或点击完成。";
+const PAUSED: &str =
+    "接缝无法对齐，已保留当前长图。可回滚或点完成。遇到留白可按 Shift 启动长截图。";
 const WHEEL_RETRY: &str = "目标窗口暂时无法接收滚轮，请点击正文后重试。";
 const SCROLL_TAIL: Duration = Duration::from_millis(320);
 const SCROLL_MAX_TAIL: Duration = Duration::from_millis(700);
@@ -164,6 +165,12 @@ fn target_at(owner: HWND, area: PixelRect) -> Option<Target> {
         }
         Target::read(window)
     }
+}
+
+#[derive(Clone, Copy)]
+struct CaptureRegions {
+    reference: PixelRect,
+    output: PixelRect,
 }
 
 fn verify_exclusion(owner: usize) -> Result<()> {
@@ -461,7 +468,12 @@ pub struct Capture {
 }
 
 impl Capture {
-    pub fn start(hwnd: HWND, area: PixelRect, screen: DisplayInfo) -> Result<Self> {
+    pub fn start(
+        hwnd: HWND,
+        area: PixelRect,
+        output: PixelRect,
+        screen: DisplayInfo,
+    ) -> Result<Self> {
         // SAFETY: all calls operate on the preview's live top-level HWND. Region ownership
         // transfers to Windows only on success. Do not borrow preview state across these calls.
         unsafe {
@@ -482,7 +494,25 @@ impl Capture {
                 // Leave the overlay active for Esc and open the source for hit testing
                 // before adding the panel, which may cover the center of a narrow selection.
                 set_capture_mask(hwnd, window, screen.bounds, area, None)?;
-                let target = target_at(hwnd, area).ok_or_else(|| fail("请框选可滚动的正文窗口"))?;
+                let target =
+                    target_at(hwnd, output).ok_or_else(|| fail("请框选可滚动的正文窗口"))?;
+                if area != output {
+                    // The user identifies the scroll pane. Also reject a reference
+                    // that visibly crosses another top-level window.
+                    let same_window = |x, y| {
+                        GetAncestor(WindowFromPoint(POINT { x, y }), GA_ROOT).0 as usize
+                            == target.window
+                    };
+                    let corners = [
+                        (area.left, area.top),
+                        (area.right - 1, area.top),
+                        (area.left, area.bottom - 1),
+                        (area.right - 1, area.bottom - 1),
+                    ];
+                    if !corners.into_iter().all(|(x, y)| same_window(x, y)) {
+                        return Err(fail("参考区须位于同一正文窗口"));
+                    }
+                }
                 set_capture_mask(hwnd, window, screen.bounds, area, Some(panel.bounds))?;
                 let module = windows::Win32::System::LibraryLoader::GetModuleHandleW(None)?;
                 let hook = Hook(SetWindowsHookExW(
@@ -494,11 +524,19 @@ impl Capture {
                 ROUTE.set(Some(Route {
                     hwnd,
                     target,
-                    area,
+                    area: output,
                     panel: panel.bounds,
                     ready: false,
                 }));
-                let worker = Worker::start(excluded_window, area, screen.clone(), target)?;
+                let worker = Worker::start(
+                    excluded_window,
+                    CaptureRegions {
+                        reference: area,
+                        output,
+                    },
+                    screen.clone(),
+                    target,
+                )?;
                 Ok(Self {
                     panel,
                     screen,
@@ -662,7 +700,7 @@ fn capture_mask(
 impl Worker {
     fn start(
         excluded_window: Option<usize>,
-        area: PixelRect,
+        regions: CaptureRegions,
         screen: DisplayInfo,
         target: Target,
     ) -> Result<Self> {
@@ -678,7 +716,7 @@ impl Worker {
                 let _permit = permit;
                 if let Err(error) = run_capture(
                     excluded_window,
-                    area,
+                    regions,
                     &screen,
                     target,
                     &token,
@@ -722,7 +760,7 @@ fn check_target(excluded_window: Option<usize>, target: Target) -> Result<()> {
 
 fn run_capture(
     excluded_window: Option<usize>,
-    area: PixelRect,
+    regions: CaptureRegions,
     screen: &DisplayInfo,
     target: Target,
     cancel: &AtomicBool,
@@ -730,6 +768,10 @@ fn run_capture(
     wake: &Receiver<()>,
 ) -> Result<()> {
     use crate::platform::windows::capture::RegionStream;
+    let CaptureRegions {
+        reference: area,
+        output,
+    } = regions;
     let mut initial = Image::new(area).map_err(|e| fail(&e))?;
     check_target(excluded_window, target)?;
     let first_stream = RegionStream::open(area, screen)?;
@@ -743,12 +785,16 @@ fn run_capture(
         }
     }
     check_target(excluded_window, target)?;
-    let mut stitch = Stitcher::new(initial).map_err(|e| fail(&e))?;
+    let mut stitch = Stitcher::with_output(initial, output).map_err(|e| fail(&e))?;
     let mut frame = Image::new(area).map_err(|e| fail(&e))?;
     let mut stream = Some(first_stream);
     shared.publish(Reply::Update(make_update(
         &stitch,
-        "在正文区域滚动，避开固定页头和底栏。",
+        if area == output {
+            "在正文区域滚动，避开固定页头和底栏。"
+        } else {
+            "在原选区内缓慢滚动。成图取原选区。"
+        },
     )?));
     let mut last_preview = Instant::now();
     let mut last_display_check = last_preview;
@@ -778,7 +824,7 @@ fn run_capture(
         let Some(active) = burst.as_mut() else {
             if finish {
                 drop(stream);
-                match long_image::thumbnail(stitch.image()) {
+                match stitch.thumbnail() {
                     Ok(thumbnail) => {
                         shared.publish(Reply::Finished(stitch.into_image(), thumbnail));
                         return Ok(());
@@ -901,9 +947,11 @@ fn publish_preview(shared: &Shared, stitch: &Stitcher, message: &'static str) ->
 }
 
 fn make_update(stitch: &Stitcher, message: &'static str) -> Result<Update> {
-    let image = stitch.image();
-    let (width, height) = image.bounds().size().ok_or_else(|| fail("无效长图尺寸"))?;
-    let thumbnail = long_image::thumbnail(image).map_err(|e| fail(&e))?;
+    let (width, height) = stitch
+        .output_bounds()
+        .size()
+        .ok_or_else(|| fail("无效长图尺寸"))?;
+    let thumbnail = stitch.thumbnail().map_err(|e| fail(&e))?;
     Ok(Update {
         thumbnail,
         width,
@@ -1045,7 +1093,7 @@ pub(in crate::platform::windows) mod tests {
         );
 
         let image = fixture(1700, 0, 2000);
-        let thumbnail = long_image::thumbnail(&image).unwrap();
+        let thumbnail = crate::core::long_image::thumbnail(&image).unwrap();
         let mut document = Document::new(&screen, &image, thumbnail).unwrap();
         assert!(document.view.scale < 1.);
         let bar = document.scrollbar();
@@ -1324,7 +1372,10 @@ pub(in crate::platform::windows) mod tests {
         let start = |window: &NativeTestWindow, area| {
             Worker::start(
                 Some(owner.0.0 as usize),
-                area,
+                CaptureRegions {
+                    reference: area,
+                    output: area,
+                },
                 screen.clone(),
                 Target::read(window.0).unwrap(),
             )

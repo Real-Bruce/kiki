@@ -66,7 +66,19 @@ impl Image {
     }
 
     pub fn downsample(&self, width: u32, height: u32) -> Result<Self, String> {
-        let (source_width, source_height) = self.bounds.size().ok_or("无效原图尺寸")?;
+        self.downsample_region(self.bounds, width, height)
+    }
+
+    pub fn downsample_region(
+        &self,
+        region: PixelRect,
+        width: u32,
+        height: u32,
+    ) -> Result<Self, String> {
+        let (source_width, source_height) = region.size().ok_or("无效原图尺寸")?;
+        if self.bounds.intersection(region) != Some(region) {
+            return Err("预览区域超出原图".into());
+        }
         if width > source_width || height > source_height {
             return Err("预览尺寸超过原图".into());
         }
@@ -77,13 +89,25 @@ impl Image {
             bottom: i32::try_from(height).map_err(|_| "预览过高")?,
         })?;
         let stride = self.stride as usize;
+        let origin = self.row_range(region, region.top).start;
         for (i, pixel) in image.pixels.chunks_exact_mut(4).enumerate() {
             let x = i % width as usize * source_width as usize / width as usize;
             let y = i / width as usize * source_height as usize / height as usize;
-            let offset = y * stride + x * 4;
+            let offset = origin + y * stride + x * 4;
             pixel.copy_from_slice(&self.pixels[offset..offset + 4]);
         }
         Ok(image)
+    }
+
+    pub(super) fn trim_rows(&mut self, bounds: PixelRect) {
+        debug_assert_eq!(bounds.left, self.bounds.left);
+        debug_assert_eq!(bounds.right, self.bounds.right);
+        debug_assert_eq!(bounds.intersection(self.bounds), Some(bounds));
+        let first = self.row_range(bounds, bounds.top).start;
+        let end = self.row_range(bounds, bounds.bottom - 1).end;
+        self.pixels.copy_within(first..end, 0);
+        self.pixels.truncate(end - first);
+        self.bounds = bounds;
     }
     pub fn rgb_at(&self, point: PixelPoint) -> Option<[u8; 3]> {
         if !contains(self.bounds, point) {

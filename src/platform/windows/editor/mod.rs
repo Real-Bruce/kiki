@@ -127,6 +127,7 @@ impl Preview {
                 long_document: None,
                 start_long: false,
                 long_reselect: None,
+                long_reference_output: None,
                 parameter_down: false,
                 parameter_slider: false,
                 parameter_edit: None,
@@ -204,6 +205,7 @@ struct State {
     long_document: Option<LongDocument>,
     start_long: bool,
     long_reselect: Option<&'static str>,
+    long_reference_output: Option<PixelRect>,
     parameter_down: bool,
     parameter_slider: bool,
     parameter_edit: Option<ParameterEdit>,
@@ -1057,7 +1059,7 @@ fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                         corner_radius: state.corner_radius,
                         text_input: state.text_input.as_ref(),
                         busy: state.busy,
-                        hover: state.hover,
+                        hover: state.long_reference_output.or(state.hover),
                         screens: &state.screens,
                         capture_tools: state.capture_tools,
                         pointer: state.pointer,
@@ -1549,6 +1551,8 @@ fn start_long_if_requested(hwnd: HWND, pointer: *mut State) -> bool {
         }
         let state = &mut *pointer;
         let area = state.selection.rect;
+        let reference_output = state.long_reference_output;
+        let select_reference = state.long_reselect.is_none() && GetKeyState(VK_SHIFT.0 as i32) < 0;
         let text = state.text_input.take();
         state.editor.clear_document();
         state.pending_output = None;
@@ -1569,10 +1573,29 @@ fn start_long_if_requested(hwnd: HWND, pointer: *mut State) -> bool {
             reselect_long(hwnd, pointer, "请重新框选单个显示器内的正文区域。");
             return true;
         };
-        match LongCapture::start(hwnd, area, screen) {
+        if select_reference {
+            (*pointer).long_reference_output = Some(area);
+            reselect_long(hwnd, pointer, "拖框覆盖原选区及同一正文的上下区域");
+            return true;
+        }
+        let output = reference_output.unwrap_or(area);
+        if let Some(original) = reference_output
+            && (area.intersection(original) != Some(original)
+                || (area.top == original.top && area.bottom == original.bottom))
+        {
+            reselect_long(hwnd, pointer, "参考区须覆盖原选区并向上或向下延伸");
+            return true;
+        }
+        let area = PixelRect {
+            left: output.left,
+            right: output.right,
+            ..area
+        };
+        match LongCapture::start(hwnd, area, output, screen) {
             Ok(capture) if SetTimer(Some(hwnd), long_capture::TIMER, 40, None) != 0 => {
                 (*pointer).long_capture = Some(capture);
                 (*pointer).long_reselect = None;
+                (*pointer).long_reference_output = None;
                 let _ = InvalidateRect(Some(hwnd), None, false);
             }
             result => {

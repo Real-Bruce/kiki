@@ -1,14 +1,20 @@
 # 当前进度
 
-更新时间：2026-11-23。当前源码 **v1.0.22**（[VERSION](../VERSION)）。[按模块阅读](README.md) · [实施历史](IMPLEMENTATION_HISTORY.md) · [验证记录](validation/README.md)
+更新时间：2026-11-23。当前源码 **v1.0.23**（[VERSION](../VERSION)）。[按模块阅读](README.md) · [实施历史](IMPLEMENTATION_HISTORY.md) · [验证记录](validation/README.md)
 
 ## 当前状态与下一步
 
 F01–F12 已实现并按下表记录放行；已实现能力不因环境待验而重新搭建。v1.0.11 完成贴图菜单和悬停工具条优化，已在单屏 125% 下验证浅深界面、缩放及保存，并完成正式 ZIP 的解压启动与框选贴图。详见 [贴图界面验证](validation/pinned/pinned-ui-v1.0.11.md)。
 
-1. 用户复测 v1.0.22，IDE 多图 README 的 1290 × 180 px 选区仍会暂停。按附件重放，停点落在第一张“通用”图的留白。窗口级 WGC 在受控同一正文中可提供位移线索，独立滚动窗格会产生错拼。下一步验证同一滚动容器的定位依据及 IDE 窗口坐标。Codex 内置浏览器 Daily 漏段仍待独立定位。 [多图现场与对照实验](validation/long-capture/multi-image-v1.0.22.md) · [v1.0.3 失败样本](validation/long-capture/long-capture-v1.0.3.md)
+1. 在 IDE 多图 README 中复测 v1.0.23 的参考框。按附件尺寸重放时，620 px 高参考框帮助原 180 px 高选区跨过留白，3120 行成图逐像素一致。已验证 Win32 原生入口及导出。Codex 内置浏览器 Daily 漏段仍待独立定位。 [v1.0.23 验证](validation/long-capture/long-capture-v1.0.23.md) · [多图排查](validation/long-capture/multi-image-v1.0.22.md) · [v1.0.3 失败样本](validation/long-capture/long-capture-v1.0.3.md)
 2. 补验普通框选后直接保存和复制至外部应用，以及贴图复制按钮；本次已补验框选后贴图和贴图保存。
 3. 按下方环境遗留补齐实机矩阵；维护者指定任务优先于这些待验项。
+
+## v1.0.23 长截图参考框
+
+- 先框定输出，按住 Shift 启动长截图，再框出包含原选区的同一滚动正文。参考框提高匹配高度，预览和导出取原选区扫过的内容。原选区的连续像素失去重叠或参考帧无法对齐时，保留已拼接内容。
+- 默认和全特性串行测试各 87 项通过、7 项按需运行，另行通过 4 项 Release 原生用例。已检查参考框提示、长图预览、PNG 像素及候选 ZIP。 [验证详情](validation/long-capture/long-capture-v1.0.23.md)
+- 本地提交主题为 `fix(capture): use a selected reference area across blank seams`。候选包待 IDE 原场景复验。
 
 ## v1.0.22 长截图接缝判断
 

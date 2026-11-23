@@ -16,6 +16,8 @@ pub struct Stitcher {
     rows: Vec<RowKey>,
     frame_height: usize,
     viewed: usize,
+    output_top: usize,
+    output_bottom: usize,
 }
 
 type RowKey = [u64; 3];
@@ -127,7 +129,20 @@ fn reliable_overlap(old: &[RowKey], new: &[RowKey]) -> bool {
 }
 
 impl Stitcher {
+    #[cfg(any(test, feature = "diagnostics"))]
     pub fn new(image: Image) -> Result<Self, String> {
+        let output = image.bounds();
+        Self::with_output(image, output)
+    }
+
+    pub fn with_output(image: Image, output: PixelRect) -> Result<Self, String> {
+        let bounds = image.bounds();
+        if bounds.intersection(output) != Some(output)
+            || bounds.left != output.left
+            || bounds.right != output.right
+        {
+            return Err("拼接参考区必须覆盖原截图选区".into());
+        }
         let (_, height) = image.bounds().size().ok_or("无效长截图尺寸")?;
         if height as usize > MAX_HEIGHT || image.pixels().len() > MAX_BYTES {
             return Err("选区超过长截图像素上限".into());
@@ -146,19 +161,37 @@ impl Stitcher {
             rows,
             frame_height: height as usize,
             viewed: 0,
+            output_top: (i64::from(output.top) - i64::from(bounds.top)) as usize,
+            output_bottom: (i64::from(output.bottom) - i64::from(bounds.top)) as usize,
         })
     }
 
+    #[cfg(any(test, feature = "diagnostics"))]
     pub fn image(&self) -> &Image {
         &self.image
     }
 
-    pub fn into_image(self) -> Image {
+    pub fn output_bounds(&self) -> PixelRect {
+        let bounds = self.image.bounds();
+        PixelRect {
+            top: bounds.top + self.output_top as i32,
+            bottom: bounds.bottom - (self.frame_height - self.output_bottom) as i32,
+            ..bounds
+        }
+    }
+
+    pub fn thumbnail(&self) -> Result<Image, String> {
+        thumbnail_region(&self.image, self.output_bounds())
+    }
+
+    pub fn into_image(mut self) -> Image {
+        let output = self.output_bounds();
+        self.image.trim_rows(output);
         self.image
     }
 
     pub fn viewport(&self) -> (usize, usize) {
-        (self.viewed, self.frame_height)
+        (self.viewed, self.output_bottom - self.output_top)
     }
 
     pub fn accept(&mut self, frame: &Image, down: bool) -> Result<Step, String> {
@@ -208,7 +241,8 @@ impl Stitcher {
             }
             found = Some((offset, overlap));
         }
-        if found.is_none() && frame.stride() >= 64 * 4 {
+        let output_height = self.output_bottom - self.output_top;
+        if found.is_none() && output_height == height && frame.stride() >= 64 * 4 {
             let mut changes = Vec::new();
             changes
                 .try_reserve_exact(height)
@@ -249,8 +283,13 @@ impl Stitcher {
             self.viewed = offset;
             return Ok(Step::Known);
         }
-        let max_rows = MAX_HEIGHT.min(MAX_BYTES / stride);
         let new_rows = height - overlap;
+        // The reference can match across a gap larger than the output viewport.
+        // Require overlap between consecutive output bands before adding rows.
+        if output_height != height && new_rows >= output_height {
+            return Ok(Step::Unmatched);
+        }
+        let max_rows = MAX_HEIGHT.min(MAX_BYTES / stride);
         if self.rows.len() + new_rows > max_rows {
             return Ok(Step::Limit);
         }
@@ -262,11 +301,15 @@ impl Stitcher {
     }
 }
 
+#[cfg(any(test, feature = "diagnostics"))]
 pub fn thumbnail(source: &Image) -> Result<Image, String> {
-    let bounds = source.bounds();
+    thumbnail_region(source, source.bounds())
+}
+
+fn thumbnail_region(source: &Image, bounds: PixelRect) -> Result<Image, String> {
     let (width, height) = bounds.size().ok_or("无效长图预览尺寸")?;
     let divisor = width.div_ceil(160).max(height.div_ceil(1000)).max(1);
-    source.downsample(width.div_ceil(divisor), height.div_ceil(divisor))
+    source.downsample_region(bounds, width.div_ceil(divisor), height.div_ceil(divisor))
 }
 #[derive(Clone, Copy)]
 pub struct View {
@@ -443,6 +486,56 @@ mod tests {
         assert_eq!(stitch.accept(&view(60, 362), true).unwrap(), Step::Added);
         assert_eq!(stitch.viewport(), (60, 362));
         assert_eq!(stitch.image().pixels(), view(0, 422).pixels());
+    }
+
+    #[test]
+    fn reference_rows_locate_a_blank_output_and_stay_out_of_the_image() {
+        let document = {
+            let mut image = fixture(120, 0, 1_000);
+            let stride = image.stride() as usize;
+            image.pixels_mut()[230 * stride..730 * stride].fill(240);
+            image
+        };
+        let viewport = PixelRect {
+            bottom: 620,
+            ..document.bounds()
+        };
+        let output = PixelRect {
+            top: 48,
+            bottom: 228,
+            ..viewport
+        };
+        let frame = |offset| {
+            document
+                .region(PixelRect {
+                    top: offset,
+                    bottom: offset + 620,
+                    ..viewport
+                })
+                .unwrap()
+        };
+        let first = frame(0);
+        let mut stitch = Stitcher::with_output(first, output).unwrap();
+        assert_eq!(stitch.viewport(), (0, 180));
+        assert_eq!(stitch.accept(&frame(180), true).unwrap(), Step::Unmatched);
+        assert_eq!(stitch.output_bounds(), output);
+
+        for offset in (16..=368).step_by(16) {
+            assert_eq!(stitch.accept(&frame(offset), true).unwrap(), Step::Added);
+        }
+        assert_eq!(stitch.accept(&frame(352), false).unwrap(), Step::Known);
+        assert_eq!(stitch.viewport(), (352, 180));
+        let expected = document
+            .region(PixelRect {
+                bottom: 228 + 368,
+                ..output
+            })
+            .unwrap();
+        assert_eq!(
+            stitch.thumbnail().unwrap().pixels(),
+            thumbnail(&expected).unwrap().pixels()
+        );
+        assert_eq!(stitch.into_image().pixels(), expected.pixels());
     }
 
     #[test]
