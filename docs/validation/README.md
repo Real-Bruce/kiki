@@ -43,6 +43,7 @@
 - [F11-v1.0.0.md](long-capture/F11-v1.0.0.md)
 - [long-capture-v1.0.3.md](long-capture/long-capture-v1.0.3.md)
 - [long-capture-v1.0.4.md](long-capture/long-capture-v1.0.4.md)
+- [README 图片区接缝排查与离线重放](long-capture/readme-seam-investigation.md)
 
 ## 输出与圆角
 
