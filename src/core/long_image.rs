@@ -41,20 +41,36 @@ fn matching_lanes(a: RowKey, b: RowKey) -> usize {
     a.into_iter().zip(b).filter(|(a, b)| a == b).count()
 }
 
-fn enough_detail(rows: impl IntoIterator<Item = RowKey>) -> bool {
+fn detail_prefix_len(rows: impl IntoIterator<Item = RowKey>) -> Option<usize> {
     let mut distinct = [None; 4];
-    for row in rows {
+    for (y, row) in rows.into_iter().enumerate() {
         if distinct.contains(&Some(row)) {
             continue;
         }
         if let Some(slot) = distinct.iter_mut().find(|slot| slot.is_none()) {
             *slot = Some(row);
             if distinct[3].is_some() {
-                return true;
+                return Some(y + 1);
             }
         }
     }
-    false
+    None
+}
+
+fn exact_detail_prefix_len(rows: &[RowKey]) -> usize {
+    let varied = detail_prefix_len(rows.iter().copied()).unwrap_or(rows.len() + 1);
+    let mut first_edge = None;
+    // Two separated, wide transitions can anchor an exact seam even if the
+    // overlap has few colors. A single edge or a thin isolated row cannot.
+    for (y, pair) in rows[..varied.min(rows.len())].windows(2).enumerate() {
+        if matching_lanes(pair[0], pair[1]) <= 1 {
+            let first = *first_edge.get_or_insert(y);
+            if y - first >= 2 {
+                return y + 2;
+            }
+        }
+    }
+    varied
 }
 
 fn coarse_match(old: &[RowKey], new: &[RowKey], changes: &[usize]) -> bool {
@@ -102,11 +118,12 @@ fn reliable_overlap(old: &[RowKey], new: &[RowKey]) -> bool {
     matched * 100 >= old.len() * 3 * 94
         && aligned_transitions >= 6
         && aligned_transitions * 100 >= transitions * 80
-        && enough_detail(
+        && detail_prefix_len(
             old.iter()
                 .zip(new)
                 .filter_map(|(a, b)| (a == b).then_some(*a)),
         )
+        .is_some()
 }
 
 impl Stitcher {
@@ -162,9 +179,10 @@ impl Stitcher {
             .map_err(|_| "没有足够内存匹配长截图")?;
         hashes.extend(data.chunks_exact(stride).map(fingerprint));
         let mut found = None;
-        // Require at least a quarter of the viewport and several distinct lines. Search
-        // both known content and the tail before accepting a unique pixel-exact seam.
+        // Search both known content and the tail. Only overlaps with visual
+        // detail can compete for a unique pixel-exact seam.
         let min_overlap = (height / 4).max(12);
+        let exact_detail = exact_detail_prefix_len(&hashes);
         let end = if down {
             self.rows.len().saturating_sub(min_overlap)
         } else {
@@ -176,7 +194,7 @@ impl Stitcher {
                 break;
             }
             let overlap = (self.rows.len() - offset).min(height);
-            if overlap == 0
+            if overlap < exact_detail
                 || self.rows[offset] != hashes[0]
                 || self.rows[offset + overlap - 1] != hashes[overlap - 1]
                 || self.rows[offset + overlap / 2] != hashes[overlap / 2]
@@ -230,9 +248,6 @@ impl Stitcher {
         if overlap == height {
             self.viewed = offset;
             return Ok(Step::Known);
-        }
-        if !enough_detail(hashes[..overlap].iter().copied()) {
-            return Ok(Step::Unmatched);
         }
         let max_rows = MAX_HEIGHT.min(MAX_BYTES / stride);
         let new_rows = height - overlap;
@@ -409,6 +424,83 @@ mod tests {
             Step::Unmatched
         );
         assert_eq!(stitch.image().bounds().bottom, 200);
+    }
+
+    #[test]
+    fn exact_content_match_survives_competing_blank_overlaps() {
+        let view = |top, height| {
+            let mut image = fixture(1057, top, height);
+            let stride = image.stride() as usize;
+            for (y, row) in image.pixels_mut().chunks_exact_mut(stride).enumerate() {
+                let document_y = top + y as i32;
+                if !(185..231).contains(&document_y) && document_y != 370 {
+                    row.fill(250);
+                }
+            }
+            image
+        };
+        let mut stitch = Stitcher::new(view(0, 362)).unwrap();
+        assert_eq!(stitch.accept(&view(60, 362), true).unwrap(), Step::Added);
+        assert_eq!(stitch.viewport(), (60, 362));
+        assert_eq!(stitch.image().pixels(), view(0, 422).pixels());
+    }
+
+    #[test]
+    fn exact_sparse_band_aligns_but_blank_and_repeated_bands_do_not() {
+        let view = |top, height, repeated| {
+            let mut image = fixture(1057, top, height);
+            let stride = image.stride() as usize;
+            for (y, row) in image.pixels_mut().chunks_exact_mut(stride).enumerate() {
+                let document_y = top + y as i32;
+                row.fill(250);
+                if (92..96).contains(&document_y)
+                    || (repeated
+                        && ((192..196).contains(&document_y) || (292..296).contains(&document_y)))
+                    || (375..382).contains(&document_y)
+                {
+                    row[100 * 4..680 * 4].fill(60);
+                }
+            }
+            image
+        };
+        let mut stitch = Stitcher::new(view(0, 362, false)).unwrap();
+        assert_eq!(
+            stitch.accept(&view(16, 362, false), true).unwrap(),
+            Step::Added
+        );
+        assert_eq!(stitch.image().pixels(), view(0, 378, false).pixels());
+        assert_eq!(
+            stitch.accept(&view(0, 362, false), false).unwrap(),
+            Step::Known
+        );
+        assert_eq!(stitch.viewport(), (0, 362));
+
+        let mut repeated = Stitcher::new(view(0, 362, true)).unwrap();
+        assert_eq!(
+            repeated.accept(&view(16, 362, true), true).unwrap(),
+            Step::Unmatched
+        );
+        assert_eq!(repeated.image().pixels(), view(0, 362, true).pixels());
+
+        let mut blank = Stitcher::new(view(400, 362, false)).unwrap();
+        assert_eq!(
+            blank.accept(&view(416, 362, false), true).unwrap(),
+            Step::Known
+        );
+        assert_eq!(blank.viewport(), (0, 362));
+        let mut past_blank = view(416, 362, false);
+        past_blank
+            .pixels_mut()
+            .chunks_exact_mut(1057 * 4)
+            .last()
+            .unwrap()
+            .fill(60);
+        assert_eq!(blank.accept(&past_blank, true).unwrap(), Step::Unmatched);
+        assert_eq!(
+            blank.accept(&view(360, 362, false), false).unwrap(),
+            Step::Unmatched
+        );
+        assert_eq!(blank.image().pixels(), view(400, 362, false).pixels());
     }
 
     #[test]

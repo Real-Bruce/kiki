@@ -1,14 +1,20 @@
 # 当前进度
 
-更新时间：2026-11-23。当前源码 **v1.0.21**（[VERSION](../VERSION)）。[按模块阅读](README.md) · [实施历史](IMPLEMENTATION_HISTORY.md) · [验证记录](validation/README.md)
+更新时间：2026-11-23。当前源码 **v1.0.22**（[VERSION](../VERSION)）。[按模块阅读](README.md) · [实施历史](IMPLEMENTATION_HISTORY.md) · [验证记录](validation/README.md)
 
 ## 当前状态与下一步
 
 F01–F12 已实现并按下表记录放行；已实现能力不因环境待验而重新搭建。v1.0.11 完成贴图菜单和悬停工具条优化，已在单屏 125% 下验证浅深界面、缩放及保存，并完成正式 ZIP 的解压启动与框选贴图。详见 [贴图界面验证](validation/pinned/pinned-ui-v1.0.11.md)。
 
-1. 优先排查 IDE 中 README 图片区长截图暂停。以实际拼接器重放时，向下 16 px、重叠 346 行的唯一精确匹配因细节不足被拒。下一步验证可定位的接缝并在 IDE 重测，见[重放数据与修复交接](validation/long-capture/readme-seam-investigation.md)。Codex 内置浏览器 Daily 漏段仍待独立定位，保留 [v1.0.3 失败样本](validation/long-capture/long-capture-v1.0.3.md)。
+1. 使用 v1.0.22 候选包在 IDE 的 README 预览中复测。已修正纯色候选导致误拒，并验证具有清晰横向边界的低纹理重叠可继续拼接。整屏留白仍可能暂停，可扩大选区重新捕获。Codex 内置浏览器 Daily 漏段仍待独立定位。 [本次验证](validation/long-capture/long-capture-v1.0.22.md) · [v1.0.3 失败样本](validation/long-capture/long-capture-v1.0.3.md)
 2. 补验普通框选后直接保存和复制至外部应用，以及贴图复制按钮；本次已补验框选后贴图和贴图保存。
 3. 按下方环境遗留补齐实机矩阵；维护者指定任务优先于这些待验项。
+
+## v1.0.22 长截图接缝判断
+
+- 纯色重叠不参与有效接缝的唯一性判断。逐像素匹配可以用两处隔开的宽边界对齐低纹理区域，无法确定偏移时保留已拼接内容。
+- 默认和全特性串行套件各 86 项通过、6 项按需运行。另行通过 3 项 Release 原生采集、回滚和 PNG 验证，便携 ZIP 已解压核对。 [接受条件与实测范围](validation/long-capture/long-capture-v1.0.22.md)
+- 本地提交主题为 `fix(capture): validate exact seams before counting candidates`。候选包待 IDE 原场景复验后放行。
 
 ## 2026-11-18 设计与验证资料清理
 
