@@ -45,6 +45,7 @@
 - [long-capture-v1.0.4.md](long-capture/long-capture-v1.0.4.md)
 - [README 图片区接缝排查与离线重放](long-capture/readme-seam-investigation.md)
 - [v1.0.22 长截图候选验证](long-capture/long-capture-v1.0.22.md)
+- [多图 README 暂停位置、窗口捕获与独立窗格对照](long-capture/multi-image-v1.0.22.md)
 
 ## 输出与圆角
 
