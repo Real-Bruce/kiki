@@ -41,6 +41,6 @@
 
 ## 真实界面
 
-本次附件未包含本模块独立操作或输出样张。历史证据见以上报告；不以设计稿替代实拍。[当前图库](../screenshots/README.md)
+v1.0.24 实拍记录了滚动前后的同一块屏幕区域。框外行号在半透明遮罩下随正文移动，原选区保持清晰。报告附有导出的完整 PNG。 [滚动实拍与成图](../validation/long-capture/long-capture-v1.0.24.md)
 
 相关模块：[标注与参数](annotation.md) · [取色](color-picker.md) · [输出与圆角](output.md)

@@ -1591,7 +1591,7 @@ fn start_long_if_requested(hwnd: HWND, pointer: *mut State) -> bool {
             right: output.right,
             ..area
         };
-        match LongCapture::start(hwnd, area, output, screen) {
+        match LongCapture::start(hwnd, area, output, screen, (*pointer).canvas.dark) {
             Ok(capture) if SetTimer(Some(hwnd), long_capture::TIMER, 40, None) != 0 => {
                 (*pointer).long_capture = Some(capture);
                 (*pointer).long_reselect = None;

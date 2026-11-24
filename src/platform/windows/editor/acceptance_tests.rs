@@ -961,7 +961,13 @@ fn verify_long_capture_toolbar(reference: bool) {
         })
         .expect("requires a real SDR display");
     println!("display={screen:?}");
-    let (source, _, reference_area, _) = native_document(&screen);
+    let (source, _, document_area, _) = native_document(&screen);
+    // Leave the document's line numbers outside the reference and output so
+    // their movement can be checked through the live dimming layer.
+    let reference_area = PixelRect {
+        left: document_area.left + 72,
+        ..document_area
+    };
     let area = if reference {
         PixelRect {
             top: reference_area.top + 48,
@@ -980,15 +986,24 @@ fn verify_long_capture_toolbar(reference: bool) {
     };
     #[cfg(feature = "diagnostics")]
     let save_evidence = |name: &str, image: &Image| {
-        if reference && let Some(folder) = std::env::var_os("KIKI_LONG_REFERENCE_EVIDENCE") {
+        if let Some(folder) = std::env::var_os("KIKI_LONG_REFERENCE_EVIDENCE") {
             let path = std::path::PathBuf::from(folder).join(name);
             output::encode::save(image, &path, OutputFormat::Png).unwrap();
         }
     };
     #[cfg(feature = "diagnostics")]
-    let source_pixels = desktop_capture().image.region(area).unwrap();
+    let source_document = desktop_capture().image.region(document_area).unwrap();
+    #[cfg(feature = "diagnostics")]
+    let source_pixels = source_document.region(area).unwrap();
     let bounds = screen.bounds;
-    let (preview, state) = capture_fixture(Image::new(bounds).unwrap(), vec![screen]);
+    let desktop = Image::new(bounds).unwrap();
+    #[cfg(feature = "diagnostics")]
+    let desktop = {
+        let mut desktop = desktop;
+        desktop.blit(&source_document);
+        desktop
+    };
+    let (preview, state) = capture_fixture(desktop, vec![screen]);
     let hwnd = preview.hwnd().unwrap();
     let center = POINT {
         x: area.left + 250,
@@ -996,7 +1011,7 @@ fn verify_long_capture_toolbar(reference: bool) {
     };
     // SAFETY: the test owns these native windows and dispatches messages on their UI thread.
     unsafe {
-        if reference && std::env::var_os("KIKI_LONG_REFERENCE_DARK").is_some() {
+        if std::env::var_os("KIKI_LONG_REFERENCE_DARK").is_some() {
             (*state).canvas.dark = true;
         }
         (*state).capture_tools[Tool::LongCapture.index().unwrap()] = true;
@@ -1042,10 +1057,6 @@ fn verify_long_capture_toolbar(reference: bool) {
             send_mouse(hwnd, bounds, WM_MOUSEMOVE, end);
             send_mouse(hwnd, bounds, WM_LBUTTONUP, end);
         }
-        assert_eq!(
-            (*state).long_capture.as_ref().map(|capture| capture.area),
-            Some(reference_area)
-        );
         assert_eq!((*state).selection.rect, Some(reference_area));
         assert_eq!(GetAncestor(WindowFromPoint(center), GA_ROOT), source.0);
         let capture = (*state).long_capture.as_ref().unwrap();
@@ -1074,7 +1085,7 @@ fn verify_long_capture_toolbar(reference: bool) {
             assert_eq!(capture.update.as_ref().unwrap().height, height);
             let finish = capture.panel.finish;
             #[cfg(feature = "diagnostics")]
-            {
+            let before = {
                 // Capture the desktop through WGC, just as a screen-sharing client
                 // would. The finish button must be visible in that capture.
                 let _ = UpdateWindow(hwnd);
@@ -1091,10 +1102,18 @@ fn verify_long_capture_toolbar(reference: bool) {
                     desktop.image.region(area).unwrap().pixels(),
                     source_pixels.pixels()
                 );
+                if reference {
+                    assert!(
+                        desktop.image.region(reference_area).unwrap().pixels()
+                            == source_document.region(reference_area).unwrap().pixels(),
+                        "matching must see clean source pixels across the reference bands"
+                    );
+                }
                 println!(
                     "desktop capture includes the control panel and preserves the source pixels"
                 );
-            }
+                desktop.image.region(document_area).unwrap()
+            };
             let start = Instant::now();
             route_test_wheel(point(center.x, center.y), -120);
             pump_until(|| {
@@ -1121,14 +1140,58 @@ fn verify_long_capture_toolbar(reference: bool) {
                 start.elapsed().as_secs_f64() * 1000.
             );
             #[cfg(feature = "diagnostics")]
-            if reference && std::env::var_os("KIKI_LONG_REFERENCE_EVIDENCE").is_some() {
+            {
                 let panel = (*state).long_capture.as_ref().unwrap().panel.bounds;
                 let _ = UpdateWindow(hwnd);
                 windows::Win32::Graphics::Dwm::DwmFlush().unwrap();
-                save_evidence(
-                    "reference-preview.png",
-                    &desktop_capture().image.region(panel).unwrap(),
+                let desktop = desktop_capture();
+                let after = desktop.image.region(document_area).unwrap();
+                if reference {
+                    save_evidence(
+                        "reference-preview.png",
+                        &desktop.image.region(panel).unwrap(),
+                    );
+                    save_evidence("reference-live-after.png", &after);
+                } else {
+                    save_evidence("live-before.png", &before);
+                    save_evidence("live-after.png", &after);
+                }
+                let displacement = i32::try_from(grown - height).unwrap();
+                let strip = rect(
+                    document_area.left + 2,
+                    document_area.top + 3,
+                    area.left - 4,
+                    document_area.bottom - displacement - 3,
                 );
+                let shifted = rect(
+                    strip.left,
+                    strip.top + displacement,
+                    strip.right,
+                    strip.bottom + displacement,
+                );
+                let masked = before.region(strip).unwrap();
+                let original = source_document.region(strip).unwrap();
+                let brightness = |image: &Image| {
+                    image
+                        .pixels()
+                        .chunks_exact(4)
+                        .map(|pixel| u64::from(pixel[2]))
+                        .sum::<u64>()
+                };
+                assert!(
+                    brightness(&masked) < brightness(&original) * 9 / 10,
+                    "the outer line numbers must be dimmed"
+                );
+                let scrolled = after.region(strip).unwrap();
+                assert!(
+                    scrolled.pixels() != masked.pixels(),
+                    "masked document froze"
+                );
+                assert!(
+                    scrolled.pixels() == before.region(shifted).unwrap().pixels(),
+                    "masked line numbers did not move with the source document"
+                );
+                println!("dimmed source strip scrolled by {displacement} pixels");
             }
             click(hwnd, bounds, point(finish.left + 2, finish.top + 2));
             pump_until(|| (*state).long_document.is_some());
@@ -1140,7 +1203,6 @@ fn verify_long_capture_toolbar(reference: bool) {
                     source_pixels.pixels(),
                     "the first captured viewport must exclude the previous screenshot UI"
                 );
-                save_evidence("reference-output.png", &image);
             }
             let path =
                 std::env::temp_dir().join(format!("kiki-long-toolbar-{}.png", std::process::id()));
@@ -1151,9 +1213,27 @@ fn verify_long_capture_toolbar(reference: bool) {
             begin_output(hwnd, state).unwrap();
             pump_until(|| !preview.is_open());
             let (size, pixels) = crate::platform::windows::output::encode::decode_file(&path);
+            #[cfg(feature = "diagnostics")]
+            if let Some(folder) = std::env::var_os("KIKI_LONG_REFERENCE_EVIDENCE") {
+                let name = if reference {
+                    "reference-output.png"
+                } else {
+                    "live-output.png"
+                };
+                std::fs::copy(&path, std::path::PathBuf::from(folder).join(name)).unwrap();
+            }
             std::fs::remove_file(path).unwrap();
             assert_eq!(size, (width, grown));
             assert_eq!(pixels, image.pixels());
+            #[cfg(feature = "diagnostics")]
+            {
+                windows::Win32::Graphics::Dwm::DwmFlush().unwrap();
+                let last_viewport = desktop_capture().image.region(area).unwrap();
+                assert!(
+                    pixels.ends_with(last_viewport.pixels()),
+                    "the PNG must contain the entire final viewport without the mask or panel"
+                );
+            }
             println!("saved_png={width}x{grown}, decoded pixels match the stitched image");
         }
         assert!(!preview.is_open());

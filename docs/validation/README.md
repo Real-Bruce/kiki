@@ -2,7 +2,7 @@
 
 以下报告保留原测试版本、环境、失败样本和复测结论。报告日期不代表当前源码再次通过；当前放行与缺项见 [PROGRESS.md](../PROGRESS.md)。[验收计划](../ACCEPTANCE_PLAN.md)定义用例，[模板](FEATURE_ACCEPTANCE_TEMPLATE.md)用于新报告。
 
-当前版本验收见 [v1.0.21 马赛克颗粒大小](settings/settings-mosaic-parameter-v1.0.21.md)。旧设置页通过样张可从对应报告中的 Git 历史链接查看，失败对照图保留在报告旁。
+当前版本验收见 [v1.0.24 长截图实时遮罩](long-capture/long-capture-v1.0.24.md)。旧设置页通过样张可从对应报告中的 Git 历史链接查看，失败对照图保留在报告旁。
 
 最新工程验证：[v1.0.17 便携包许可合并](engineering/package-v1.0.17.md)。
 
@@ -47,6 +47,7 @@
 - [v1.0.22 长截图候选验证](long-capture/long-capture-v1.0.22.md)
 - [多图 README 暂停位置、窗口捕获与独立窗格对照](long-capture/multi-image-v1.0.22.md)
 - [v1.0.23 长截图参考框验证](long-capture/long-capture-v1.0.23.md)
+- [v1.0.24 长截图实时遮罩验证](long-capture/long-capture-v1.0.24.md)
 
 ## 输出与圆角
 

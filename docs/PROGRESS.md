@@ -1,14 +1,20 @@
 # 当前进度
 
-更新时间：2026-11-23。当前源码 **v1.0.23**（[VERSION](../VERSION)）。[按模块阅读](README.md) · [实施历史](IMPLEMENTATION_HISTORY.md) · [验证记录](validation/README.md)
+更新时间：2026-11-24。当前源码 **v1.0.24**（[VERSION](../VERSION)）。[按模块阅读](README.md) · [实施历史](IMPLEMENTATION_HISTORY.md) · [验证记录](validation/README.md)
 
 ## 当前状态与下一步
 
 F01–F12 已实现并按下表记录放行；已实现能力不因环境待验而重新搭建。v1.0.11 完成贴图菜单和悬停工具条优化，已在单屏 125% 下验证浅深界面、缩放及保存，并完成正式 ZIP 的解压启动与框选贴图。详见 [贴图界面验证](validation/pinned/pinned-ui-v1.0.11.md)。
 
-1. 在 IDE 多图 README 中复测 v1.0.23 的参考框。按附件尺寸重放时，620 px 高参考框帮助原 180 px 高选区跨过留白，3120 行成图逐像素一致。已验证 Win32 原生入口及导出。Codex 内置浏览器 Daily 漏段仍待独立定位。 [v1.0.23 验证](validation/long-capture/long-capture-v1.0.23.md) · [多图排查](validation/long-capture/multi-image-v1.0.22.md) · [v1.0.3 失败样本](validation/long-capture/long-capture-v1.0.3.md)
+1. 用 v1.0.24 在附件中的 IDE 预览复测框内外滚动，并在多图 README 中继续复验短选区配合 Shift 参考框跨越留白的拼接效果。Codex 内置浏览器 Daily 漏段仍待独立定位。 [实时遮罩实拍](validation/long-capture/long-capture-v1.0.24.md) · [参考框验证](validation/long-capture/long-capture-v1.0.23.md) · [多图排查](validation/long-capture/multi-image-v1.0.22.md) · [Daily 失败样本](validation/long-capture/long-capture-v1.0.3.md)
 2. 补验普通框选后直接保存和复制至外部应用，以及贴图复制按钮；本次已补验框选后贴图和贴图保存。
 3. 按下方环境遗留补齐实机矩阵；维护者指定任务优先于这些待验项。
+
+## v1.0.24 长截图实时遮罩
+
+- 在原选区内滚动时，框内正文和框外遮罩下的同一页面同步移动。Windows 合成半透明遮罩，采集期间无需逐帧重画桌面背景。
+- 最终版在 Windows 11 单屏 200% 下验证。滚轮让框外行号与框内正文一起上移 39 px，普通及 Shift 入口在浅深主题下均通过，导出 PNG 与原文档逐像素核对一致。实拍及便携包记录见[验证报告](validation/long-capture/long-capture-v1.0.24.md)。
+- 本地提交主题为 `fix(capture): dim the live desktop during scrolling capture`。
 
 ## v1.0.23 长截图参考框
 

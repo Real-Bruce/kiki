@@ -1118,32 +1118,13 @@ impl Canvas {
             .as_ref()
             .map(|u| self.image_bitmap(&u.thumbnail))
             .transpose()?;
-        // SAFETY: the native window region exposes the shaded surround and preview panel.
-        // The opening shows the real scrolling application. All drawing stays on the UI thread.
+        // SAFETY: the HWND region clips this surface to the preview panel. The
+        // separate layered window shades the live desktop without frame copies.
         unsafe {
             self.target.BeginDraw();
             self.target
                 .Clear(Some(&tone(palette::background(self.dark), 1.)));
-            if let Some(bitmap) = self.bitmap.as_ref() {
-                self.target.DrawBitmap(
-                    bitmap,
-                    None,
-                    1.,
-                    D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
-                    None,
-                );
-            }
-            self.fill(
-                self.screen_local(capture.screen.bounds),
-                tone(palette::foreground(false), 0.50),
-            );
             let panel = &capture.panel;
-            self.outline(
-                self.screen_local(capture.area),
-                0.,
-                4.,
-                tone(palette::accent(self.dark), 1.),
-            );
             self.long_panel(panel, "长截图预览");
             let foreground = tone(palette::foreground(self.dark), 1.);
             let status = PixelRect {

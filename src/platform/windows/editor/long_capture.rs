@@ -1,3 +1,5 @@
+mod mask;
+
 use crate::core::{
     display::DisplayInfo,
     geometry::PixelRect,
@@ -15,7 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 use windows::{
-    Win32::{Foundation::*, Graphics::Gdi::*, UI::WindowsAndMessaging::*},
+    Win32::{Foundation::*, Graphics::Gdi::SetWindowRgn, UI::WindowsAndMessaging::*},
     core::{Error, Result},
 };
 
@@ -457,7 +459,6 @@ impl Drop for Worker {
 pub struct Capture {
     pub panel: Panel,
     pub screen: DisplayInfo,
-    pub area: PixelRect,
     pub browse: Option<f32>,
     target: Target,
     pub update: Option<Update>,
@@ -465,6 +466,7 @@ pub struct Capture {
     pub requested: bool,
     worker: Worker,
     hook: Option<Hook>,
+    _masks: mask::Masks,
 }
 
 impl Capture {
@@ -473,6 +475,7 @@ impl Capture {
         area: PixelRect,
         output: PixelRect,
         screen: DisplayInfo,
+        dark: bool,
     ) -> Result<Self> {
         // SAFETY: all calls operate on the preview's live top-level HWND. Region ownership
         // transfers to Windows only on success. Do not borrow preview state across these calls.
@@ -489,11 +492,9 @@ impl Capture {
                 } else {
                     None
                 };
-                let mut window = RECT::default();
-                GetWindowRect(hwnd, &mut window)?;
                 // Leave the overlay active for Esc and open the source for hit testing
                 // before adding the panel, which may cover the center of a narrow selection.
-                set_capture_mask(hwnd, window, screen.bounds, area, None)?;
+                mask::clip_preview(hwnd, None)?;
                 let target =
                     target_at(hwnd, output).ok_or_else(|| fail("请框选可滚动的正文窗口"))?;
                 if area != output {
@@ -513,7 +514,9 @@ impl Capture {
                         return Err(fail("参考区须位于同一正文窗口"));
                     }
                 }
-                set_capture_mask(hwnd, window, screen.bounds, area, Some(panel.bounds))?;
+                mask::clip_preview(hwnd, Some(panel.bounds))?;
+                let masks =
+                    mask::Masks::show(hwnd, screen.bounds, area, output, panel.bounds, dark)?;
                 let module = windows::Win32::System::LibraryLoader::GetModuleHandleW(None)?;
                 let hook = Hook(SetWindowsHookExW(
                     WH_MOUSE_LL,
@@ -529,7 +532,7 @@ impl Capture {
                     ready: false,
                 }));
                 let worker = Worker::start(
-                    excluded_window,
+                    [excluded_window, masks.excluded_window()],
                     CaptureRegions {
                         reference: area,
                         output,
@@ -540,7 +543,7 @@ impl Capture {
                 Ok(Self {
                     panel,
                     screen,
-                    area,
+                    _masks: masks,
                     browse: None,
                     target,
                     update: None,
@@ -638,68 +641,9 @@ impl Capture {
     }
 }
 
-fn set_capture_mask(
-    hwnd: HWND,
-    window: RECT,
-    screen: PixelRect,
-    area: PixelRect,
-    panel: Option<PixelRect>,
-) -> Result<()> {
-    let region = capture_mask(window, screen, area, panel)?;
-    // SAFETY: hwnd belongs to the UI thread. Windows owns region after success only.
-    unsafe {
-        if SetWindowRgn(hwnd, Some(region), false) == 0 {
-            let _ = DeleteObject(region.into());
-            return Err(fail("无法隔离长截图预览窗口"));
-        }
-    }
-    Ok(())
-}
-
-fn capture_mask(
-    window: RECT,
-    screen: PixelRect,
-    area: PixelRect,
-    panel: Option<PixelRect>,
-) -> Result<HRGN> {
-    // SAFETY: each temporary GDI region is deleted here. The caller owns the returned
-    // region until it transfers ownership to Windows with SetWindowRgn.
-    unsafe {
-        let create = |r: PixelRect| {
-            CreateRectRgn(
-                r.left - window.left,
-                r.top - window.top,
-                r.right - window.left,
-                r.bottom - window.top,
-            )
-        };
-        let region = create(screen);
-        let hole = create(area);
-        let valid = !region.is_invalid() && !hole.is_invalid();
-        let combined = valid
-            && CombineRgn(Some(region), Some(region), Some(hole), RGN_DIFF) != RGN_ERROR
-            && panel.is_none_or(|panel| {
-                let preview = create(panel);
-                if preview.is_invalid() {
-                    return false;
-                }
-                let added =
-                    CombineRgn(Some(region), Some(region), Some(preview), RGN_OR) != RGN_ERROR;
-                let _ = DeleteObject(preview.into());
-                added
-            });
-        let _ = DeleteObject(hole.into());
-        if !combined {
-            let _ = DeleteObject(region.into());
-            return Err(fail("无法建立长截图遮罩"));
-        }
-        Ok(region)
-    }
-}
-
 impl Worker {
     fn start(
-        excluded_window: Option<usize>,
+        excluded_windows: [Option<usize>; 2],
         regions: CaptureRegions,
         screen: DisplayInfo,
         target: Target,
@@ -715,7 +659,7 @@ impl Worker {
             .spawn(move || {
                 let _permit = permit;
                 if let Err(error) = run_capture(
-                    excluded_window,
+                    excluded_windows,
                     regions,
                     &screen,
                     target,
@@ -748,8 +692,8 @@ impl Worker {
     }
 }
 
-fn check_target(excluded_window: Option<usize>, target: Target) -> Result<()> {
-    if let Some(window) = excluded_window {
+fn check_target(excluded_windows: [Option<usize>; 2], target: Target) -> Result<()> {
+    for window in excluded_windows.into_iter().flatten() {
         verify_exclusion(window)?;
     }
     if !target.valid() {
@@ -759,7 +703,7 @@ fn check_target(excluded_window: Option<usize>, target: Target) -> Result<()> {
 }
 
 fn run_capture(
-    excluded_window: Option<usize>,
+    excluded_windows: [Option<usize>; 2],
     regions: CaptureRegions,
     screen: &DisplayInfo,
     target: Target,
@@ -773,7 +717,7 @@ fn run_capture(
         output,
     } = regions;
     let mut initial = Image::new(area).map_err(|e| fail(&e))?;
-    check_target(excluded_window, target)?;
+    check_target(excluded_windows, target)?;
     let first_stream = RegionStream::open(area, screen)?;
     let start = Instant::now();
     loop {
@@ -784,7 +728,7 @@ fn run_capture(
             return Err(fail("等待长截图首帧超时，请重新截图"));
         }
     }
-    check_target(excluded_window, target)?;
+    check_target(excluded_windows, target)?;
     let mut stitch = Stitcher::with_output(initial, output).map_err(|e| fail(&e))?;
     let mut frame = Image::new(area).map_err(|e| fail(&e))?;
     let mut stream = Some(first_stream);
@@ -857,11 +801,11 @@ fn run_capture(
         } else {
             Ok(())
         }
-        .and_then(|()| check_target(excluded_window, target))
+        .and_then(|()| check_target(excluded_windows, target))
         .and_then(|()| source.read(&mut frame, FRAME_WAIT, cancel))
         .and_then(|read| {
             if read {
-                check_target(excluded_window, target).map(|()| true)
+                check_target(excluded_windows, target).map(|()| true)
             } else {
                 Ok(false)
             }
@@ -966,6 +910,7 @@ fn make_update(stitch: &Stitcher, message: &'static str) -> Result<Update> {
 pub(in crate::platform::windows) mod tests {
     use super::*;
     use crate::core::{display::ColorMode, long_image::fixture};
+    use windows::Win32::Graphics::Gdi::*;
 
     fn screen() -> DisplayInfo {
         DisplayInfo {
@@ -980,51 +925,6 @@ pub(in crate::platform::windows) mod tests {
             rotation_degrees: 0,
             refresh_hz: 60,
             color: ColorMode::Sdr,
-        }
-    }
-
-    #[test]
-    fn mask_keeps_surround_and_panel_but_leaves_live_content_open() {
-        let screen = screen().bounds;
-        let window = RECT {
-            left: -2100,
-            top: -400,
-            right: 1920,
-            bottom: 1080,
-        };
-        let area = PixelRect {
-            left: -1700,
-            top: 220,
-            right: -100,
-            bottom: 700,
-        };
-        let panel = PixelRect {
-            left: -290,
-            top: 140,
-            right: -12,
-            bottom: 780,
-        };
-        let mask = capture_mask(window, screen, area, Some(panel)).unwrap();
-        let fullscreen = capture_mask(window, screen, screen, Some(panel)).unwrap();
-        // SAFETY: the test owns the native region and deletes it before returning.
-        unsafe {
-            let includes = |x, y| PtInRegion(mask, x - window.left, y - window.top).as_bool();
-            let in_fullscreen =
-                |x, y| PtInRegion(fullscreen, x - window.left, y - window.top).as_bool();
-            let results = [
-                includes(-1850, 500),
-                !includes(-1400, 500),
-                includes(-200, 500),
-                includes(-1701, 220),
-                !includes(-1700, 220),
-                !includes(500, 500),
-                !in_fullscreen(-1850, 500),
-                !in_fullscreen(-1400, 500),
-                in_fullscreen(-200, 500),
-            ];
-            let _ = DeleteObject(mask.into());
-            let _ = DeleteObject(fullscreen.into());
-            assert!(results.into_iter().all(|valid| valid));
         }
     }
 
@@ -1371,7 +1271,7 @@ pub(in crate::platform::windows) mod tests {
         };
         let start = |window: &NativeTestWindow, area| {
             Worker::start(
-                Some(owner.0.0 as usize),
+                [Some(owner.0.0 as usize), None],
                 CaptureRegions {
                     reference: area,
                     output: area,
