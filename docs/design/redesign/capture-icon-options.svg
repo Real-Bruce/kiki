@@ -6,9 +6,24 @@
     <symbol id="a-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 19.5 19.5 4.5 M10.5 4.5h9v9"/></symbol>
     <symbol id="a-pen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M3.4 17.8C5.7 17.8 6.8 6.2 10.3 6.2c3.8 0 1.9 11.4 5.2 11.4 2 0 3.5-3.5 5.1-3.5"/></symbol>
     <symbol id="a-text" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7V5h14v2 M12 5v14 M8.5 19h7"/></symbol>
-    <symbol id="a-mosaic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="6.5" height="6.5" rx="1.25"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.25"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.25"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.25"/></symbol>
+    <symbol id="a-mosaic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">
+      <g fill="currentColor" stroke="none">
+        <rect x="3.1" y="3.1" width="5.1" height="5.1" rx="1.15"/>
+        <rect x="15.8" y="3.1" width="5.1" height="5.1" rx="1.15"/>
+        <rect x="9.45" y="9.45" width="5.1" height="5.1" rx="1.15"/>
+        <rect x="3.1" y="15.8" width="5.1" height="5.1" rx="1.15"/>
+        <rect x="15.8" y="15.8" width="5.1" height="5.1" rx="1.15"/>
+      </g>
+      <rect x="10.275" y="3.925" width="3.45" height="3.45" rx="0.45"/>
+      <rect x="3.925" y="10.275" width="3.45" height="3.45" rx="0.45"/>
+      <rect x="16.625" y="10.275" width="3.45" height="3.45" rx="0.45"/>
+      <rect x="10.275" y="16.625" width="3.45" height="3.45" rx="0.45"/>
+    </symbol>
     <symbol id="a-number" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.7"/><path d="m9.7 10.1 2.6-2.4v8.6 M9.9 16.3h4.8"/></symbol>
-    <symbol id="a-long" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3.5H6A2.5 2.5 0 0 0 3.5 6v12A2.5 2.5 0 0 0 6 20.5h4 M16.5 4v16 M12.5 8l4-4 4 4m-8 8 4 4 4-4"/></symbol>
+    <symbol id="a-long" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3.5" y="3.5" width="10.2" height="17" rx="2.15"/>
+      <path d="M6.6 8.4h4M6.6 12.1h4M18.65 6v13.9m-2.95-2.95 2.95 2.95 2.95-2.95"/>
+    </symbol>
     <symbol id="a-picker" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="m12.9 6.4 2.5-2.5a2.8 2.8 0 0 1 4 4l-2.5 2.5 M11.4 5l7.2 7.2 M12.8 7.1 5 14.9c-.6.6-.9 1.3-1 2.1l-.5 3.5 3.5-.5c.8-.1 1.5-.4 2.1-1l7.8-7.8"/></symbol>
     <symbol id="a-undo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="m8.5 4.5-5 5 5 5 M3.5 9.5h11.2a5.2 5.2 0 0 1 0 10.4H12"/></symbol>
     <symbol id="a-pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="m12.4 4.5 1.2-1.2a1 1 0 0 1 1.4 0l5.7 5.7a1 1 0 0 1 0 1.4l-1.2 1.2-2.5-.4-4.2 4.2-.6 3.2-6.8-6.8 3.2-.6 4.2-4.2-.4-2.5Z M8.8 15.2l-5.2 5.2"/></symbol>
