@@ -1,0 +1,266 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="832" viewBox="0 0 1440 832" role="img" aria-labelledby="title description" lang="zh-CN">
+  <title id="title">kiki 截图工具条图标</title>
+  <desc id="description">圆角细线、几何线条和实心剪影三套图标，以及同尺寸的浅深工具条。</desc>
+  <defs>
+    <symbol id="a-rect" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.25" width="17" height="15.5" rx="2.7"/></symbol>
+    <symbol id="a-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 19.5 19.5 4.5 M10.5 4.5h9v9"/></symbol>
+    <symbol id="a-pen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M3.4 17.8C5.7 17.8 6.8 6.2 10.3 6.2c3.8 0 1.9 11.4 5.2 11.4 2 0 3.5-3.5 5.1-3.5"/></symbol>
+    <symbol id="a-text" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7V5h14v2 M12 5v14 M8.5 19h7"/></symbol>
+    <symbol id="a-mosaic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="6.5" height="6.5" rx="1.25"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.25"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.25"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.25"/></symbol>
+    <symbol id="a-number" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.7"/><path d="m9.7 10.1 2.6-2.4v8.6 M9.9 16.3h4.8"/></symbol>
+    <symbol id="a-long" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3.5H6A2.5 2.5 0 0 0 3.5 6v12A2.5 2.5 0 0 0 6 20.5h4 M16.5 4v16 M12.5 8l4-4 4 4m-8 8 4 4 4-4"/></symbol>
+    <symbol id="a-picker" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="m12.9 6.4 2.5-2.5a2.8 2.8 0 0 1 4 4l-2.5 2.5 M11.4 5l7.2 7.2 M12.8 7.1 5 14.9c-.6.6-.9 1.3-1 2.1l-.5 3.5 3.5-.5c.8-.1 1.5-.4 2.1-1l7.8-7.8"/></symbol>
+    <symbol id="a-undo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="m8.5 4.5-5 5 5 5 M3.5 9.5h11.2a5.2 5.2 0 0 1 0 10.4H12"/></symbol>
+    <symbol id="a-pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="m12.4 4.5 1.2-1.2a1 1 0 0 1 1.4 0l5.7 5.7a1 1 0 0 1 0 1.4l-1.2 1.2-2.5-.4-4.2 4.2-.6 3.2-6.8-6.8 3.2-.6 4.2-4.2-.4-2.5Z M8.8 15.2l-5.2 5.2"/></symbol>
+    <symbol id="a-save" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 3.5h10.7l4.3 4.3v10.7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2Z M7.5 3.5V9h8V3.5 M7.5 20.5v-6.4h9v6.4"/></symbol>
+    <symbol id="a-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3.5" width="12.5" height="12.5" rx="2.3"/><path d="M4.5 8.5a2 2 0 0 0-1 1.7v8.3a2 2 0 0 0 2 2h8.3a2 2 0 0 0 1.7-1"/></symbol>
+    <symbol id="a-cancel" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="m5.8 5.8 12.4 12.4m0-12.4L5.8 18.2"/></symbol>
+    <symbol id="a-more" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.35" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.35" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.35" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="b-rect" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.95" stroke-linecap="round" stroke-linejoin="round"><rect x="3.4" y="4.4" width="17.2" height="15.2" rx="0.8"/></symbol>
+    <symbol id="b-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.95" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 19.5 19 5 M10 5h9v9"/></symbol>
+    <symbol id="b-pen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.95" stroke-linecap="round" stroke-linejoin="round"><path d="M3.7 20.3l1.4-6.1L15.8 3.5l4.7 4.7L9.8 18.9l-6.1 1.4Z M13.5 5.8l4.7 4.7"/></symbol>
+    <symbol id="b-text" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.95" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 5h15 M12 5v14"/></symbol>
+    <symbol id="b-mosaic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.95" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="3" height="3" rx="0.3" fill="currentColor" stroke="none"/><rect x="10.5" y="4" width="3" height="3" rx="0.3" fill="currentColor" stroke="none"/><rect x="17" y="4" width="3" height="3" rx="0.3" fill="currentColor" stroke="none"/><rect x="4" y="10.5" width="3" height="3" rx="0.3" fill="currentColor" stroke="none"/><rect x="10.5" y="10.5" width="3" height="3" rx="0.3" fill="currentColor" stroke="none"/><rect x="17" y="10.5" width="3" height="3" rx="0.3" fill="currentColor" stroke="none"/><rect x="4" y="17" width="3" height="3" rx="0.3" fill="currentColor" stroke="none"/><rect x="10.5" y="17" width="3" height="3" rx="0.3" fill="currentColor" stroke="none"/><rect x="17" y="17" width="3" height="3" rx="0.3" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="b-number" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.95" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.3"/><path d="m10 9.7 2.5-2v8.7"/></symbol>
+    <symbol id="b-long" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.95" stroke-linecap="round" stroke-linejoin="round"><path d="M7.2 3.5H4.5v17h2.7m9.6-17h2.7v17h-2.7 M12 4.6v14.8M9 7.6l3-3 3 3m-6 8.8 3 3 3-3"/></symbol>
+    <symbol id="b-picker" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.95" stroke-linecap="round" stroke-linejoin="round"><path d="m12.5 6.7 3.9-3.9 4.8 4.8-3.9 3.9 M11.5 5.7l6.8 6.8 M12.2 8.4l-7.7 7.7v3.4h3.4l7.7-7.7 M4.5 19.5l-1.3 1.3"/></symbol>
+    <symbol id="b-undo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.95" stroke-linecap="round" stroke-linejoin="round"><path d="M8.2 5 3.5 9.7l4.7 4.7m-4.7-4.7h12.3a4.7 4.7 0 0 1 0 9.4h-3"/></symbol>
+    <symbol id="b-pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.95" stroke-linecap="round" stroke-linejoin="round"><path d="m13 3.3 7.7 7.7-3.8.2-4.7 4.7-1.1 2.4-5.4-5.4 2.4-1.1 4.7-4.7.2-3.8Z M8.4 15.6l-4.8 4.8"/></symbol>
+    <symbol id="b-save" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.95" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v11.3m-4.1-4.1 4.1 4.1 4.1-4.1 M3.6 14.7v5.6h16.8v-5.6"/></symbol>
+    <symbol id="b-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.95" stroke-linecap="round" stroke-linejoin="round"><rect x="8.2" y="3.7" width="12" height="12" rx="0.8"/><path d="M3.8 8.2v12h12"/></symbol>
+    <symbol id="b-cancel" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.95" stroke-linecap="round" stroke-linejoin="round"><path d="m5.8 5.8 12.4 12.4m0-12.4L5.8 18.2"/></symbol>
+    <symbol id="b-more" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.95" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.45" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.45" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.45" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="c-rect" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M5.5 3.5h13a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2Zm2 4v9h9v-9Z" fill-rule="evenodd"/></symbol>
+    <symbol id="c-arrow" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8.8 3.8h10a1.4 1.4 0 0 1 1.4 1.4v10a1.4 1.4 0 0 1-2.8 0V8.6L6 20a1.4 1.4 0 0 1-2-2L15.4 6.6H8.8a1.4 1.4 0 0 1 0-2.8Z"/></symbol>
+    <symbol id="c-pen" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="m4.7 14.9 9.9-9.9 4.4 4.4-9.9 9.9-5.3 1a.3.3 0 0 1-.4-.4l1.3-5Zm11-11 1-1a1.4 1.4 0 0 1 2 0L21 5.3a1.4 1.4 0 0 1 0 2l-1 1Z"/></symbol>
+    <symbol id="c-text" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M4.2 4h15.6v3.2h-6.2V17h3.6v3H6.8v-3h3.6V7.2H4.2Z"/></symbol>
+    <symbol id="c-mosaic" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="3.5" y="3.5" width="4.5" height="4.5" rx="0.6"/><rect x="9.75" y="3.5" width="4.5" height="4.5" rx="0.6"/><rect x="16" y="3.5" width="4.5" height="4.5" rx="0.6"/><rect x="3.5" y="9.75" width="4.5" height="4.5" rx="0.6"/><rect x="9.75" y="9.75" width="4.5" height="4.5" rx="0.6"/><rect x="16" y="9.75" width="4.5" height="4.5" rx="0.6"/><rect x="3.5" y="16" width="4.5" height="4.5" rx="0.6"/><rect x="9.75" y="16" width="4.5" height="4.5" rx="0.6"/><rect x="16" y="16" width="4.5" height="4.5" rx="0.6"/></symbol>
+    <symbol id="c-number" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.8a9.2 9.2 0 1 1 0 18.4 9.2 9.2 0 0 1 0-18.4ZM11.2 8.8l-1.5 1.3v2.1l1.6-1.3v4.6H9.7v1.8h5v-1.8h-1.3V7.2h-1.2Z" fill-rule="evenodd"/></symbol>
+    <symbol id="c-long" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M4.9 3.3h4.8v2.7H6.1v12h3.6v2.7H4.9a1.5 1.5 0 0 1-1.5-1.5V4.8a1.5 1.5 0 0 1 1.5-1.5Zm12 0 5 5-1.9 1.9-1.8-1.8v7.2l1.8-1.8 1.9 1.9-5 5-5-5 1.9-1.9 1.8 1.8V8.4l-1.8 1.8-1.9-1.9Z"/></symbol>
+    <symbol id="c-picker" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="m13.8 4.3 1.3-1.3a2.7 2.7 0 0 1 3.8 0L21 5.1a2.7 2.7 0 0 1 0 3.8l-1.3 1.3-5.9-5.9Zm-1 1 5.9 5.9-1.6 1.6-1-1-7.2 7.2a3.6 3.6 0 0 1-1.8.9l-3.7.7.7-3.7a3.6 3.6 0 0 1 .9-1.8l7.2-7.2-1-1Zm.1 5.1-5.4 5.4-.5 1.2 1.2-.5 5.4-5.4Z" fill-rule="evenodd"/></symbol>
+    <symbol id="c-undo" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M7.8 3.4 2.9 8.3a1.4 1.4 0 0 0 0 2l4.9 4.9 1.9-1.9-2.8-2.7h8a3.6 3.6 0 0 1 0 7.2h-3.2v2.8h3.2a6.4 6.4 0 0 0 0-12.8H7l2.7-2.5Z"/></symbol>
+    <symbol id="c-pin" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="m13.1 3.2 7.7 7.7a1 1 0 0 1-1 1.7l-2.7-.5-4 4-.8 2.7a.7.7 0 0 1-1.2.3l-2-2-3.6 3.6H3.2v-2.3l3.6-3.6-2-2a.7.7 0 0 1 .3-1.2l2.7-.8 4-4-.5-2.7a1 1 0 0 1 1.8-.9Z"/></symbol>
+    <symbol id="c-save" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M10.5 3.1h3v7.8l2.7-2.7 2.1 2.1-6.3 6.3-6.3-6.3 2.1-2.1 2.7 2.7ZM3.3 14.8h3v3.4h11.4v-3.4h3v4.9a1.5 1.5 0 0 1-1.5 1.5H4.8a1.5 1.5 0 0 1-1.5-1.5Z"/></symbol>
+    <symbol id="c-copy" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="8.3" y="3.3" width="12.3" height="12.3" rx="1.8"/><path d="M6.4 8.2v6.4a3 3 0 0 0 3 3h6.4v1.4a1.6 1.6 0 0 1-1.6 1.6H5a1.6 1.6 0 0 1-1.6-1.6V9.8A1.6 1.6 0 0 1 5 8.2Z"/></symbol>
+    <symbol id="c-cancel" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M5.2 5.2a1.5 1.5 0 0 1 2.1 0l4.7 4.7 4.7-4.7a1.5 1.5 0 0 1 2.1 2.1L14.1 12l4.7 4.7a1.5 1.5 0 0 1-2.1 2.1L12 14.1l-4.7 4.7a1.5 1.5 0 0 1-2.1-2.1L9.9 12 5.2 7.3a1.5 1.5 0 0 1 0-2.1Z"/></symbol>
+    <symbol id="c-more" viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/></symbol>
+  </defs>
+  <rect x="0" y="0" width="1440" height="832" rx="0" fill="#F1EEE8"/>
+  <g font-family="Segoe UI, Microsoft YaHei UI, Microsoft YaHei, sans-serif" fill="#25231F">
+    <text x="28" y="54" font-size="36" font-weight="650">kiki 截图工具条图标</text>
+    <text x="29" y="85" font-size="17" fill="#625D55">三套图标 · 24 × 24 网格 · 48 DIP 工具条演示全部工具开启</text>
+    <g aria-label="A  圆角细线">
+      <rect x="28" y="110" width="1384" height="222" rx="15" fill="#FAF9F6" stroke="#DFDBD2"/>
+      <text x="49" y="148" font-size="25" font-weight="650">A  圆角细线</text>
+      <text x="234" y="148" font-size="16" fill="#625D55">柔和转角、圆端笔画，保留手绘曲线和经典保存图形</text>
+      <use href="#a-rect" x="77" y="178" width="38" height="38" color="#25231F"/>
+      <text x="96" y="234" font-size="15" text-anchor="middle" fill="#625D55">矩形</text>
+      <use href="#a-arrow" x="173" y="178" width="38" height="38" color="#25231F"/>
+      <text x="192" y="234" font-size="15" text-anchor="middle" fill="#625D55">箭头</text>
+      <use href="#a-pen" x="269" y="178" width="38" height="38" color="#25231F"/>
+      <text x="288" y="234" font-size="15" text-anchor="middle" fill="#625D55">画笔</text>
+      <use href="#a-text" x="365" y="178" width="38" height="38" color="#25231F"/>
+      <text x="384" y="234" font-size="15" text-anchor="middle" fill="#625D55">文字</text>
+      <use href="#a-mosaic" x="461" y="178" width="38" height="38" color="#25231F"/>
+      <text x="480" y="234" font-size="15" text-anchor="middle" fill="#625D55">马赛克</text>
+      <use href="#a-number" x="557" y="178" width="38" height="38" color="#25231F"/>
+      <text x="576" y="234" font-size="15" text-anchor="middle" fill="#625D55">编号</text>
+      <use href="#a-long" x="653" y="178" width="38" height="38" color="#25231F"/>
+      <text x="672" y="234" font-size="15" text-anchor="middle" fill="#625D55">长截图</text>
+      <use href="#a-picker" x="749" y="178" width="38" height="38" color="#25231F"/>
+      <text x="768" y="234" font-size="15" text-anchor="middle" fill="#625D55">取色</text>
+      <use href="#a-undo" x="845" y="178" width="38" height="38" color="#25231F"/>
+      <text x="864" y="234" font-size="15" text-anchor="middle" fill="#625D55">撤销</text>
+      <use href="#a-pin" x="941" y="178" width="38" height="38" color="#25231F"/>
+      <text x="960" y="234" font-size="15" text-anchor="middle" fill="#625D55">贴图</text>
+      <use href="#a-save" x="1037" y="178" width="38" height="38" color="#25231F"/>
+      <text x="1056" y="234" font-size="15" text-anchor="middle" fill="#625D55">保存</text>
+      <use href="#a-copy" x="1133" y="178" width="38" height="38" color="#25231F"/>
+      <text x="1152" y="234" font-size="15" text-anchor="middle" fill="#625D55">复制</text>
+      <use href="#a-cancel" x="1229" y="178" width="38" height="38" color="#25231F"/>
+      <text x="1248" y="234" font-size="15" text-anchor="middle" fill="#625D55">取消</text>
+      <use href="#a-more" x="1325" y="178" width="38" height="38" color="#25231F"/>
+      <text x="1344" y="234" font-size="15" text-anchor="middle" fill="#625D55">更多</text>
+      <text x="42" y="263" font-size="15" fill="#625D55">浅色</text>
+      <text x="726" y="263" font-size="15" fill="#625D55">深色</text>
+      <rect x="42" y="272" width="672" height="48" rx="10" fill="#FAF9F6" stroke="#DFDBD2"/>
+      <use href="#a-rect" x="69" y="284" width="24" height="24" color="#25231F"/>
+      <rect x="106" y="278" width="42" height="36" rx="7" fill="#E3EBE5"/>
+      <use href="#a-arrow" x="115" y="284" width="24" height="24" color="#365F56"/>
+      <use href="#a-pen" x="161" y="284" width="24" height="24" color="#25231F"/>
+      <use href="#a-text" x="207" y="284" width="24" height="24" color="#25231F"/>
+      <use href="#a-mosaic" x="253" y="284" width="24" height="24" color="#25231F"/>
+      <use href="#a-number" x="299" y="284" width="24" height="24" color="#25231F"/>
+      <path d="M341 285v22" stroke="#DFDBD2"/>
+      <use href="#a-long" x="359" y="284" width="24" height="24" color="#25231F"/>
+      <use href="#a-picker" x="405" y="284" width="24" height="24" color="#25231F"/>
+      <use href="#a-undo" x="451" y="284" width="24" height="24" color="#969087"/>
+      <path d="M493 285v22" stroke="#DFDBD2"/>
+      <use href="#a-pin" x="511" y="284" width="24" height="24" color="#25231F"/>
+      <use href="#a-save" x="557" y="284" width="24" height="24" color="#25231F"/>
+      <use href="#a-copy" x="603" y="284" width="24" height="24" color="#25231F"/>
+      <path d="M645 285v22" stroke="#DFDBD2"/>
+      <use href="#a-cancel" x="663" y="284" width="24" height="24" color="#25231F"/>
+      <rect x="726" y="272" width="672" height="48" rx="10" fill="#232321" stroke="#49453F"/>
+      <use href="#a-rect" x="753" y="284" width="24" height="24" color="#F4F0E8"/>
+      <rect x="790" y="278" width="42" height="36" rx="7" fill="#34483E"/>
+      <use href="#a-arrow" x="799" y="284" width="24" height="24" color="#A0CEBB"/>
+      <use href="#a-pen" x="845" y="284" width="24" height="24" color="#F4F0E8"/>
+      <use href="#a-text" x="891" y="284" width="24" height="24" color="#F4F0E8"/>
+      <use href="#a-mosaic" x="937" y="284" width="24" height="24" color="#F4F0E8"/>
+      <use href="#a-number" x="983" y="284" width="24" height="24" color="#F4F0E8"/>
+      <path d="M1025 285v22" stroke="#49453F"/>
+      <use href="#a-long" x="1043" y="284" width="24" height="24" color="#F4F0E8"/>
+      <use href="#a-picker" x="1089" y="284" width="24" height="24" color="#F4F0E8"/>
+      <use href="#a-undo" x="1135" y="284" width="24" height="24" color="#8B847A"/>
+      <path d="M1177 285v22" stroke="#49453F"/>
+      <use href="#a-pin" x="1195" y="284" width="24" height="24" color="#F4F0E8"/>
+      <use href="#a-save" x="1241" y="284" width="24" height="24" color="#F4F0E8"/>
+      <use href="#a-copy" x="1287" y="284" width="24" height="24" color="#F4F0E8"/>
+      <path d="M1329 285v22" stroke="#49453F"/>
+      <use href="#a-cancel" x="1347" y="284" width="24" height="24" color="#F4F0E8"/>
+    </g>
+    <g aria-label="B  几何线条">
+      <rect x="28" y="348" width="1384" height="222" rx="15" fill="#FAF9F6" stroke="#DFDBD2"/>
+      <text x="49" y="386" font-size="25" font-weight="650">B  几何线条</text>
+      <text x="234" y="386" font-size="16" fill="#625D55">稍粗线条、方正轮廓，铅笔表示画笔，向下箭头和托盘表示保存</text>
+      <use href="#b-rect" x="77" y="416" width="38" height="38" color="#25231F"/>
+      <text x="96" y="472" font-size="15" text-anchor="middle" fill="#625D55">矩形</text>
+      <use href="#b-arrow" x="173" y="416" width="38" height="38" color="#25231F"/>
+      <text x="192" y="472" font-size="15" text-anchor="middle" fill="#625D55">箭头</text>
+      <use href="#b-pen" x="269" y="416" width="38" height="38" color="#25231F"/>
+      <text x="288" y="472" font-size="15" text-anchor="middle" fill="#625D55">画笔</text>
+      <use href="#b-text" x="365" y="416" width="38" height="38" color="#25231F"/>
+      <text x="384" y="472" font-size="15" text-anchor="middle" fill="#625D55">文字</text>
+      <use href="#b-mosaic" x="461" y="416" width="38" height="38" color="#25231F"/>
+      <text x="480" y="472" font-size="15" text-anchor="middle" fill="#625D55">马赛克</text>
+      <use href="#b-number" x="557" y="416" width="38" height="38" color="#25231F"/>
+      <text x="576" y="472" font-size="15" text-anchor="middle" fill="#625D55">编号</text>
+      <use href="#b-long" x="653" y="416" width="38" height="38" color="#25231F"/>
+      <text x="672" y="472" font-size="15" text-anchor="middle" fill="#625D55">长截图</text>
+      <use href="#b-picker" x="749" y="416" width="38" height="38" color="#25231F"/>
+      <text x="768" y="472" font-size="15" text-anchor="middle" fill="#625D55">取色</text>
+      <use href="#b-undo" x="845" y="416" width="38" height="38" color="#25231F"/>
+      <text x="864" y="472" font-size="15" text-anchor="middle" fill="#625D55">撤销</text>
+      <use href="#b-pin" x="941" y="416" width="38" height="38" color="#25231F"/>
+      <text x="960" y="472" font-size="15" text-anchor="middle" fill="#625D55">贴图</text>
+      <use href="#b-save" x="1037" y="416" width="38" height="38" color="#25231F"/>
+      <text x="1056" y="472" font-size="15" text-anchor="middle" fill="#625D55">保存</text>
+      <use href="#b-copy" x="1133" y="416" width="38" height="38" color="#25231F"/>
+      <text x="1152" y="472" font-size="15" text-anchor="middle" fill="#625D55">复制</text>
+      <use href="#b-cancel" x="1229" y="416" width="38" height="38" color="#25231F"/>
+      <text x="1248" y="472" font-size="15" text-anchor="middle" fill="#625D55">取消</text>
+      <use href="#b-more" x="1325" y="416" width="38" height="38" color="#25231F"/>
+      <text x="1344" y="472" font-size="15" text-anchor="middle" fill="#625D55">更多</text>
+      <text x="42" y="501" font-size="15" fill="#625D55">浅色</text>
+      <text x="726" y="501" font-size="15" fill="#625D55">深色</text>
+      <rect x="42" y="510" width="672" height="48" rx="10" fill="#FAF9F6" stroke="#DFDBD2"/>
+      <use href="#b-rect" x="69" y="522" width="24" height="24" color="#25231F"/>
+      <rect x="106" y="516" width="42" height="36" rx="7" fill="#E3EBE5"/>
+      <use href="#b-arrow" x="115" y="522" width="24" height="24" color="#365F56"/>
+      <use href="#b-pen" x="161" y="522" width="24" height="24" color="#25231F"/>
+      <use href="#b-text" x="207" y="522" width="24" height="24" color="#25231F"/>
+      <use href="#b-mosaic" x="253" y="522" width="24" height="24" color="#25231F"/>
+      <use href="#b-number" x="299" y="522" width="24" height="24" color="#25231F"/>
+      <path d="M341 523v22" stroke="#DFDBD2"/>
+      <use href="#b-long" x="359" y="522" width="24" height="24" color="#25231F"/>
+      <use href="#b-picker" x="405" y="522" width="24" height="24" color="#25231F"/>
+      <use href="#b-undo" x="451" y="522" width="24" height="24" color="#969087"/>
+      <path d="M493 523v22" stroke="#DFDBD2"/>
+      <use href="#b-pin" x="511" y="522" width="24" height="24" color="#25231F"/>
+      <use href="#b-save" x="557" y="522" width="24" height="24" color="#25231F"/>
+      <use href="#b-copy" x="603" y="522" width="24" height="24" color="#25231F"/>
+      <path d="M645 523v22" stroke="#DFDBD2"/>
+      <use href="#b-cancel" x="663" y="522" width="24" height="24" color="#25231F"/>
+      <rect x="726" y="510" width="672" height="48" rx="10" fill="#232321" stroke="#49453F"/>
+      <use href="#b-rect" x="753" y="522" width="24" height="24" color="#F4F0E8"/>
+      <rect x="790" y="516" width="42" height="36" rx="7" fill="#34483E"/>
+      <use href="#b-arrow" x="799" y="522" width="24" height="24" color="#A0CEBB"/>
+      <use href="#b-pen" x="845" y="522" width="24" height="24" color="#F4F0E8"/>
+      <use href="#b-text" x="891" y="522" width="24" height="24" color="#F4F0E8"/>
+      <use href="#b-mosaic" x="937" y="522" width="24" height="24" color="#F4F0E8"/>
+      <use href="#b-number" x="983" y="522" width="24" height="24" color="#F4F0E8"/>
+      <path d="M1025 523v22" stroke="#49453F"/>
+      <use href="#b-long" x="1043" y="522" width="24" height="24" color="#F4F0E8"/>
+      <use href="#b-picker" x="1089" y="522" width="24" height="24" color="#F4F0E8"/>
+      <use href="#b-undo" x="1135" y="522" width="24" height="24" color="#8B847A"/>
+      <path d="M1177 523v22" stroke="#49453F"/>
+      <use href="#b-pin" x="1195" y="522" width="24" height="24" color="#F4F0E8"/>
+      <use href="#b-save" x="1241" y="522" width="24" height="24" color="#F4F0E8"/>
+      <use href="#b-copy" x="1287" y="522" width="24" height="24" color="#F4F0E8"/>
+      <path d="M1329 523v22" stroke="#49453F"/>
+      <use href="#b-cancel" x="1347" y="522" width="24" height="24" color="#F4F0E8"/>
+    </g>
+    <g aria-label="C  实心剪影">
+      <rect x="28" y="586" width="1384" height="222" rx="15" fill="#FAF9F6" stroke="#DFDBD2"/>
+      <text x="49" y="624" font-size="25" font-weight="650">C  实心剪影</text>
+      <text x="234" y="624" font-size="16" fill="#625D55">用实面和镂空区分轮廓，小尺寸下视觉分量更足</text>
+      <use href="#c-rect" x="77" y="654" width="38" height="38" color="#25231F"/>
+      <text x="96" y="710" font-size="15" text-anchor="middle" fill="#625D55">矩形</text>
+      <use href="#c-arrow" x="173" y="654" width="38" height="38" color="#25231F"/>
+      <text x="192" y="710" font-size="15" text-anchor="middle" fill="#625D55">箭头</text>
+      <use href="#c-pen" x="269" y="654" width="38" height="38" color="#25231F"/>
+      <text x="288" y="710" font-size="15" text-anchor="middle" fill="#625D55">画笔</text>
+      <use href="#c-text" x="365" y="654" width="38" height="38" color="#25231F"/>
+      <text x="384" y="710" font-size="15" text-anchor="middle" fill="#625D55">文字</text>
+      <use href="#c-mosaic" x="461" y="654" width="38" height="38" color="#25231F"/>
+      <text x="480" y="710" font-size="15" text-anchor="middle" fill="#625D55">马赛克</text>
+      <use href="#c-number" x="557" y="654" width="38" height="38" color="#25231F"/>
+      <text x="576" y="710" font-size="15" text-anchor="middle" fill="#625D55">编号</text>
+      <use href="#c-long" x="653" y="654" width="38" height="38" color="#25231F"/>
+      <text x="672" y="710" font-size="15" text-anchor="middle" fill="#625D55">长截图</text>
+      <use href="#c-picker" x="749" y="654" width="38" height="38" color="#25231F"/>
+      <text x="768" y="710" font-size="15" text-anchor="middle" fill="#625D55">取色</text>
+      <use href="#c-undo" x="845" y="654" width="38" height="38" color="#25231F"/>
+      <text x="864" y="710" font-size="15" text-anchor="middle" fill="#625D55">撤销</text>
+      <use href="#c-pin" x="941" y="654" width="38" height="38" color="#25231F"/>
+      <text x="960" y="710" font-size="15" text-anchor="middle" fill="#625D55">贴图</text>
+      <use href="#c-save" x="1037" y="654" width="38" height="38" color="#25231F"/>
+      <text x="1056" y="710" font-size="15" text-anchor="middle" fill="#625D55">保存</text>
+      <use href="#c-copy" x="1133" y="654" width="38" height="38" color="#25231F"/>
+      <text x="1152" y="710" font-size="15" text-anchor="middle" fill="#625D55">复制</text>
+      <use href="#c-cancel" x="1229" y="654" width="38" height="38" color="#25231F"/>
+      <text x="1248" y="710" font-size="15" text-anchor="middle" fill="#625D55">取消</text>
+      <use href="#c-more" x="1325" y="654" width="38" height="38" color="#25231F"/>
+      <text x="1344" y="710" font-size="15" text-anchor="middle" fill="#625D55">更多</text>
+      <text x="42" y="739" font-size="15" fill="#625D55">浅色</text>
+      <text x="726" y="739" font-size="15" fill="#625D55">深色</text>
+      <rect x="42" y="748" width="672" height="48" rx="10" fill="#FAF9F6" stroke="#DFDBD2"/>
+      <use href="#c-rect" x="69" y="760" width="24" height="24" color="#25231F"/>
+      <rect x="106" y="754" width="42" height="36" rx="7" fill="#E3EBE5"/>
+      <use href="#c-arrow" x="115" y="760" width="24" height="24" color="#365F56"/>
+      <use href="#c-pen" x="161" y="760" width="24" height="24" color="#25231F"/>
+      <use href="#c-text" x="207" y="760" width="24" height="24" color="#25231F"/>
+      <use href="#c-mosaic" x="253" y="760" width="24" height="24" color="#25231F"/>
+      <use href="#c-number" x="299" y="760" width="24" height="24" color="#25231F"/>
+      <path d="M341 761v22" stroke="#DFDBD2"/>
+      <use href="#c-long" x="359" y="760" width="24" height="24" color="#25231F"/>
+      <use href="#c-picker" x="405" y="760" width="24" height="24" color="#25231F"/>
+      <use href="#c-undo" x="451" y="760" width="24" height="24" color="#969087"/>
+      <path d="M493 761v22" stroke="#DFDBD2"/>
+      <use href="#c-pin" x="511" y="760" width="24" height="24" color="#25231F"/>
+      <use href="#c-save" x="557" y="760" width="24" height="24" color="#25231F"/>
+      <use href="#c-copy" x="603" y="760" width="24" height="24" color="#25231F"/>
+      <path d="M645 761v22" stroke="#DFDBD2"/>
+      <use href="#c-cancel" x="663" y="760" width="24" height="24" color="#25231F"/>
+      <rect x="726" y="748" width="672" height="48" rx="10" fill="#232321" stroke="#49453F"/>
+      <use href="#c-rect" x="753" y="760" width="24" height="24" color="#F4F0E8"/>
+      <rect x="790" y="754" width="42" height="36" rx="7" fill="#34483E"/>
+      <use href="#c-arrow" x="799" y="760" width="24" height="24" color="#A0CEBB"/>
+      <use href="#c-pen" x="845" y="760" width="24" height="24" color="#F4F0E8"/>
+      <use href="#c-text" x="891" y="760" width="24" height="24" color="#F4F0E8"/>
+      <use href="#c-mosaic" x="937" y="760" width="24" height="24" color="#F4F0E8"/>
+      <use href="#c-number" x="983" y="760" width="24" height="24" color="#F4F0E8"/>
+      <path d="M1025 761v22" stroke="#49453F"/>
+      <use href="#c-long" x="1043" y="760" width="24" height="24" color="#F4F0E8"/>
+      <use href="#c-picker" x="1089" y="760" width="24" height="24" color="#F4F0E8"/>
+      <use href="#c-undo" x="1135" y="760" width="24" height="24" color="#8B847A"/>
+      <path d="M1177 761v22" stroke="#49453F"/>
+      <use href="#c-pin" x="1195" y="760" width="24" height="24" color="#F4F0E8"/>
+      <use href="#c-save" x="1241" y="760" width="24" height="24" color="#F4F0E8"/>
+      <use href="#c-copy" x="1287" y="760" width="24" height="24" color="#F4F0E8"/>
+      <path d="M1329 761v22" stroke="#49453F"/>
+      <use href="#c-cancel" x="1347" y="760" width="24" height="24" color="#F4F0E8"/>
+    </g>
+  </g>
+</svg>
