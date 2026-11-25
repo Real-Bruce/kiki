@@ -2,7 +2,7 @@
 
 以下报告保留原测试版本、环境、失败样本和复测结论。报告日期不代表当前源码再次通过；当前放行与缺项见 [PROGRESS.md](../PROGRESS.md)。[验收计划](../ACCEPTANCE_PLAN.md)定义用例，[模板](FEATURE_ACCEPTANCE_TEMPLATE.md)用于新报告。
 
-当前候选验证见 [v2.0.3 滑杆与圆角排版](settings/slider-corner-v2.0.3.md)，此前截图页记录见 [v2.0.2](settings/capture-refinement-v2.0.2.md)，导航及通用页记录见 [v2.0.1](settings/settings-refinement-v2.0.1.md)，整体升级记录见 [v2.0.0](settings/ui-upgrade-v2.0.0.md)。上一放行版本见 [v1.0.24 长截图实时遮罩](long-capture/long-capture-v1.0.24.md)。旧设置页通过样张可从对应报告中的 Git 历史链接查看，失败对照图保留在报告旁。
+当前候选检查及用户待复测项见 [v2.0.4 圆角比例与背景](settings/corner-balanced-v2.0.4.md)，前次实拍与滑杆修复见 [v2.0.3](settings/slider-corner-v2.0.3.md)，此前截图页记录见 [v2.0.2](settings/capture-refinement-v2.0.2.md)，导航及通用页记录见 [v2.0.1](settings/settings-refinement-v2.0.1.md)，整体升级记录见 [v2.0.0](settings/ui-upgrade-v2.0.0.md)。上一放行版本见 [v1.0.24 长截图实时遮罩](long-capture/long-capture-v1.0.24.md)。旧设置页通过样张可从对应报告中的 Git 历史链接查看，失败对照图保留在报告旁。
 
 最新工程验证：[v1.0.17 便携包许可合并](engineering/package-v1.0.17.md)。
 

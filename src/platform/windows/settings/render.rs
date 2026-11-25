@@ -391,34 +391,38 @@ impl Canvas {
     }
     pub fn corner_preview(
         &self,
-        x: f32,
-        y: f32,
+        [x, y, width, height]: [f32; 4],
         configured: u16,
         format: OutputFormat,
         dark: bool,
     ) {
-        if format == OutputFormat::Jpeg {
-            self.fill(x, y, 108., 72., 0xffffff);
-        } else {
-            let cell = 9.;
-            for row in 0..8 {
-                for column in 0..12 {
-                    self.fill(
-                        x + column as f32 * cell,
-                        y + row as f32 * cell,
-                        cell,
-                        cell,
-                        if (row + column) % 2 == 0 {
-                            divider(dark)
-                        } else {
-                            sidebar(dark)
-                        },
-                    );
-                }
+        let cell = 12.;
+        let rows = (height / cell).ceil() as i32;
+        let columns = (width / cell).ceil() as i32;
+        for row in 0..rows {
+            for column in 0..columns {
+                self.fill(
+                    x + column as f32 * cell,
+                    y + row as f32 * cell,
+                    cell.min(width - column as f32 * cell),
+                    cell.min(height - row as f32 * cell),
+                    if (row + column) % 2 == 0 {
+                        divider(dark)
+                    } else {
+                        sidebar(dark)
+                    },
+                );
             }
         }
-        // Represent a 768 × 512 px image at 108 × 72 DIP so the whole radius range is visible.
-        let radius = f32::from(configured) * 72. / 512.;
+        // Fit a 768 × 512 px image inside a persistent checkerboard border.
+        let image_width = (width - 24.).min((height - 24.) * 1.5).max(1.);
+        let image_height = image_width * 2. / 3.;
+        let x = x + (width - image_width) / 2.;
+        let y = y + (height - image_height) / 2.;
+        if format == OutputFormat::Jpeg {
+            self.fill(x, y, image_width, image_height, 0xffffff);
+        }
+        let radius = f32::from(configured) * image_height / 512.;
         // SAFETY: the settings window owns the brush and target during this paint.
         unsafe {
             self.brush.SetColor(&color(accent(dark)));
@@ -427,8 +431,8 @@ impl Canvas {
                     rect: D2D_RECT_F {
                         left: x,
                         top: y,
-                        right: x + 108.,
-                        bottom: y + 72.,
+                        right: x + image_width,
+                        bottom: y + image_height,
                     },
                     radiusX: radius,
                     radiusY: radius,

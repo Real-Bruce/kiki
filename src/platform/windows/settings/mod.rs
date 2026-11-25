@@ -1041,8 +1041,7 @@ fn paint(hwnd: HWND, dc: HDC, p: *mut State) -> Result<()> {
                 Item::Divider(y) => c.fill(x, *y as f32 - offset, w, 1., appearance::divider(dark)),
                 Item::CornerPreview(r) => {
                     c.corner_preview(
-                        r.x as f32,
-                        r.y as f32 - offset,
+                        [r.x as f32, r.y as f32 - offset, r.w as f32, r.h as f32],
                         config.corner_radius,
                         config.output_format,
                         dark,

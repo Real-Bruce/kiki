@@ -179,14 +179,28 @@ impl Page {
                 p.text("默认保存格式", 0, p.width - 126, Tone::Normal);
                 p.control(OUTPUT_FORMAT, p.width - 116, -8, 116, 36);
                 p.y += ROW;
-                p.items.push(Item::CornerPreview(p.rect(0, 0, 108, 72)));
-                let start = 132;
-                p.control(PARAMETER_SLIDER + 4, start, 22, p.width - start - 78, 28);
+                let split = p.width / 2;
+                let preview_width = split * 3 / 5;
+                let preview_height = preview_width * 2 / 3;
+                let row_height = preview_height + 32;
+                p.items.push(Item::CornerPreview(p.rect(
+                    (split - preview_width) / 2,
+                    16,
+                    preview_width,
+                    preview_height,
+                )));
+                p.control(
+                    PARAMETER_SLIDER + 4,
+                    split,
+                    (row_height - 28) / 2,
+                    p.width - split - 78,
+                    28,
+                );
                 p.items.push(Item::ParameterValue(
                     PARAMETER_SLIDER + 4,
-                    p.rect(p.width - 72, 26, 72, 22),
+                    p.rect(p.width - 72, (row_height - 20) / 2, 72, 22),
                 ));
-                p.y += 72;
+                p.y += row_height;
                 p.rule();
                 p.control(RESET_CAPTURE, 0, 0, 152, 36);
                 p.y += 36;
@@ -518,7 +532,9 @@ mod tests {
                 })
                 .unwrap();
             let corner_slider = bounds(&closed, PARAMETER_SLIDER + 4).unwrap();
-            assert!(corner.x + corner.w < corner_slider.x);
+            assert_eq!(corner_slider.x, closed.left + closed.width / 2);
+            assert_eq!(corner.w, (closed.width / 2) * 3 / 5);
+            assert!((2 * (corner.x - closed.left) + corner.w - closed.width / 2).abs() <= 1);
             assert_eq!(
                 corner.y + corner.h / 2,
                 corner_slider.y + corner_slider.h / 2
