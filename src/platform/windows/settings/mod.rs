@@ -598,7 +598,7 @@ fn font(dpi: u32, size: u32, face: PCWSTR) -> HFONT {
 fn parameter_label(parameter: CaptureParameter, config: &Config) -> String {
     let value = parameter.value(config);
     if matches!(parameter, CaptureParameter::CornerRadius) && value == 0 {
-        "无（0 px）".into()
+        "无".into()
     } else {
         format!("{value} px")
     }
@@ -1453,30 +1453,23 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                     };
                     shapes.rounded(r, dip(12), fill);
                 }
-                let top = (r.top + r.bottom - dip(18)) / 2;
-                let square = RECT {
-                    left: r.left + dip(8),
-                    top,
-                    right: r.left + dip(26),
-                    bottom: top + dip(18),
-                };
-                if on {
-                    shapes.rounded(square, dip(8), accent);
-                    labels.push((
-                        state.icon_font,
-                        "\u{e73e}".into(),
-                        square,
-                        appearance::on_accent(dark),
-                        DT_CENTER,
-                    ));
-                } else {
-                    shapes.focus_ring(square, dip(4) as f32, dpi_scale, appearance::muted(dark));
-                }
+                draw_toggle(
+                    shapes,
+                    RECT {
+                        left: r.right - dip(52),
+                        ..r
+                    },
+                    dip,
+                    dark,
+                    on,
+                    pressed,
+                );
                 labels.push((
                     state.font,
                     Tool::TOOLBAR[index].label().into(),
                     RECT {
-                        left: r.left + dip(68),
+                        left: r.left + dip(34),
+                        right: r.right - dip(64),
                         ..r
                     },
                     fg,
@@ -1484,8 +1477,7 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                 ));
                 shapes.icon(
                     RECT {
-                        left: r.left + dip(34),
-                        right: r.left + dip(62),
+                        right: r.left + dip(28),
                         ..r
                     },
                     crate::platform::windows::editor::toolbar::tool_button(Tool::TOOLBAR[index]),
@@ -2279,6 +2271,22 @@ mod tests {
             }
             assert!((*state).error.is_none());
             assert_eq!(preferences::current().corner_radius, 256);
+            assert_eq!(
+                parameter_label(CaptureParameter::CornerRadius, &preferences::current()),
+                "256 px"
+            );
+            let corner_slider = GetDlgItem(Some(hwnd), i32::from(PARAMETER_SLIDER + 4)).unwrap();
+            SendMessageW(
+                corner_slider,
+                WM_KEYDOWN,
+                Some(WPARAM(VK_HOME.0 as usize)),
+                None,
+            );
+            assert_eq!(preferences::current().corner_radius, 0);
+            assert_eq!(
+                parameter_label(CaptureParameter::CornerRadius, &preferences::current()),
+                "无"
+            );
             assert_eq!(
                 (
                     preferences::current().color,

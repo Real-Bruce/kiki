@@ -145,17 +145,15 @@ impl Page {
                 p.row("关闭当前贴图", "Esc");
             }
             2 => {
-                p.heading("截图工具条");
+                p.heading("工具条");
                 let preview_height =
                     crate::platform::windows::editor::toolbar::BAR_HEIGHT as i32 + 8;
                 p.control(TOOLBAR_PREVIEW, 0, 0, p.width, preview_height);
                 p.y += preview_height + 12;
                 if tools_expanded {
-                    let cell = (p.width - 12) / 2;
-                    for index in 0..4 {
-                        p.control(CAPTURE_TOOL + index, 0, 0, cell, 34);
-                        p.control(CAPTURE_TOOL + index + 4, cell + 12, 0, cell, 34);
-                        p.y += 36;
+                    for id in CAPTURE_TOOL_IDS {
+                        p.control(id, 0, -8, p.width, 36);
+                        p.y += ROW;
                     }
                     p.rule();
                 }
@@ -174,7 +172,7 @@ impl Page {
                     (6, CaptureParameter::SequenceSize),
                 ] {
                     if parameter_visible(parameter, cfg) {
-                        p.parameter_row(index, parameter);
+                        p.parameter_row(index);
                     }
                 }
                 p.divider();
@@ -182,7 +180,7 @@ impl Page {
                 p.text("默认保存格式", 0, p.width - 126, Tone::Normal);
                 p.control(OUTPUT_FORMAT, p.width - 116, -8, 116, 36);
                 p.y += ROW;
-                p.parameter_row(4, CaptureParameter::CornerRadius);
+                p.parameter_row(4);
                 p.y += 4;
                 p.items.push(Item::CornerPreview(p.rect(0, 0, 108, 72)));
                 p.y += 12;
@@ -339,7 +337,7 @@ impl Page {
         self.y += ROW;
     }
 
-    fn parameter_row(&mut self, index: u16, parameter: CaptureParameter) {
+    fn parameter_row(&mut self, index: u16) {
         let start = (self.width - 360).max(132);
         self.text(
             PARAMETER_LABELS[usize::from(index)],
@@ -347,12 +345,6 @@ impl Page {
             start - 10,
             Tone::Normal,
         );
-        let (min, max) = parameter.bounds();
-        self.items.push(Item::Text(
-            format!("{min}–{max} px"),
-            self.rect(0, 20, start - 10, 18),
-            Tone::Muted,
-        ));
         self.control(
             PARAMETER_SLIDER + index,
             start,
@@ -536,9 +528,13 @@ mod tests {
             let preview = bounds(&open, TOOLBAR_PREVIEW).unwrap();
             assert_eq!(preview.w, open.width);
             assert_eq!(preview.y, bounds(&closed, TOOLBAR_PREVIEW).unwrap().y);
+            let mut previous_bottom = preview.y + preview.h;
             for id in CAPTURE_TOOL_IDS {
                 assert!(bounds(&closed, id).is_none());
-                assert!(bounds(&open, id).unwrap().y >= preview.y + preview.h);
+                let row = bounds(&open, id).unwrap();
+                assert_eq!((row.x, row.w, row.h), (open.left, open.width, 36));
+                assert!(row.y >= previous_bottom);
+                previous_bottom = row.y + row.h;
             }
             for index in 0..=5 {
                 let id = PARAMETER_SLIDER + index;

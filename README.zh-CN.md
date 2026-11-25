@@ -53,7 +53,7 @@
 
 选择工具条显示的工具，调整默认标注样式。
 
-![截图设置：默认标注样式与圆角滑杆](docs/screenshots/settings-refinement-v2.0.1/capture-light.jpg)
+![截图设置：默认标注样式与圆角滑杆](docs/screenshots/capture-refinement-v2.0.2/capture-light.jpg)
 
 ### 贴图
 

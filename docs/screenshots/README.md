@@ -1,5 +1,15 @@
 # 当前界面与功能面板
 
+## v2.0.2 截图设置修订
+
+2026-11-25，[本轮目录](capture-refinement-v2.0.2/)来自真实 Windows 11 `26300.9974`、200% 的 MSVC x64 Release diagnostics；JPEG 为工具输出的逻辑尺寸，约 949×815。工具开关按整行排列，参数范围描述移除，零圆角仅显示「无」。浅深工具列表、样式参数与圆角均已检查，详细范围见[验证报告](../validation/settings/capture-refinement-v2.0.2.md)。
+
+![截图设置浅色](capture-refinement-v2.0.2/capture-light.jpg)
+
+![整行工具开关深色](capture-refinement-v2.0.2/tools-dark.jpg)
+
+![圆角为零的浅色显示](capture-refinement-v2.0.2/corners-light.jpg)
+
 ## v2.0.1 通用页与导航修订
 
 2026-11-25，Windows 11 `26300.9974`、200%（窗口 DPI 192），[本轮目录](settings-refinement-v2.0.1/)中的浅深通用页来自 MSVC x64 Release diagnostics；浅色快捷键、截图、贴图和外观页来自正式 ZIP 解压后的普通 Release，保留用户自定义参数。工具按逻辑坐标输出 JPEG。通用页删除开始截图分组和指定托盘提示，自启修复按钮与开关分开；导航使用用户提供的键盘结构与交叉裁切线。详细构建和范围见[本轮验证](../validation/settings/settings-refinement-v2.0.1.md)。下方 v2.0.0 图保留历史版本。
