@@ -24,6 +24,7 @@
 | --- | --- |
 | [产品规格](PRODUCT_SPEC.md) | 产品边界、输出语义与性能目标 |
 | [视觉与交互规范](DESIGN_SPEC.md) | 已批准视觉方向及最新交互约束 |
+| [界面与图标升级方案](design/redesign/UPGRADE_PLAN.md) | 已选 B 布局、当前主题与最终 A 图标，U1–U4 实施和验收安排 |
 | [功能开发方案](FEATURE_PLAN.md) | F01–F12 的行为、默认值、接入和配置迁移 |
 | [实施计划](IMPLEMENTATION_PLAN.md) | P0–P8 原始实施基线与工程原则 |
 | [验收计划](ACCEPTANCE_PLAN.md) | 用例定义、环境矩阵和放行条件 |

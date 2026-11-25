@@ -6,9 +6,10 @@
 
 F01–F12 已实现并按下表记录放行；已实现能力不因环境待验而重新搭建。v1.0.11 完成贴图菜单和悬停工具条优化，已在单屏 125% 下验证浅深界面、缩放及保存，并完成正式 ZIP 的解压启动与框选贴图。详见 [贴图界面验证](validation/pinned/pinned-ui-v1.0.11.md)。
 
-1. 用 v1.0.24 在附件中的 IDE 预览复测框内外滚动，并在多图 README 中继续复验短选区配合 Shift 参考框跨越留白的拼接效果。Codex 内置浏览器 Daily 漏段仍待独立定位。 [实时遮罩实拍](validation/long-capture/long-capture-v1.0.24.md) · [参考框验证](validation/long-capture/long-capture-v1.0.23.md) · [多图排查](validation/long-capture/multi-image-v1.0.22.md) · [Daily 失败样本](validation/long-capture/long-capture-v1.0.3.md)
-2. 补验普通框选后直接保存和复制至外部应用，以及贴图复制按钮；本次已补验框选后贴图和贴图保存。
-3. 按下方环境遗留补齐实机矩阵；维护者指定任务优先于这些待验项。
+1. 用户已确认 B 版布局、当前主题和最终 A 版图标；已整理[整体升级方案](design/redesign/UPGRADE_PLAN.md)，下一实施阶段为 U1 共享图标与控件基础，再落地截图设置页及其余界面。当前仅完成方案准备，应用仍为 v1.0.24。
+2. 用 v1.0.24 在附件中的 IDE 预览复测框内外滚动，并在多图 README 中继续复验短选区配合 Shift 参考框跨越留白的拼接效果。Codex 内置浏览器 Daily 漏段仍待独立定位。 [实时遮罩实拍](validation/long-capture/long-capture-v1.0.24.md) · [参考框验证](validation/long-capture/long-capture-v1.0.23.md) · [多图排查](validation/long-capture/multi-image-v1.0.22.md) · [Daily 失败样本](validation/long-capture/long-capture-v1.0.3.md)
+3. 补验普通框选后直接保存和复制至外部应用，以及贴图复制按钮；本次已补验框选后贴图和贴图保存。
+4. 按下方环境遗留补齐实机矩阵；维护者指定任务优先于这些待验项。
 
 ## 2026-11-24 至 2026-11-25 界面设计评审
 
@@ -17,7 +18,7 @@ F01–F12 已实现并按下表记录放行；已实现能力不因环境待验�
 - 截图工具条新增圆角细线、几何线条和实心剪影三套图标设计。已目视核对浅深工具条及全部工具顺序。本地提交主题为 `docs(design): compare three capture icon sets`。 [图标对照](design/redesign/README.md#截图工具条图标方案)
 - 用户选择 A 圆角细线。按复评反馈把马赛克改为一大五小的同线宽像素块，把长截图简化为取景框和居中向下箭头。已核对放大稿及浅深工具条。 [修订对照](design/redesign/capture-icon-options.png)
 - 用户继续反馈不喜欢上述修订，参考现有设计讨论后，新增独立的「规整像素块 + 双向下折线」提案，展示放大图、常态／选中状态和浅深完整工具条。已将 SVG 渲染为 2400×1640 PNG 并目视核对。仅设计资料变更，应用保持 v1.0.24；未运行新的应用 GUI 验收。本地提交主题为 `docs(design): preview pixel mosaic and double-chevron icons`。 [本轮提案](design/redesign/capture-icon-a-pixels-chevrons.png)
-- 下一步为用户评审本轮两枚图标的功能表达与整体协调性，确认后再处理原生控件实现与输出验收。
+- 用户明确喜欢并选中本轮最终图标。已整理整体升级方案，统一六页设置、截图工具条和配套浮层的布局、颜色、图标、状态及 U1–U4 实施安排；更新视觉规范和索引，消除旧无卡片排版及马赛克空心轮廓要求的冲突。已核对选中设计图、源码入口、文档引用及 diff；未修改应用或运行新一轮 GUI／性能验收。本地提交主题为 `docs(design): define approved UI and icon upgrade plan`。下一步按整体方案开始 U1，无需再次选择主设计方向。
 
 ## v1.0.24 长截图实时遮罩
 

@@ -6,6 +6,8 @@
 
 配套资料：[设计草图索引](design/next/README.md)、[验收计划](ACCEPTANCE_PLAN.md)、[验收记录模板](validation/FEATURE_ACCEPTANCE_TEMPLATE.md)。草图为方案示意，不得作为真实运行或验收截图。
 
+2026-11-25 已确认的界面与图标升级按[整体升级方案](design/redesign/UPGRADE_PLAN.md)实施，复用 F01–F12 已有能力；新的分组面板及最终图标优先于本文早期视觉描述，功能行为与默认值继续适用。
+
 ## 1. 已确认范围与实施约定
 
 - 保持 Rust 2024、固定 Rust 1.88.0、windows-rs、Win32/Direct2D/DirectWrite/WIC 和 Windows 11 x64 ZIP 交付。复用已有工程，不引入 WebView 或其他 GUI 框架。
