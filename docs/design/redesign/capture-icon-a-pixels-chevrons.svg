@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="820" viewBox="0 0 1200 820"><title>kiki A 版图标修订：规整像素与双向下折线</title><defs><symbol id="a-rect" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.25" width="17" height="15.5" rx="2.7"/></symbol>
+<symbol id="a-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 19.5 19.5 4.5 M10.5 4.5h9v9"/></symbol>
+<symbol id="a-pen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M3.4 17.8C5.7 17.8 6.8 6.2 10.3 6.2c3.8 0 1.9 11.4 5.2 11.4 2 0 3.5-3.5 5.1-3.5"/></symbol>
+<symbol id="a-text" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7V5h14v2 M12 5v14 M8.5 19h7"/></symbol>
+<symbol id="a-mosaic" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="5" height="5" rx=".35" opacity=".9"/><rect x="9.5" y="4" width="5" height="5" rx=".35" opacity=".32"/><rect x="15" y="4" width="5" height="5" rx=".35" opacity=".9"/><rect x="4" y="9.5" width="5" height="5" rx=".35" opacity=".32"/><rect x="9.5" y="9.5" width="5" height="5" rx=".35" opacity=".9"/><rect x="15" y="9.5" width="5" height="5" rx=".35" opacity=".32"/><rect x="4" y="15" width="5" height="5" rx=".35" opacity=".9"/><rect x="9.5" y="15" width="5" height="5" rx=".35" opacity=".32"/><rect x="15" y="15" width="5" height="5" rx=".35" opacity=".9"/></symbol>
+<symbol id="a-number" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.7"/><path d="m9.7 10.1 2.6-2.4v8.6 M9.9 16.3h4.8"/></symbol>
+<symbol id="a-long" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="m6.5 6.5 5.5 5.5 5.5-5.5 M6.5 13l5.5 5.5 5.5-5.5"/></symbol>
+<symbol id="a-picker" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="m12.9 6.4 2.5-2.5a2.8 2.8 0 0 1 4 4l-2.5 2.5 M11.4 5l7.2 7.2 M12.8 7.1 5 14.9c-.6.6-.9 1.3-1 2.1l-.5 3.5 3.5-.5c.8-.1 1.5-.4 2.1-1l7.8-7.8"/></symbol>
+<symbol id="a-undo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="m8.5 4.5-5 5 5 5 M3.5 9.5h11.2a5.2 5.2 0 0 1 0 10.4H12"/></symbol>
+<symbol id="a-pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="m12.4 4.5 1.2-1.2a1 1 0 0 1 1.4 0l5.7 5.7a1 1 0 0 1 0 1.4l-1.2 1.2-2.5-.4-4.2 4.2-.6 3.2-6.8-6.8 3.2-.6 4.2-4.2-.4-2.5Z M8.8 15.2l-5.2 5.2"/></symbol>
+<symbol id="a-save" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 3.5h10.7l4.3 4.3v10.7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2Z M7.5 3.5V9h8V3.5 M7.5 20.5v-6.4h9v6.4"/></symbol>
+<symbol id="a-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3.5" width="12.5" height="12.5" rx="2.3"/><path d="M4.5 8.5a2 2 0 0 0-1 1.7v8.3a2 2 0 0 0 2 2h8.3a2 2 0 0 0 1.7-1"/></symbol>
+<symbol id="a-cancel" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="m5.8 5.8 12.4 12.4m0-12.4L5.8 18.2"/></symbol>
+<symbol id="a-more" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.35" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.35" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.35" fill="currentColor" stroke="none"/></symbol></defs>
+<rect x="0" y="0" width="1200" height="820" rx="0" fill="#F1EEE8" stroke="none"/>
+<g font-family="Microsoft YaHei UI, Microsoft YaHei, Segoe UI, sans-serif">
+<text x="48" y="57" font-size="29" fill="#25231F" font-weight="600">kiki / 图标精简提案</text>
+<text x="48" y="89" font-size="16" fill="#625D55" font-weight="400">A 圆角细线 · 当前松绿主题</text>
+<text x="1000" y="56" font-size="14" fill="#365F56" font-weight="400">设计评审稿</text>
+<rect x="48" y="120" width="540" height="244" rx="16" fill="#FAF9F6" stroke="#DFDBD2"/>
+<text x="76" y="159" font-size="20" fill="#25231F" font-weight="600">马赛克</text>
+<rect x="76" y="186" width="104" height="104" rx="14" fill="#E3EBE5" stroke="none"/>
+<use href="#a-mosaic" x="92" y="202" width="72" height="72" color="#365F56"/>
+<text x="209" y="211" font-size="19" fill="#25231F" font-weight="500">规整像素块</text>
+<text x="209" y="242" font-size="14" fill="#625D55" font-weight="400">等大方块，用明暗呈现像素纹理</text>
+<text x="209" y="269" font-size="14" fill="#625D55" font-weight="400">保持紧凑、完整的方形轮廓</text>
+<text x="76" y="336" font-size="13" fill="#625D55" font-weight="400">常态</text>
+<use href="#a-mosaic" x="122" y="316" width="24" height="24" color="#25231F"/>
+<text x="193" y="336" font-size="13" fill="#625D55" font-weight="400">选中</text>
+<rect x="237" y="310" width="36" height="36" rx="6" fill="#E3EBE5" stroke="none"/>
+<use href="#a-mosaic" x="243" y="316" width="24" height="24" color="#365F56"/>
+<rect x="612" y="120" width="540" height="244" rx="16" fill="#FAF9F6" stroke="#DFDBD2"/>
+<text x="640" y="159" font-size="20" fill="#25231F" font-weight="600">长截图</text>
+<rect x="640" y="186" width="104" height="104" rx="14" fill="#E3EBE5" stroke="none"/>
+<use href="#a-long" x="656" y="202" width="72" height="72" color="#365F56"/>
+<text x="773" y="211" font-size="19" fill="#25231F" font-weight="500">双向下折线</text>
+<text x="773" y="242" font-size="14" fill="#625D55" font-weight="400">两条圆头折线，表达继续向下</text>
+<text x="773" y="269" font-size="14" fill="#625D55" font-weight="400">去掉外框与文字细节</text>
+<text x="640" y="336" font-size="13" fill="#625D55" font-weight="400">常态</text>
+<use href="#a-long" x="686" y="316" width="24" height="24" color="#25231F"/>
+<text x="757" y="336" font-size="13" fill="#625D55" font-weight="400">选中</text>
+<rect x="801" y="310" width="36" height="36" rx="6" fill="#E3EBE5" stroke="none"/>
+<use href="#a-long" x="807" y="316" width="24" height="24" color="#365F56"/>
+<rect x="48" y="388" width="1104" height="176" rx="16" fill="#E9E6DF" stroke="none"/>
+<text x="76" y="422" font-size="17" fill="#365F56" font-weight="500">浅色工具条</text>
+<text x="886" y="422" font-size="13" fill="#625D55" font-weight="400">马赛克选中 · 全部工具开启</text>
+<g transform="translate(96 452) scale(1.5)">
+<rect x="0" y="0" width="672" height="48" rx="10" fill="#FAF9F6" stroke="#DFDBD2"/>
+<use href="#a-rect" x="24" y="12" width="24" height="24" color="#25231F"/>
+<use href="#a-arrow" x="70" y="12" width="24" height="24" color="#25231F"/>
+<use href="#a-pen" x="116" y="12" width="24" height="24" color="#25231F"/>
+<use href="#a-text" x="162" y="12" width="24" height="24" color="#25231F"/>
+<rect x="199" y="6" width="42" height="36" rx="6" fill="#E3EBE5" stroke="none"/>
+<use href="#a-mosaic" x="208" y="12" width="24" height="24" color="#365F56"/>
+<use href="#a-number" x="254" y="12" width="24" height="24" color="#25231F"/>
+<path d="M293 13v22" stroke="#DFDBD2"/>
+<use href="#a-long" x="314" y="12" width="24" height="24" color="#25231F"/>
+<use href="#a-picker" x="360" y="12" width="24" height="24" color="#25231F"/>
+<use href="#a-undo" x="406" y="12" width="24" height="24" color="#99948C"/>
+<path d="M445 13v22" stroke="#DFDBD2"/>
+<use href="#a-pin" x="466" y="12" width="24" height="24" color="#25231F"/>
+<use href="#a-save" x="512" y="12" width="24" height="24" color="#25231F"/>
+<use href="#a-copy" x="558" y="12" width="24" height="24" color="#25231F"/>
+<path d="M597 13v22" stroke="#DFDBD2"/>
+<use href="#a-cancel" x="618" y="12" width="24" height="24" color="#25231F"/>
+</g>
+<rect x="48" y="580" width="1104" height="176" rx="16" fill="#1C1D1B" stroke="none"/>
+<text x="76" y="614" font-size="17" fill="#A0CEBB" font-weight="500">深色工具条</text>
+<text x="886" y="614" font-size="13" fill="#ABA69D" font-weight="400">马赛克选中 · 全部工具开启</text>
+<g transform="translate(96 644) scale(1.5)">
+<rect x="0" y="0" width="672" height="48" rx="10" fill="#232321" stroke="#49453F"/>
+<use href="#a-rect" x="24" y="12" width="24" height="24" color="#F4F0E8"/>
+<use href="#a-arrow" x="70" y="12" width="24" height="24" color="#F4F0E8"/>
+<use href="#a-pen" x="116" y="12" width="24" height="24" color="#F4F0E8"/>
+<use href="#a-text" x="162" y="12" width="24" height="24" color="#F4F0E8"/>
+<rect x="199" y="6" width="42" height="36" rx="6" fill="#34483E" stroke="none"/>
+<use href="#a-mosaic" x="208" y="12" width="24" height="24" color="#A0CEBB"/>
+<use href="#a-number" x="254" y="12" width="24" height="24" color="#F4F0E8"/>
+<path d="M293 13v22" stroke="#49453F"/>
+<use href="#a-long" x="314" y="12" width="24" height="24" color="#F4F0E8"/>
+<use href="#a-picker" x="360" y="12" width="24" height="24" color="#F4F0E8"/>
+<use href="#a-undo" x="406" y="12" width="24" height="24" color="#827D74"/>
+<path d="M445 13v22" stroke="#49453F"/>
+<use href="#a-pin" x="466" y="12" width="24" height="24" color="#F4F0E8"/>
+<use href="#a-save" x="512" y="12" width="24" height="24" color="#F4F0E8"/>
+<use href="#a-copy" x="558" y="12" width="24" height="24" color="#F4F0E8"/>
+<path d="M597 13v22" stroke="#49453F"/>
+<use href="#a-cancel" x="618" y="12" width="24" height="24" color="#F4F0E8"/>
+</g>
+<text x="48" y="794" font-size="13" fill="#625D55" font-weight="400">两枚图标局部放大；下方为相同布局的浅深工具条预览。</text>
+<text x="989" y="794" font-size="13" fill="#625D55" font-weight="400">kiki · 2026.11.25</text>
+</g></svg>

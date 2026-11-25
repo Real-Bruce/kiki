@@ -16,7 +16,8 @@ F01–F12 已实现并按下表记录放行；已实现能力不因环境待验�
 - 用户偏好 B 版排版，并要求沿用当前主题。已提供暖灰、松绿的 B 版评审图，目视核对分组和浅深工具条。 [配色修订](design/redesign/README.md#b-版排版与当前主题)
 - 截图工具条新增圆角细线、几何线条和实心剪影三套图标设计。已目视核对浅深工具条及全部工具顺序。本地提交主题为 `docs(design): compare three capture icon sets`。 [图标对照](design/redesign/README.md#截图工具条图标方案)
 - 用户选择 A 圆角细线。按复评反馈把马赛克改为一大五小的同线宽像素块，把长截图简化为取景框和居中向下箭头。已核对放大稿及浅深工具条。 [修订对照](design/redesign/capture-icon-options.png)
-- 下一步为评审 A 版两枚修订图标，随后处理原生控件实现与输出验收。
+- 用户继续反馈不喜欢上述修订，参考现有设计讨论后，新增独立的「规整像素块 + 双向下折线」提案，展示放大图、常态／选中状态和浅深完整工具条。已将 SVG 渲染为 2400×1640 PNG 并目视核对。仅设计资料变更，应用保持 v1.0.24；未运行新的应用 GUI 验收。本地提交主题为 `docs(design): preview pixel mosaic and double-chevron icons`。 [本轮提案](design/redesign/capture-icon-a-pixels-chevrons.png)
+- 下一步为用户评审本轮两枚图标的功能表达与整体协调性，确认后再处理原生控件实现与输出验收。
 
 ## v1.0.24 长截图实时遮罩
 
