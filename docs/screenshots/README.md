@@ -1,5 +1,13 @@
 # 当前界面与功能面板
 
+## v2.0.4 用户真机验收
+
+2026-11-25，用户确认浅色、深色主题真机验证通过，并提供以下两张原始 PNG。均为 1898×1629，展示 PNG、55 px 圆角状态；按原字节收录，未裁切、缩放或重新编码。附件未提供设备、DPI 或 EXE 哈希，不沿用旧图的环境数据。版本关联、文件哈希及通过范围见[验收补充](../validation/settings/corner-balanced-v2.0.4.md#用户验收与本地放行)。
+
+![用户验证通过的浅色界面](corner-balanced-v2.0.4/corners-light.png)
+
+![用户验证通过的深色界面](corner-balanced-v2.0.4/corners-dark.png)
+
 ## v2.0.3 滑杆与圆角排版
 
 2026-11-25，[本轮目录](slider-corner-v2.0.3/)来自 Windows 11 `26300.9974`、200% 的真实 MSVC x64 Release diagnostics，JPEG 为约 949×815 逻辑尺寸。参数在合法最小值下的圆环完整，圆角预览与滑杆同排居中，用户标记的说明文字已移除。构建、修复前后原生像素对照、真实操作和产物见[验证报告](../validation/settings/slider-corner-v2.0.3.md)。

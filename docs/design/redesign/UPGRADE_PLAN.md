@@ -1,6 +1,6 @@
 # kiki 界面与图标整体升级方案
 
-2026-11-25。实施基线为 v1.0.24。用户已选定 **B 版分组排版 + 当前暖灰松绿主题 + A 圆角细线图标（最终像素块／双向下折线修订）**。目前已实现整体升级候选，并按后续复评完成 v2.0.1 通用页与导航、v2.0.2 截图设置修订。执行状态统一记录在 [PROGRESS.md](../../PROGRESS.md)，实测范围见[整体升级验证](../../validation/settings/ui-upgrade-v2.0.0.md)、[通用页修订](../../validation/settings/settings-refinement-v2.0.1.md)和[截图页修订](../../validation/settings/capture-refinement-v2.0.2.md)。
+2026-11-25。实施基线为 v1.0.24。用户已选定 **B 版分组排版 + 当前暖灰松绿主题 + A 圆角细线图标（最终像素块／双向下折线修订）**。整体升级及后续设置修订已在 v2.0.4 按用户确认本地放行，含用户自身修改。执行状态统一记录在 [PROGRESS.md](../../PROGRESS.md)，实测范围见[整体升级验证](../../validation/settings/ui-upgrade-v2.0.0.md)、[通用页修订](../../validation/settings/settings-refinement-v2.0.1.md)、[截图页修订](../../validation/settings/capture-refinement-v2.0.2.md)和[最终圆角修订与用户验收](../../validation/settings/corner-balanced-v2.0.4.md)。
 
 ## 1. 设计依据与优先级
 

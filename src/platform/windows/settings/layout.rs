@@ -21,7 +21,7 @@ pub const PARAMETER_LABELS: [&str; 7] = [
     "画笔线宽",
     "文字字号",
     "圆角半径",
-    "马赛克颗粒大小",
+    "马赛克颗粒",
     "编号直径",
 ];
 pub const FOOTER: i32 = 48;
@@ -218,7 +218,6 @@ impl Page {
                 p.y += 38;
             }
             4 => {
-                p.heading("主题");
                 let gap = if p.width >= 500 { 18 } else { 8 };
                 let size = ((p.width - 2 * gap) / 3).clamp(1, 174);
                 for i in 0..3 {
