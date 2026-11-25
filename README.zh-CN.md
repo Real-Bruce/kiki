@@ -6,7 +6,7 @@
 
 [下载](https://github.com/Real-Bruce/kiki/releases) · [界面截图](#界面截图) · [文档索引](docs/README.md) · [版本变更](docs/CHANGELOG.md)
 
-![kiki 截图选区与全工具工具条](docs/screenshots/capture/toolbar-light.png)
+![kiki 全工具截图工具条](docs/screenshots/upgrade-v2/toolbar-light.png)
 
 ## 功能
 
@@ -41,31 +41,31 @@
 
 开始截图，管理开机启动与后台运行。
 
-![通用设置](docs/screenshots/settings/general-light.png)
+![通用设置](docs/screenshots/upgrade-v2/general-light.jpg)
 
 ### 快捷键
 
 自定义截图热键，查看贴图快捷键。
 
-![快捷键设置](docs/screenshots/settings/shortcuts-light.png)
+![快捷键设置](docs/screenshots/upgrade-v2/shortcuts-light.jpg)
 
 ### 截图
 
 选择工具条显示的工具，调整默认标注样式。
 
-![截图设置：默认标注样式与圆角滑杆](docs/screenshots/settings/capture-parameters-light.jpg)
+![截图设置：默认标注样式与圆角滑杆](docs/screenshots/upgrade-v2/capture-light.jpg)
 
 ### 贴图
 
 将截图置顶显示，拖动、缩放或一次关闭所有贴图。
 
-![贴图设置](docs/screenshots/settings/pinned-light.png)
+![贴图设置](docs/screenshots/upgrade-v2/pinned-light.jpg)
 
 ### 外观
 
 跟随系统主题，或选择浅色与深色模式。
 
-![外观设置](docs/screenshots/settings/appearance-light.png)
+![外观设置](docs/screenshots/upgrade-v2/appearance-light.jpg)
 
 ## 开发
 

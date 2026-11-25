@@ -6,7 +6,7 @@
 
 F01–F12 已实现并按下表记录放行；已实现能力不因环境待验而重新搭建。v1.0.11 完成贴图菜单和悬停工具条优化，已在单屏 125% 下验证浅深界面、缩放及保存，并完成正式 ZIP 的解压启动与框选贴图。详见 [贴图界面验证](validation/pinned/pinned-ui-v1.0.11.md)。
 
-1. 已在 `codex/ui-icon-upgrade` 实施[整体升级方案](design/redesign/UPGRADE_PLAN.md)。U1 共享图标提交 `dd70494`；U2 六页圆角分组、真实控件布局与测量换行已落地；U3 导航、工具选择、主题选中边框、色环和截图／设置滑杆已统一。默认与全特性串行测试各 88 项通过、7 项按需跳过，严格 Clippy 通过。v2.0.0 为整体界面升级候选，浅深真实设置窗口已检查，便携包已生成，U4 整体验证和环境缺项正在记录，尚未创建完成标签。
+1. 已在 `codex/ui-icon-upgrade` 实施[整体升级方案](design/redesign/UPGRADE_PLAN.md)。U1 共享图标提交 `dd70494`；U2／U3 六页圆角分组、测量换行、导航、工具选择、主题卡片、色环和滑杆提交 `660b218`。默认与全特性串行测试各 88 项通过、7 项按需跳过，严格 Clippy 通过，另 1 项 Release 原生长截图回归通过。v2.0.0 候选 ZIP 已生成并解压核对，真实浅深设置、截图工具条、框选贴图与 PNG 输出及 60 秒资源采样见[升级验证](validation/settings/ui-upgrade-v2.0.0.md)。完整实机 DPI／多屏等缺项保留，尚未创建完成标签或发布。
 2. 用 v1.0.24 在附件中的 IDE 预览复测框内外滚动，并在多图 README 中继续复验短选区配合 Shift 参考框跨越留白的拼接效果。Codex 内置浏览器 Daily 漏段仍待独立定位。 [实时遮罩实拍](validation/long-capture/long-capture-v1.0.24.md) · [参考框验证](validation/long-capture/long-capture-v1.0.23.md) · [多图排查](validation/long-capture/multi-image-v1.0.22.md) · [Daily 失败样本](validation/long-capture/long-capture-v1.0.3.md)
 3. 补验普通框选后直接保存和复制至外部应用，以及贴图复制按钮；本次已补验框选后贴图和贴图保存。
 4. 按下方环境遗留补齐实机矩阵；维护者指定任务优先于这些待验项。

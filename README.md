@@ -6,7 +6,7 @@ A lightweight, native screenshot and annotation tool for **Windows 11 x64**. Cap
 
 [Download](https://github.com/Real-Bruce/kiki/releases) · [Screenshots](#screenshots) · [Documentation](docs/README.md) · [Changelog](docs/CHANGELOG.md)
 
-![kiki capture selection and toolbar, with all tools enabled](docs/screenshots/capture/toolbar-light.png)
+![kiki capture toolbar, with all tools enabled](docs/screenshots/upgrade-v2/toolbar-light.png)
 
 ## Features
 
@@ -41,31 +41,31 @@ Scrolling capture is limited to one screen and manual vertical scrolling. Enteri
 
 Start a capture and manage startup behavior.
 
-![General settings](docs/screenshots/settings/general-light.png)
+![General settings](docs/screenshots/upgrade-v2/general-light.jpg)
 
 ### Shortcuts
 
 Customize the capture hotkey and find shortcuts for pinned images.
 
-![Shortcut settings](docs/screenshots/settings/shortcuts-light.png)
+![Shortcut settings](docs/screenshots/upgrade-v2/shortcuts-light.jpg)
 
 ### Capture
 
 Choose toolbar tools and adjust default annotation styles.
 
-![Capture settings: sliders for annotation defaults and corner radius](docs/screenshots/settings/capture-parameters-light.jpg)
+![Capture settings: sliders for annotation defaults and corner radius](docs/screenshots/upgrade-v2/capture-light.jpg)
 
 ### Pinned images
 
 Keep captures above other windows, move and zoom them, or close them all at once.
 
-![Pinned image settings](docs/screenshots/settings/pinned-light.png)
+![Pinned image settings](docs/screenshots/upgrade-v2/pinned-light.jpg)
 
 ### Appearance
 
 Follow the system theme or choose light or dark mode.
 
-![Appearance settings](docs/screenshots/settings/appearance-light.png)
+![Appearance settings](docs/screenshots/upgrade-v2/appearance-light.jpg)
 
 ## Development
 
