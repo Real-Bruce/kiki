@@ -19,8 +19,7 @@ mod reset_dialog;
 use layout as settings_layout;
 use settings_layout::{
     CAPTURE_TOOL, CAPTURE_TOOL_IDS, FOOTER, HEADER, Item, OPEN_CONFIG_FOLDER, OUTPUT_FORMAT,
-    PARAMETER_LABELS, PARAMETER_SLIDER, Page, RESET_CAPTURE, Rect, START_CAPTURE, TOOLBAR_PREVIEW,
-    Tone,
+    PARAMETER_LABELS, PARAMETER_SLIDER, Page, RESET_CAPTURE, Rect, TOOLBAR_PREVIEW, Tone,
 };
 use std::{cell::Cell, rc::Rc};
 use windows::{
@@ -615,7 +614,6 @@ fn caption(id: u16, cfg: &Config, state: &State) -> String {
         }
         .into(),
         201 => "更新开机启动".into(),
-        START_CAPTURE => "开始截图".into(),
         OPEN_CONFIG_FOLDER => "打开设置文件夹".into(),
         301 => "恢复默认快捷键".into(),
         400 => format!(
@@ -678,7 +676,6 @@ fn create_controls(hwnd: HWND) -> Result<()> {
             .chain([
                 200,
                 201,
-                START_CAPTURE,
                 OPEN_CONFIG_FOLDER,
                 300,
                 301,
@@ -1152,7 +1149,6 @@ fn action(hwnd: HWND, id: u16) {
                 }
                 result
             }
-            START_CAPTURE => preferences::request_capture_from_settings(),
             OPEN_CONFIG_FOLDER if (*p).page == 0 => open_folder(hwnd),
             300 => {
                 let child = (*p).controls.iter().find(|c| c.id == 300).unwrap().hwnd;
@@ -1582,11 +1578,7 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                     _ => false,
                 };
                 let theme = (600..=602).contains(&id);
-                let primary = id == START_CAPTURE && !disabled;
                 let fill = match (pressed, selected && !theme, hovered && !disabled) {
-                    (true, _, _) if primary => Some(appearance::accent_pressed(dark)),
-                    (_, _, true) if primary => Some(appearance::accent_hover(dark)),
-                    _ if primary => Some(accent),
                     (true, _, _) => Some(appearance::pressed(dark)),
                     (_, true, _) => Some(appearance::selected(dark)),
                     (_, _, true) => Some(appearance::hover(dark)),
@@ -1597,8 +1589,6 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                 }
                 let text_color = if disabled {
                     appearance::muted(dark)
-                } else if primary {
-                    appearance::on_accent(dark)
                 } else if selected {
                     accent
                 } else {
@@ -1683,12 +1673,7 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                     right: r.right - inset,
                     bottom: r.bottom - inset,
                 };
-                let focus = if id == START_CAPTURE {
-                    appearance::on_accent(dark)
-                } else {
-                    accent
-                };
-                shapes.focus_ring(frame, dip(4) as f32, dpi_scale, focus);
+                shapes.focus_ring(frame, dip(4) as f32, dpi_scale, accent);
             }
             labels
         });

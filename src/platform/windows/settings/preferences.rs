@@ -136,14 +136,6 @@ pub fn active_shortcut() -> Option<String> {
             .then(|| session.config.hotkey.label())
     })
 }
-pub fn request_capture_from_settings() -> std::result::Result<(), String> {
-    let owner = SESSION
-        .with_borrow(|slot| slot.as_ref().map(|s| s.owner))
-        .ok_or("截图暂不可用。")?;
-    // SAFETY: the tray owner outlives the UI-thread preferences session.
-    unsafe { PostMessageW(Some(owner), CAPTURE_FROM_SETTINGS, WPARAM(0), LPARAM(0)) }
-        .map_err(|_| "无法开始截图，请重试。".into())
-}
 pub fn matches(id: usize) -> bool {
     SESSION.with_borrow(|slot| slot.as_ref().is_some_and(|s| s.registration.matches(id)))
 }

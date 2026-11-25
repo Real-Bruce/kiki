@@ -29,9 +29,6 @@ pub const fn pressed(dark: bool) -> u32 {
 pub const fn on_accent(dark: bool) -> u32 {
     if dark { 0x1c2924 } else { 0xffffff }
 }
-pub const fn accent_hover(dark: bool) -> u32 {
-    if dark { 0x96c3b1 } else { 0x30564d }
-}
 pub const fn accent_pressed(dark: bool) -> u32 {
     if dark { 0x8bb6a5 } else { 0x2a4d45 }
 }

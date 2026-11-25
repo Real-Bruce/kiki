@@ -6,7 +6,6 @@ use crate::platform::windows::app::startup;
 use windows::Win32::Graphics::DirectWrite::IDWriteFactory;
 
 pub const HEADER: i32 = 68;
-pub const START_CAPTURE: u16 = 202;
 pub const OPEN_CONFIG_FOLDER: u16 = 203;
 pub const PARAMETER_SLIDER: u16 = 420;
 pub const OUTPUT_FORMAT: u16 = 430;
@@ -105,46 +104,16 @@ impl Page {
         };
         match page {
             0 => {
-                p.heading("开始截图");
-                p.control(START_CAPTURE, 0, 0, 132, 38);
-                if hotkey_active {
-                    p.items.push(Item::Text(
-                        format!("快捷键 {}", cfg.hotkey.label()),
-                        p.rect(148, 9, p.width - 148, ROW),
-                        Tone::Muted,
-                    ));
-                } else {
-                    p.text(
-                        "可在「快捷键」中修改截图快捷键。",
-                        148,
-                        p.width - 148,
-                        Tone::Muted,
-                    );
-                }
-                p.y += 52;
-                p.note("拖动框选区域，或单击选择窗口。", Tone::Normal);
-                p.note(
-                    "按 Enter 复制，再按 Ctrl+V 粘贴。也可按 Ctrl+S 保存或按 Ctrl+P 贴图。",
-                    Tone::Normal,
-                );
-                p.divider();
                 p.heading("启动与后台");
                 let moved = matches!(start, Ok(startup::State::Moved));
                 p.toggle_row("登录 Windows 时自动启动", 200);
                 if moved {
-                    p.text(
-                        "kiki 已移动，开机启动需要更新。",
-                        0,
-                        p.width - 146,
-                        Tone::Warning,
-                    );
-                    p.control(201, p.width - 132, -7, 132, 36);
-                    p.y += ROW;
+                    p.rule();
+                    p.note("kiki 已移动，开机启动需要更新。", Tone::Muted);
+                    p.y += 8;
+                    p.control(201, 0, 0, 152, 36);
+                    p.y += 36;
                 }
-                p.note(
-                    "关闭设置后，仍可从任务栏右下角的 kiki 图标开始截图。",
-                    Tone::Muted,
-                );
                 p.divider();
                 p.heading("设置文件");
                 p.control(OPEN_CONFIG_FOLDER, 0, 0, 152, 36);
@@ -164,7 +133,7 @@ impl Page {
                     p.note(error, Tone::Warning);
                 } else if !hotkey_active {
                     p.note(
-                        "当前快捷键不可用。请换一组按键，或从通用页开始截图。",
+                        "当前快捷键不可用。请换一组按键，或从系统托盘开始截图。",
                         Tone::Warning,
                     );
                 }
@@ -446,12 +415,9 @@ impl Page {
 
 fn capture_help(cfg: &Config, hotkey_active: bool) -> String {
     if hotkey_active {
-        format!(
-            "按 {}，也可从系统托盘或「通用」页开始。",
-            cfg.hotkey.label()
-        )
+        format!("按 {}，也可从系统托盘开始截图。", cfg.hotkey.label())
     } else {
-        "从系统托盘或「通用」页开始。可在「快捷键」页修改截图快捷键。".into()
+        "从系统托盘开始截图。可在「快捷键」页修改截图快捷键。".into()
     }
 }
 
@@ -459,6 +425,37 @@ fn capture_help(cfg: &Config, hotkey_active: bool) -> String {
 mod tests {
     use super::*;
     use crate::core::config::Key;
+
+    #[test]
+    fn general_removes_capture_entry_and_separates_startup_repair() {
+        let factory = super::super::render::text_factory().unwrap();
+        let cfg = Config::default();
+        for width in [630, 660, 944] {
+            for state in [
+                startup::State::Disabled,
+                startup::State::Enabled,
+                startup::State::Moved,
+            ] {
+                let moved = matches!(state, startup::State::Moved);
+                let page = Page::new(width, (0, false), &cfg, &Ok(state), false, None, &factory);
+                let control = |id| {
+                    page.items.iter().find_map(|item| match item {
+                        Item::Control(control_id, bounds) if *control_id == id => Some(bounds),
+                        _ => None,
+                    })
+                };
+                assert_eq!(page.panels.len(), 2);
+                assert!(control(202).is_none());
+                assert!(control(OPEN_CONFIG_FOLDER).is_some());
+                assert_eq!(control(201).is_some(), moved);
+                if let Some(repair) = control(201) {
+                    let toggle = control(200).unwrap();
+                    assert!(repair.y - (toggle.y + toggle.h) >= 16);
+                    assert!(repair.y + repair.h < page.panels[1].y);
+                }
+            }
+        }
+    }
 
     #[test]
     fn grouped_pages_keep_controls_inside_nonoverlapping_panels() {

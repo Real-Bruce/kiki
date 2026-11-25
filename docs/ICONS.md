@@ -11,3 +11,7 @@
 平台图标模块从 EXE 资源加载系统尺寸图标，供托盘和窗口类使用。共享图标由 Windows 管理，不调用 `DestroyIcon`。分发程序无需携带外部 ICO。
 
 仓库内图标为 `resources/icons/kiki.ico`。
+
+## 设置导航
+
+2026-11-25 用户提供 `keyboard-outline.svg` 用于快捷键导航，[参考原件](design/redesign/keyboard-outline-reference.svg)按字节保留，SHA-256 为 `a2095ea44711c4c220dfa3326a66c87078b0558f90514b8006f3fc21ebe3caef`。原件只作设计参考，不随应用加载或分发。原生实现保留两排各五个按键和空格键，轮廓转为共享 A 版 1.65 DIP 圆端描边；截图导航为两条相交的裁切线。两者跟随主题前景／选中色，未引入图标字体或 SVG 运行依赖。

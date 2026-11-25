@@ -1,5 +1,13 @@
 # 当前界面与功能面板
 
+## v2.0.1 通用页与导航修订
+
+2026-11-25，Windows 11 `26300.9974`、200%（窗口 DPI 192），[本轮目录](settings-refinement-v2.0.1/)中的浅深通用页来自 MSVC x64 Release diagnostics；浅色快捷键、截图、贴图和外观页来自正式 ZIP 解压后的普通 Release，保留用户自定义参数。工具按逻辑坐标输出 JPEG。通用页删除开始截图分组和指定托盘提示，自启修复按钮与开关分开；导航使用用户提供的键盘结构与交叉裁切线。详细构建和范围见[本轮验证](../validation/settings/settings-refinement-v2.0.1.md)。下方 v2.0.0 图保留历史版本。
+
+![修订后的浅色通用页](settings-refinement-v2.0.1/general-light.jpg)
+
+![修订后的深色通用页](settings-refinement-v2.0.1/general-dark.jpg)
+
 ## v2.0.0 升级候选实拍
 
 2026-11-25 新增 [升级实拍目录](upgrade-v2/)，来自真实 MSVC x64 Release diagnostics 窗口，Windows 11 `26300.9974`、窗口 DPI 192（200%）。工具输出的 JPEG 使用逻辑坐标尺寸，工具条 PNG 仅从实拍裁切面板，不是设计参考图；详细环境、版本、哈希、实际操作及待验项见 [v2.0.0 验证](../validation/settings/ui-upgrade-v2.0.0.md)。以下旧图库保留原始版本说明。

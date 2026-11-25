@@ -23,7 +23,7 @@ The application interface is currently in **Simplified Chinese**. Rectangle, arr
 
 Download the Windows x64 ZIP from [Releases](https://github.com/Real-Bruce/kiki/releases), extract it, and launch `kiki.exe`. No Rust toolchain or installer is required.
 
-1. Click **开始截图** (Start capture), press **Ctrl+Alt+A**, or use the tray menu. The global shortcut is configurable.
+1. Press **Ctrl+Alt+A** or choose **开始截图** (Start capture) from the tray menu. The global shortcut is configurable.
 2. Drag to select a region, or click a highlighted window. Add annotations using the toolbar.
 3. Press **Enter** to copy, **Ctrl+S** to save, or **Ctrl+P** to pin. **Esc** cancels the active operation, then the capture when no operation is active.
 
@@ -39,33 +39,33 @@ Scrolling capture is limited to one screen and manual vertical scrolling. Enteri
 
 ### General
 
-Start a capture and manage startup behavior.
+Manage startup behavior and open the settings folder.
 
-![General settings](docs/screenshots/upgrade-v2/general-light.jpg)
+![General settings](docs/screenshots/settings-refinement-v2.0.1/general-light.jpg)
 
 ### Shortcuts
 
 Customize the capture hotkey and find shortcuts for pinned images.
 
-![Shortcut settings](docs/screenshots/upgrade-v2/shortcuts-light.jpg)
+![Shortcut settings](docs/screenshots/settings-refinement-v2.0.1/shortcuts-light.jpg)
 
 ### Capture
 
 Choose toolbar tools and adjust default annotation styles.
 
-![Capture settings: sliders for annotation defaults and corner radius](docs/screenshots/upgrade-v2/capture-light.jpg)
+![Capture settings: sliders for annotation defaults and corner radius](docs/screenshots/settings-refinement-v2.0.1/capture-light.jpg)
 
 ### Pinned images
 
 Keep captures above other windows, move and zoom them, or close them all at once.
 
-![Pinned image settings](docs/screenshots/upgrade-v2/pinned-light.jpg)
+![Pinned image settings](docs/screenshots/settings-refinement-v2.0.1/pinned-light.jpg)
 
 ### Appearance
 
 Follow the system theme or choose light or dark mode.
 
-![Appearance settings](docs/screenshots/upgrade-v2/appearance-light.jpg)
+![Appearance settings](docs/screenshots/settings-refinement-v2.0.1/appearance-light.jpg)
 
 ## Development
 

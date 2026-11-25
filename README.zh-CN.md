@@ -23,7 +23,7 @@
 
 从 [Releases](https://github.com/Real-Bruce/kiki/releases) 下载 Windows x64 ZIP，解压后运行 `kiki.exe`，无需安装 Rust 或开发工具。
 
-1. 点击「开始截图」，按默认快捷键 **Ctrl+Alt+A**，或使用托盘菜单；快捷键可以在设置中修改。
+1. 按默认快捷键 **Ctrl+Alt+A**，或从托盘菜单选择「开始截图」；快捷键可以在设置中修改。
 2. 拖动框选，或单击高亮窗口，再通过工具条添加标注。
 3. 按 **Enter** 复制、**Ctrl+S** 保存、**Ctrl+P** 贴图。**Esc** 先取消当前操作，无活动操作时取消截图。
 
@@ -39,33 +39,33 @@
 
 ### 通用
 
-开始截图，管理开机启动与后台运行。
+管理开机启动，打开设置文件夹。
 
-![通用设置](docs/screenshots/upgrade-v2/general-light.jpg)
+![通用设置](docs/screenshots/settings-refinement-v2.0.1/general-light.jpg)
 
 ### 快捷键
 
 自定义截图热键，查看贴图快捷键。
 
-![快捷键设置](docs/screenshots/upgrade-v2/shortcuts-light.jpg)
+![快捷键设置](docs/screenshots/settings-refinement-v2.0.1/shortcuts-light.jpg)
 
 ### 截图
 
 选择工具条显示的工具，调整默认标注样式。
 
-![截图设置：默认标注样式与圆角滑杆](docs/screenshots/upgrade-v2/capture-light.jpg)
+![截图设置：默认标注样式与圆角滑杆](docs/screenshots/settings-refinement-v2.0.1/capture-light.jpg)
 
 ### 贴图
 
 将截图置顶显示，拖动、缩放或一次关闭所有贴图。
 
-![贴图设置](docs/screenshots/upgrade-v2/pinned-light.jpg)
+![贴图设置](docs/screenshots/settings-refinement-v2.0.1/pinned-light.jpg)
 
 ### 外观
 
 跟随系统主题，或选择浅色与深色模式。
 
-![外观设置](docs/screenshots/upgrade-v2/appearance-light.jpg)
+![外观设置](docs/screenshots/settings-refinement-v2.0.1/appearance-light.jpg)
 
 ## 开发
 
