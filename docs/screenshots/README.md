@@ -1,5 +1,15 @@
 # 当前界面与功能面板
 
+## v2.0.3 滑杆与圆角排版
+
+2026-11-25，[本轮目录](slider-corner-v2.0.3/)来自 Windows 11 `26300.9974`、200% 的真实 MSVC x64 Release diagnostics，JPEG 为约 949×815 逻辑尺寸。参数在合法最小值下的圆环完整，圆角预览与滑杆同排居中，用户标记的说明文字已移除。构建、修复前后原生像素对照、真实操作和产物见[验证报告](../validation/settings/slider-corner-v2.0.3.md)。
+
+![浅色最小值圆环](slider-corner-v2.0.3/capture-light.jpg)
+
+![圆角预览与滑杆并排](slider-corner-v2.0.3/corners-light.jpg)
+
+![深色圆角布局](slider-corner-v2.0.3/corners-dark.jpg)
+
 ## v2.0.2 截图设置修订
 
 2026-11-25，[本轮目录](capture-refinement-v2.0.2/)来自真实 Windows 11 `26300.9974`、200% 的 MSVC x64 Release diagnostics；JPEG 为工具输出的逻辑尺寸，约 949×815。工具开关按整行排列，参数范围描述移除，零圆角仅显示「无」。浅深工具列表、样式参数与圆角均已检查，详细范围见[验证报告](../validation/settings/capture-refinement-v2.0.2.md)。

@@ -1,12 +1,12 @@
 # 当前进度
 
-更新时间：2026-11-25。当前源码 **v2.0.2 候选**（[VERSION](../VERSION)）。[按模块阅读](README.md) · [实施历史](IMPLEMENTATION_HISTORY.md) · [验证记录](validation/README.md)
+更新时间：2026-11-25。当前源码 **v2.0.3 候选**（[VERSION](../VERSION)）。[按模块阅读](README.md) · [实施历史](IMPLEMENTATION_HISTORY.md) · [验证记录](validation/README.md)
 
 ## 当前状态与下一步
 
 F01–F12 已实现并按下表记录放行；已实现能力不因环境待验而重新搭建。v1.0.11 完成贴图菜单和悬停工具条优化，已在单屏 125% 下验证浅深界面、缩放及保存，并完成正式 ZIP 的解压启动与框选贴图。详见 [贴图界面验证](validation/pinned/pinned-ui-v1.0.11.md)。
 
-1. `codex/ui-icon-upgrade` 的 v2.0.2 将截图页首组更名为「工具条」，展开的工具选项改为整行图标／名称和右侧开关，复用通用页样式；移除参数范围描述，零圆角仅显示「无」。默认与全特性串行测试各 89 项通过、7 项按需跳过，严格 Clippy 通过；已检查真实浅深工具列表、样式和圆角，并生成便携候选。[本轮验证](validation/settings/capture-refinement-v2.0.2.md)。提交主题为 `fix(settings): refine capture tool rows and parameter labels`。v2.0.1 通用页及导航修改见[前次验证](validation/settings/settings-refinement-v2.0.1.md)，整体升级源于 `dd70494`、`660b218`，完整实拍、输出及资源证据见[v2.0.0 验证](validation/settings/ui-upgrade-v2.0.0.md)。完整实机 DPI／多屏等缺项保留，未创建完成标签或发布。
+1. `codex/ui-icon-upgrade` 的 v2.0.3 移除截图页标记说明及可见圆角标签，圆角预览与滑杆改为同排居中；修复全部设置滑杆在两端的圆环裁切。默认与全特性各 90 项通过、7 项按需跳过，严格 Clippy 通过，新增浅深四种缩放的真实 Direct2D 像素回归；已检查本机 200% 浅深窗口、生成并启动便携候选。[本轮验证](validation/settings/slider-corner-v2.0.3.md)。提交主题为 `fix(settings): prevent clipped slider rings and align corner preview`。前次设置修订见 [v2.0.2](validation/settings/capture-refinement-v2.0.2.md) 与 [v2.0.1](validation/settings/settings-refinement-v2.0.1.md)，整体升级实拍、输出和资源记录见 [v2.0.0](validation/settings/ui-upgrade-v2.0.0.md)。完整实机环境缺项保留，未创建完成标签或发布。
 2. 用 v1.0.24 在附件中的 IDE 预览复测框内外滚动，并在多图 README 中继续复验短选区配合 Shift 参考框跨越留白的拼接效果。Codex 内置浏览器 Daily 漏段仍待独立定位。 [实时遮罩实拍](validation/long-capture/long-capture-v1.0.24.md) · [参考框验证](validation/long-capture/long-capture-v1.0.23.md) · [多图排查](validation/long-capture/multi-image-v1.0.22.md) · [Daily 失败样本](validation/long-capture/long-capture-v1.0.3.md)
 3. 补验普通框选后直接保存和复制至外部应用，以及贴图复制按钮；本次已补验框选后贴图和贴图保存。
 4. 按下方环境遗留补齐实机矩阵；维护者指定任务优先于这些待验项。

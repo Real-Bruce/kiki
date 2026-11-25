@@ -1305,12 +1305,13 @@ fn slider_input(
         }
         let mut rect = RECT::default();
         if GetClientRect(hwnd, &mut rect).is_ok() {
-            let inset = (6. * GetDpiForWindow(hwnd) as f32 / 96.).round();
+            let (left, right) =
+                appearance::slider_endpoints(rect, GetDpiForWindow(hwnd) as f32 / 96.);
             let value = parameter_control::slider_value(
                 parameter,
                 f32::from(lp.0 as i16),
-                inset,
-                rect.right as f32 - inset,
+                left as f32,
+                right as f32,
             );
             set_parameter_value(parent, parameter, value);
         }
@@ -1534,32 +1535,12 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                     );
                 }
             } else if let Some(parameter) = setting_parameter(id) {
-                let left = r.left + dip(6);
-                let right = r.right - dip(6);
-                let y = (r.top + r.bottom) / 2;
-                let radius = dip(7).max(1);
-                let x = left
-                    + (parameter_control::fraction(parameter, parameter.value(&cfg))
-                        * (right - left) as f32)
-                        .round() as i32;
-                let track = RECT {
-                    left,
-                    top: y - dip(1),
-                    right,
-                    bottom: y + dip(2),
-                };
-                shapes.rounded(track, dip(3), appearance::divider(dark));
-                if x > left {
-                    shapes.rounded(RECT { right: x, ..track }, dip(3), accent);
-                }
-                let thumb = RECT {
-                    left: x - radius,
-                    top: y - radius,
-                    right: x + radius,
-                    bottom: y + radius,
-                };
-                shapes.rounded(thumb, 2 * radius, appearance::background(dark));
-                shapes.focus_ring(thumb, radius as f32, 1.5 * dpi_scale, accent);
+                shapes.parameter_slider(
+                    r,
+                    dpi_scale,
+                    parameter_control::fraction(parameter, parameter.value(&cfg)),
+                    dark,
+                );
             } else {
                 let selected = match id {
                     100..=105 => usize::from(id - 100) == state.page,

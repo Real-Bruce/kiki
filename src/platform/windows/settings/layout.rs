@@ -1,7 +1,7 @@
 //! Settings page geometry shared by native control positioning and canvas painting.
 use super::render::Paragraph;
 use crate::core::annotation::Tool;
-use crate::core::config::{CaptureParameter, Config, OutputFormat};
+use crate::core::config::{CaptureParameter, Config};
 use crate::platform::windows::app::startup;
 use windows::Win32::Graphics::DirectWrite::IDWriteFactory;
 
@@ -160,7 +160,6 @@ impl Page {
                 p.toggle_row("截图时显示操作提示", 400);
                 p.divider();
                 p.heading("样式调整");
-                p.note("用于新标注。尺寸按截图的实际像素计算。", Tone::Muted);
                 p.text("标注颜色", 0, 86, Tone::Normal);
                 p.choices(410, 8);
                 for (index, parameter) in [
@@ -180,27 +179,14 @@ impl Page {
                 p.text("默认保存格式", 0, p.width - 126, Tone::Normal);
                 p.control(OUTPUT_FORMAT, p.width - 116, -8, 116, 36);
                 p.y += ROW;
-                p.parameter_row(4);
-                p.y += 4;
                 p.items.push(Item::CornerPreview(p.rect(0, 0, 108, 72)));
-                p.y += 12;
-                p.text(
-                    match cfg.output_format {
-                        OutputFormat::Png => "保存为 PNG 时，圆角外透明。",
-                        OutputFormat::Jpeg => "保存为 JPEG 时，圆角外填白。",
-                    },
-                    122,
-                    p.width - 122,
-                    Tone::Normal,
-                );
-                p.y += 24;
-                p.text(
-                    "圆角半径最多为截图短边的一半。",
-                    122,
-                    p.width - 122,
-                    Tone::Muted,
-                );
-                p.y += 36;
+                let start = 132;
+                p.control(PARAMETER_SLIDER + 4, start, 22, p.width - start - 78, 28);
+                p.items.push(Item::ParameterValue(
+                    PARAMETER_SLIDER + 4,
+                    p.rect(p.width - 72, 26, 72, 22),
+                ));
+                p.y += 72;
                 p.rule();
                 p.control(RESET_CAPTURE, 0, 0, 152, 36);
                 p.y += 36;
@@ -523,6 +509,20 @@ mod tests {
                 |expanded| Page::new(width, (2, expanded), &cfg, &startup, true, None, &factory);
             let closed = page(false);
             let open = page(true);
+            let corner = closed
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    Item::CornerPreview(bounds) => Some(bounds),
+                    _ => None,
+                })
+                .unwrap();
+            let corner_slider = bounds(&closed, PARAMETER_SLIDER + 4).unwrap();
+            assert!(corner.x + corner.w < corner_slider.x);
+            assert_eq!(
+                corner.y + corner.h / 2,
+                corner_slider.y + corner_slider.h / 2
+            );
             let height_added = open.end - closed.end;
             assert!(height_added > 0);
             let preview = bounds(&open, TOOLBAR_PREVIEW).unwrap();

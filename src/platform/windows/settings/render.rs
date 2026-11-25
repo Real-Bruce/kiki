@@ -90,12 +90,45 @@ pub fn release_control_surface() {
     drop(CONTROL_SURFACE.take());
 }
 
+/// Track centers shared by native pointer mapping and drawing.
+pub fn slider_endpoints(bounds: RECT, scale: f32) -> (i32, i32) {
+    // The 7 DIP ring needs room at both endpoints, plus antialiasing clearance.
+    let inset = ((9. * scale).round() as i32).min((bounds.right - bounds.left) / 2);
+    (bounds.left + inset, bounds.right - inset)
+}
+
 pub struct ControlShapes<'a> {
     surface: &'a ControlSurface,
     origin: [i32; 2],
 }
 
 impl ControlShapes<'_> {
+    pub fn parameter_slider(&self, bounds: RECT, scale: f32, fraction: f32, dark: bool) {
+        let dip = |value: f32| (value * scale).round() as i32;
+        let (left, right) = slider_endpoints(bounds, scale);
+        let y = (bounds.top + bounds.bottom) / 2;
+        let radius = dip(7.).max(1);
+        let x = left + (fraction.clamp(0., 1.) * (right - left) as f32).round() as i32;
+        let track = RECT {
+            left,
+            top: y - dip(1.),
+            right,
+            bottom: y + dip(2.),
+        };
+        self.rounded(track, dip(3.), divider(dark));
+        if x > left {
+            self.rounded(RECT { right: x, ..track }, dip(3.), accent(dark));
+        }
+        let thumb = RECT {
+            left: x - radius,
+            top: y - radius,
+            right: x + radius,
+            bottom: y + radius,
+        };
+        self.rounded(thumb, 2 * radius, background(dark));
+        self.focus_ring(thumb, radius as f32, 1.5 * scale, accent(dark));
+    }
+
     fn rect(&self, bounds: RECT) -> D2D_RECT_F {
         let [x, y] = self.origin;
         D2D_RECT_F {
@@ -516,6 +549,80 @@ fn color(rgb: u32) -> D2D1_COLOR_F {
 mod tests {
     use super::*;
     use windows::Win32::Graphics::Gdi::*;
+
+    #[test]
+    fn slider_endpoint_rings_stay_inside_the_native_control() {
+        // SAFETY: this test owns the memory DC and bitmap until all Direct2D draws and
+        // GDI pixel reads finish; it restores the old bitmap before releasing both resources.
+        unsafe {
+            let dc = CreateCompatibleDC(None);
+            assert!(!dc.is_invalid());
+            let info = BITMAPINFO {
+                bmiHeader: BITMAPINFOHEADER {
+                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                    biWidth: 600,
+                    biHeight: -80,
+                    biPlanes: 1,
+                    biBitCount: 32,
+                    biCompression: BI_RGB.0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let mut bits = std::ptr::null_mut();
+            let bitmap = CreateDIBSection(None, &info, DIB_RGB_COLORS, &mut bits, None, 0).unwrap();
+            let old = SelectObject(dc, bitmap.into());
+            let mut failures = Vec::new();
+            for scale in [1_f32, 1.25, 1.5, 2.] {
+                for width in [100_f32, 280.] {
+                    for dark in [false, true] {
+                        for fraction in [0., 0.5, 1.] {
+                            let bounds = RECT {
+                                right: (width * scale).round() as i32,
+                                bottom: (28. * scale).round() as i32,
+                                ..Default::default()
+                            };
+                            let bg = background(dark);
+                            let bg = ((bg & 255) << 16) | (bg & 0xff00) | ((bg >> 16) & 255);
+                            let drawn = paint_control(dc, bounds, background(dark), |shapes| {
+                                shapes.parameter_slider(bounds, scale, fraction, dark);
+                            })
+                            .is_some();
+                            let edges_clear = (0..bounds.bottom).all(|y| {
+                                GetPixel(dc, 0, y).0 == bg
+                                    && GetPixel(dc, bounds.right - 1, y).0 == bg
+                            });
+                            let (left, right) = slider_endpoints(bounds, scale);
+                            let center = left + (fraction * (right - left) as f32).round() as i32;
+                            let radius = (7. * scale).round() as i32;
+                            let ring_present = [center - radius, center + radius - 1]
+                                .into_iter()
+                                .all(|x| GetPixel(dc, x, bounds.bottom / 2).0 != bg);
+                            if !(drawn && edges_clear && ring_present) {
+                                failures.push((
+                                    scale,
+                                    width,
+                                    dark,
+                                    fraction,
+                                    drawn,
+                                    edges_clear,
+                                    ring_present,
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+            release_control_surface();
+            SelectObject(dc, old);
+            let _ = DeleteObject(bitmap.into());
+            let _ = DeleteDC(dc);
+            assert!(
+                failures.is_empty(),
+                "clipped or missing slider rings: {failures:?}"
+            );
+        }
+    }
 
     #[test]
     fn native_control_edges_have_blended_pixels_at_multiple_scales() {
