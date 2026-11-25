@@ -6,7 +6,7 @@
 
 F01–F12 已实现并按下表记录放行；已实现能力不因环境待验而重新搭建。v1.0.11 完成贴图菜单和悬停工具条优化，已在单屏 125% 下验证浅深界面、缩放及保存，并完成正式 ZIP 的解压启动与框选贴图。详见 [贴图界面验证](validation/pinned/pinned-ui-v1.0.11.md)。
 
-1. 用户已确认 B 版布局、当前主题和最终 A 版图标；已整理[整体升级方案](design/redesign/UPGRADE_PLAN.md)，下一实施阶段为 U1 共享图标与控件基础，再落地截图设置页及其余界面。当前仅完成方案准备，应用仍为 v1.0.24。
+1. 已在 `codex/ui-icon-upgrade` 开始实施[整体升级方案](design/redesign/UPGRADE_PLAN.md)。U1 已将最终 A 版全部截图图标转换为共享 Direct2D 几何，马赛克恢复画刷透明度、长截图使用两条圆端向下折线；截图、设置预览和贴图复用。默认串行回归 87 项通过、7 项按需跳过。U2 分组布局正在改造，尚未整体验收与升级分发版本。首次沙箱运行的四项热键／注册表权限失败已在允许原生权限的重跑中通过；GUI 结论待候选版实际检查。
 2. 用 v1.0.24 在附件中的 IDE 预览复测框内外滚动，并在多图 README 中继续复验短选区配合 Shift 参考框跨越留白的拼接效果。Codex 内置浏览器 Daily 漏段仍待独立定位。 [实时遮罩实拍](validation/long-capture/long-capture-v1.0.24.md) · [参考框验证](validation/long-capture/long-capture-v1.0.23.md) · [多图排查](validation/long-capture/multi-image-v1.0.22.md) · [Daily 失败样本](validation/long-capture/long-capture-v1.0.3.md)
 3. 补验普通框选后直接保存和复制至外部应用，以及贴图复制按钮；本次已补验框选后贴图和贴图保存。
 4. 按下方环境遗留补齐实机矩阵；维护者指定任务优先于这些待验项。
