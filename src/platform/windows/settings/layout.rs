@@ -73,7 +73,10 @@ pub struct Page {
     pub sidebar: i32,
     pub items: Vec<Item>,
     pub end: i32,
+    pub panels: Vec<Rect>,
     y: i32,
+    panel_top: i32,
+    text_factory: IDWriteFactory,
 }
 
 impl Page {
@@ -87,18 +90,22 @@ impl Page {
         text_factory: &IDWriteFactory,
     ) -> Self {
         let sidebar = if width >= 790 { 176 } else { 148 };
-        let margin = if width >= 790 { 36 } else { 24 };
+        let margin = if width >= 790 { 32 } else { 24 };
         let body = (width - sidebar - 2 * margin).clamp(1, 720);
         let mut p = Self {
-            left: sidebar + (width - sidebar - body).max(0) / 2,
-            width: body,
+            left: sidebar + (width - sidebar - body).max(0) / 2 + 20,
+            width: (body - 40).max(1),
             sidebar,
             items: Vec::new(),
             end: 0,
-            y: HEADER + 6,
+            panels: Vec::new(),
+            y: HEADER + 26,
+            panel_top: HEADER + 6,
+            text_factory: text_factory.clone(),
         };
         match page {
             0 => {
+                p.heading("开始截图");
                 p.control(START_CAPTURE, 0, 0, 132, 38);
                 if hotkey_active {
                     p.items.push(Item::Text(
@@ -181,7 +188,7 @@ impl Page {
                         p.control(CAPTURE_TOOL + index + 4, cell + 12, 0, cell, 34);
                         p.y += 36;
                     }
-                    p.divider();
+                    p.rule();
                 }
                 p.toggle_row("截图时显示操作提示", 400);
                 p.divider();
@@ -227,11 +234,12 @@ impl Page {
                     Tone::Muted,
                 );
                 p.y += 36;
-                p.divider();
+                p.rule();
                 p.control(RESET_CAPTURE, 0, 0, 152, 36);
                 p.y += 36;
             }
             3 => {
+                p.heading("置顶贴图");
                 p.note("截图时按 Ctrl+P，图片会显示在其他窗口上方。", Tone::Normal);
                 p.divider();
                 p.heading("窗口操作");
@@ -243,6 +251,7 @@ impl Page {
                 p.y += 38;
             }
             4 => {
+                p.heading("主题");
                 let gap = if p.width >= 500 { 18 } else { 8 };
                 let size = ((p.width - 2 * gap) / 3).clamp(1, 174);
                 for i in 0..3 {
@@ -281,6 +290,7 @@ impl Page {
                 );
             }
         }
+        p.finish_panel();
         p.end = p.y + 18;
         p
     }
@@ -296,7 +306,7 @@ impl Page {
 
     fn heading(&mut self, text: &'static str) {
         self.items.push(Item::Heading(text, self.y));
-        self.y += 32;
+        self.y += 36;
     }
 
     fn text(&mut self, text: impl Into<String>, x: i32, w: i32, tone: Tone) {
@@ -305,13 +315,23 @@ impl Page {
     }
 
     fn note(&mut self, text: &str, tone: Tone) {
-        self.text(text, 0, self.width, tone);
-        // A Chinese glyph can occupy a full em; use that bound for narrow wrapping notes.
-        let size = if matches!(tone, Tone::Normal) { 14 } else { 12 };
-        let lines = (text.chars().count() as u32 * size)
-            .div_ceil(self.width as u32)
-            .max(1) as i32;
-        self.y += lines * 20 + 4;
+        let size = if matches!(tone, Tone::Normal) {
+            14.
+        } else {
+            12.
+        };
+        if let Ok(paragraph) = Paragraph::new(&self.text_factory, text, size, self.width) {
+            let height = paragraph.height;
+            self.items.push(Item::Paragraph(
+                paragraph,
+                self.rect(0, 0, self.width, height),
+                tone,
+            ));
+            self.y += height + 8;
+        } else {
+            self.text(text, 0, self.width, tone);
+            self.y += ROW;
+        }
     }
 
     fn help_topic(&mut self, factory: &IDWriteFactory, title: &str, detail: &str) {
@@ -379,6 +399,22 @@ impl Page {
     }
 
     fn divider(&mut self) {
+        self.finish_panel();
+        self.y += 36;
+        self.panel_top = self.y - 20;
+    }
+
+    fn finish_panel(&mut self) {
+        self.y += 20;
+        self.panels.push(Rect {
+            x: self.left - 20,
+            y: self.panel_top,
+            w: self.width + 40,
+            h: self.y - self.panel_top,
+        });
+    }
+
+    fn rule(&mut self) {
         self.y += 12;
         self.items.push(Item::Divider(self.y));
         self.y += 21;
@@ -423,6 +459,61 @@ fn capture_help(cfg: &Config, hotkey_active: bool) -> String {
 mod tests {
     use super::*;
     use crate::core::config::Key;
+
+    #[test]
+    fn grouped_pages_keep_controls_inside_nonoverlapping_panels() {
+        let factory = super::super::render::text_factory().unwrap();
+        let startup = Ok(startup::State::Moved);
+        for width in [630, 660, 790, 944, 1280] {
+            for tools in [
+                [false; 8],
+                crate::core::config::DEFAULT_CAPTURE_TOOLS,
+                [true; 8],
+            ] {
+                let cfg = Config {
+                    capture_tools: tools,
+                    ..Config::default()
+                };
+                for index in 0..6 {
+                    for expanded in [false, true] {
+                        let page = Page::new(
+                            width,
+                            (index, expanded),
+                            &cfg,
+                            &startup,
+                            false,
+                            Some("快捷键已被其他程序使用，请换一组按键。"),
+                            &factory,
+                        );
+                        assert!(!page.panels.is_empty());
+                        if index == 2 {
+                            assert_eq!(page.panels.len(), 3);
+                        }
+                        for panels in page.panels.windows(2) {
+                            assert!(panels[1].y - (panels[0].y + panels[0].h) >= 16);
+                        }
+                        for item in &page.items {
+                            let bounds = match item {
+                                Item::Control(_, r)
+                                | Item::ParameterValue(_, r)
+                                | Item::CornerPreview(r)
+                                | Item::Paragraph(_, r, _) => r,
+                                _ => continue,
+                            };
+                            assert!(bounds.w > 0 && bounds.h > 0);
+                            assert!(
+                                page.panels.iter().any(|panel| bounds.x >= panel.x + 19
+                                    && bounds.x + bounds.w <= panel.x + panel.w - 19
+                                    && bounds.y >= panel.y + 19
+                                    && bounds.y + bounds.h <= panel.y + panel.h - 19),
+                                "page {index}, width {width}: control outside panel"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn capture_preview_moves_only_following_content_and_keeps_parameter_rows() {
@@ -519,6 +610,7 @@ mod tests {
             Page::new(width, (5, false), &cfg, &startup, true, None, &factory)
                 .items
                 .into_iter()
+                .skip_while(|item| !matches!(item, Item::Heading("使用帮助", _)))
                 .filter_map(|item| match item {
                     Item::Paragraph(_, bounds, _) => Some(bounds),
                     _ => None,

@@ -189,6 +189,24 @@ impl ControlShapes<'_> {
         }
     }
 
+    pub fn icon(&self, bounds: RECT, id: usize, scale: f32, rgb: u32) {
+        let rect = self.rect(bounds);
+        // SAFETY: retained icon geometry and brush belong to this active UI-thread target.
+        unsafe {
+            self.surface.brush.SetColor(&color(rgb));
+            self.surface.icons.draw(
+                &self.surface.target,
+                &self.surface.brush,
+                id,
+                Vector2 {
+                    X: (rect.left + rect.right) / 2.,
+                    Y: (rect.top + rect.bottom) / 2.,
+                },
+                scale,
+            );
+        }
+    }
+
     pub fn chevron_down(&self, bounds: RECT, width: f32, rgb: u32) {
         let rect = self.rect(bounds);
         let left = Vector2 {
@@ -294,7 +312,7 @@ impl Canvas {
             self.target.BindDC(dc, bounds)?;
             self.target.SetDpi(dpi as f32, dpi as f32);
             self.target.BeginDraw();
-            self.target.Clear(Some(&color(background(dark))));
+            self.target.Clear(Some(&color(sidebar(dark))));
         }
         Ok(())
     }
@@ -315,6 +333,27 @@ impl Canvas {
                 },
                 &self.brush,
             );
+        }
+    }
+    pub fn panel(&self, bounds: [f32; 4], dark: bool) {
+        let [x, y, width, height] = bounds;
+        let panel = D2D1_ROUNDED_RECT {
+            rect: D2D_RECT_F {
+                left: x,
+                top: y,
+                right: x + width,
+                bottom: y + height,
+            },
+            radiusX: 12.,
+            radiusY: 12.,
+        };
+        // SAFETY: this UI-thread render pass owns the target and its brush.
+        unsafe {
+            self.brush.SetColor(&color(background(dark)));
+            self.target.FillRoundedRectangle(&panel, &self.brush);
+            self.brush.SetColor(&color(divider(dark)));
+            self.target
+                .DrawRoundedRectangle(&panel, &self.brush, 1., None);
         }
     }
     pub fn corner_preview(
@@ -523,6 +562,21 @@ mod tests {
                 let ok = paint_control(dc, bounds, 0xffffff, |shapes| {
                     shapes.rounded(circle, scale(22), 0x000000);
                     shapes.focus_ring(frame, scale(6) as f32, percent as f32 / 100., 0x000000);
+                    // Mosaic's alternating alpha must not dim the next toolbar icon.
+                    shapes.surface.brush.SetOpacity(0.63);
+                    shapes.icon(
+                        RECT {
+                            left: 100,
+                            top: 55,
+                            right: 124,
+                            bottom: 79,
+                        },
+                        crate::platform::windows::editor::toolbar::MOSAIC,
+                        percent as f32 / 100.,
+                        0x365f56,
+                    );
+                    assert_eq!(shapes.surface.brush.GetOpacity(), 0.63);
+                    shapes.surface.brush.SetOpacity(1.);
                 })
                 .is_some();
                 // Sample the corners rather than text or filled centers. Binary GDI masks

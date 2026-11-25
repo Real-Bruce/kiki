@@ -17,6 +17,7 @@ pub(in crate::platform::windows) struct ToolbarIcons {
     picker: ID2D1PathGeometry,
     stroke: ID2D1StrokeStyle,
     long_capture: ID2D1PathGeometry,
+    navigation: [ID2D1PathGeometry; 6],
 }
 
 type Point = (f32, f32);
@@ -144,11 +145,11 @@ const COPY_ICON: &[Figure] = &[
     Figure(
         (-7.5, -3.5),
         &[
-            C((-8.12, -3.14), (-8.5, -2.516), (-8.5, -1.8)),
+            C((-8.12, -3.1425), (-8.5, -2.516), (-8.5, -1.8)),
             L((-8.5, 6.5)),
             C((-8.5, 7.605), (-7.605, 8.5), (-6.5, 8.5)),
             L((1.8, 8.5)),
-            C((2.516, 8.5), (3.14, 8.12), (3.5, 7.5)),
+            C((2.516, 8.5), (3.1425, 8.12), (3.5, 7.5)),
         ],
         false,
     ),
@@ -182,6 +183,56 @@ const EYEDROPPER: &[Figure] = &[
         false,
     ),
 ];
+
+pub const NAVIGATION_FIRST: usize = 30;
+const CIRCLE: Figure = Figure(
+    (0., -8.5),
+    &[
+        C((4.694, -8.5), (8.5, -4.694), (8.5, 0.)),
+        C((8.5, 4.694), (4.694, 8.5), (0., 8.5)),
+        C((-4.694, 8.5), (-8.5, 4.694), (-8.5, 0.)),
+        C((-8.5, -4.694), (-4.694, -8.5), (0., -8.5)),
+    ],
+    true,
+);
+const KEYBOARD: &[Figure] = &[
+    Figure(
+        (-7., -6.),
+        &[
+            L((7., -6.)),
+            C((8.105, -6.), (9., -5.105), (9., -4.)),
+            L((9., 4.)),
+            C((9., 5.105), (8.105, 6.), (7., 6.)),
+            L((-7., 6.)),
+            C((-8.105, 6.), (-9., 5.105), (-9., 4.)),
+            L((-9., -4.)),
+            C((-9., -5.105), (-8.105, -6.), (-7., -6.)),
+        ],
+        true,
+    ),
+    Figure((-3., 3.), &[L((3., 3.))], false),
+];
+const CAPTURE_FRAME: &[Figure] = &[
+    Figure((-8., -3.), &[L((-8., -8.)), L((-3., -8.))], false),
+    Figure((3., -8.), &[L((8., -8.)), L((8., -3.))], false),
+    Figure((8., 3.), &[L((8., 8.)), L((3., 8.))], false),
+    Figure((-3., 8.), &[L((-8., 8.)), L((-8., 3.))], false),
+    Figure((-4., -4.), &[L((4., -4.)), L((4., 4.)), L((-4., 4.))], true),
+];
+const PALETTE: &[Figure] = &[Figure(
+    (0., -8.5),
+    &[
+        C((4.8, -8.5), (8.5, -5.), (8.5, -0.8)),
+        C((8.5, 2.), (7., 3.), (4.8, 3.)),
+        L((3., 3.)),
+        C((1.5, 3.), (1.5, 4.4), (2.2, 5.3)),
+        C((3.6, 7.3), (1.6, 8.5), (0., 8.5)),
+        C((-4.7, 8.5), (-8.5, 4.7), (-8.5, 0.)),
+        C((-8.5, -4.7), (-4.7, -8.5), (0., -8.5)),
+    ],
+    true,
+)];
+const ABOUT: &[Figure] = &[CIRCLE, Figure((0., -0.7), &[L((0., 4.5))], false)];
 
 impl ToolbarIcons {
     pub fn new(factory: &ID2D1Factory) -> Result<Self> {
@@ -223,6 +274,36 @@ impl ToolbarIcons {
                 Ok(geometry)
             };
             Ok(Self {
+                navigation: [
+                    {
+                        let mut segments = Vec::new();
+                        for step in 1..=48 {
+                            let angle = step as f32 * std::f32::consts::TAU / 48.;
+                            let radius = match step % 6 {
+                                0 | 1 | 5 => 9.,
+                                _ => 7.2,
+                            };
+                            segments.push(L((angle.sin() * radius, -angle.cos() * radius)));
+                        }
+                        // The sink consumes these points synchronously before the vector drops.
+                        let geometry = factory.CreatePathGeometry()?;
+                        let sink = geometry.Open()?;
+                        sink.BeginFigure(Vector2 { X: 0., Y: -9. }, D2D1_FIGURE_BEGIN_HOLLOW);
+                        for segment in segments {
+                            if let L((x, y)) = segment {
+                                sink.AddLine(Vector2 { X: x, Y: y });
+                            }
+                        }
+                        sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+                        sink.Close()?;
+                        geometry
+                    },
+                    path(KEYBOARD)?,
+                    path(CAPTURE_FRAME)?,
+                    path(PIN)?,
+                    path(PALETTE)?,
+                    path(ABOUT)?,
+                ],
                 paths: [
                     Some(path(RECTANGLE)?),
                     Some(path(ARROW)?),
@@ -325,6 +406,9 @@ impl ToolbarIcons {
             }
             let path = if index == LONG_CAPTURE {
                 Some(&self.long_capture)
+            } else if (NAVIGATION_FIRST..NAVIGATION_FIRST + self.navigation.len()).contains(&index)
+            {
+                self.navigation.get(index - NAVIGATION_FIRST)
             } else if index == PICKER {
                 Some(&self.picker)
             } else {
@@ -349,6 +433,34 @@ impl ToolbarIcons {
                 } * prior),
             );
             target.DrawGeometry(path, brush, 1.65, &self.stroke);
+            if index == NAVIGATION_FIRST {
+                target.DrawEllipse(
+                    &D2D1_ELLIPSE {
+                        point: Vector2::default(),
+                        radiusX: 3.,
+                        radiusY: 3.,
+                    },
+                    brush,
+                    1.65,
+                    &self.stroke,
+                );
+            }
+            let dots: &[(f32, f32)] = match index.checked_sub(NAVIGATION_FIRST) {
+                Some(1) => &[(-5., -2.), (0., -2.), (5., -2.), (-5., 1.), (5., 1.)],
+                Some(4) => &[(-4., -1.), (-2.5, -5.), (2., -5.), (5., -2.)],
+                Some(5) => &[(0., -4.5)],
+                _ => &[],
+            };
+            for &(x, y) in dots {
+                target.FillEllipse(
+                    &D2D1_ELLIPSE {
+                        point: Vector2 { X: x, Y: y },
+                        radiusX: 0.95,
+                        radiusY: 0.95,
+                    },
+                    brush,
+                );
+            }
             target.SetTransform(&prior);
         }
     }

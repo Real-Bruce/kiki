@@ -993,7 +993,7 @@ fn paint(hwnd: HWND, dc: HDC, p: *mut State) -> Result<()> {
         let dark = system_dark();
         let fg = appearance::foreground(dark);
         let sub = appearance::muted(dark);
-        let bg = appearance::background(dark);
+        let bg = appearance::sidebar(dark);
         let config = preferences::current();
 
         c.begin(dc, &rect, state.dpi, dark)?;
@@ -1005,9 +1005,20 @@ fn paint(hwnd: HWND, dc: HDC, p: *mut State) -> Result<()> {
             appearance::sidebar(dark),
         );
         c.heading("kiki", 63., 21., 75., 24., fg);
+        for panel in &page.panels {
+            c.panel(
+                [
+                    panel.x as f32,
+                    panel.y as f32 - offset,
+                    panel.w as f32,
+                    panel.h as f32,
+                ],
+                dark,
+            );
+        }
         for item in &page.items {
             match item {
-                Item::Heading(label, y) => c.heading(label, x, *y as f32 - offset, w, 16., fg),
+                Item::Heading(label, y) => c.heading(label, x, *y as f32 - offset, w, 18., fg),
                 Item::Text(label, r, tone) => {
                     let (size, color) = match tone {
                         Tone::Normal => (14., fg),
@@ -1056,7 +1067,7 @@ fn paint(hwnd: HWND, dc: HDC, p: *mut State) -> Result<()> {
         }
         let sidebar = page.sidebar as f32;
         c.fill(sidebar, 0., width - sidebar, HEADER as f32, bg);
-        c.heading(PAGES[state.page], x, 19., w, 24., fg);
+        c.heading(PAGES[state.page], x - 20., 19., w + 40., 24., fg);
         c.fill(
             sidebar,
             height - FOOTER as f32,
@@ -1469,12 +1480,22 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                     state.font,
                     Tool::TOOLBAR[index].label().into(),
                     RECT {
-                        left: r.left + dip(36),
+                        left: r.left + dip(68),
                         ..r
                     },
                     fg,
                     DT_LEFT,
                 ));
+                shapes.icon(
+                    RECT {
+                        left: r.left + dip(34),
+                        right: r.left + dip(62),
+                        ..r
+                    },
+                    crate::platform::windows::editor::toolbar::tool_button(Tool::TOOLBAR[index]),
+                    dpi_scale,
+                    fg,
+                );
             } else if (410..=417).contains(&id) {
                 let color = COLORS[usize::from(id - 410)];
                 let selected = cfg.color == color;
@@ -1511,18 +1532,24 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                     shapes.rounded(swatch, size, color);
                 }
                 if selected {
-                    let mark = if red * 3 + green * 6 + blue > 1400 {
-                        0x202226
-                    } else {
-                        0xffffff
-                    };
-                    labels.push((state.icon_font, "\u{e73e}".to_owned(), r, mark, DT_CENTER));
+                    let gap = dip(3);
+                    shapes.focus_ring(
+                        RECT {
+                            left: swatch.left - gap,
+                            top: swatch.top - gap,
+                            right: swatch.right + gap,
+                            bottom: swatch.bottom + gap,
+                        },
+                        (size / 2 + gap) as f32,
+                        1.5 * dpi_scale,
+                        accent,
+                    );
                 }
             } else if let Some(parameter) = setting_parameter(id) {
                 let left = r.left + dip(6);
                 let right = r.right - dip(6);
                 let y = (r.top + r.bottom) / 2;
-                let radius = dip(5).max(1);
+                let radius = dip(7).max(1);
                 let x = left
                     + (parameter_control::fraction(parameter, parameter.value(&cfg))
                         * (right - left) as f32)
@@ -1533,20 +1560,18 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                     right,
                     bottom: y + dip(2),
                 };
-                shapes.rounded(track, dip(3), if dark { 0x797166 } else { 0x8b8275 });
+                shapes.rounded(track, dip(3), appearance::divider(dark));
                 if x > left {
                     shapes.rounded(RECT { right: x, ..track }, dip(3), accent);
                 }
-                shapes.rounded(
-                    RECT {
-                        left: x - radius,
-                        top: y - radius,
-                        right: x + radius,
-                        bottom: y + radius,
-                    },
-                    2 * radius,
-                    accent,
-                );
+                let thumb = RECT {
+                    left: x - radius,
+                    top: y - radius,
+                    right: x + radius,
+                    bottom: y + radius,
+                };
+                shapes.rounded(thumb, 2 * radius, appearance::background(dark));
+                shapes.focus_ring(thumb, radius as f32, 1.5 * dpi_scale, accent);
             } else {
                 let selected = match id {
                     100..=105 => usize::from(id - 100) == state.page,
@@ -1582,20 +1607,18 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                 let mut label_bounds = r;
                 let label = match id {
                     100..=105 => {
-                        const ICONS: [&str; 6] = [
-                            "\u{e713}", "\u{e765}", "\u{e739}", "\u{e718}", "\u{e790}", "\u{e946}",
-                        ];
                         let icon = RECT {
-                            left: r.left + dip(13),
+                            left: r.left + dip(9),
+                            right: r.left + dip(33),
                             ..r
                         };
-                        labels.push((
-                            state.icon_font,
-                            ICONS[usize::from(id - 100)].to_owned(),
+                        shapes.icon(
                             icon,
+                            crate::platform::windows::ui::toolbar_icons::NAVIGATION_FIRST
+                                + usize::from(id - 100),
+                            dpi_scale,
                             text_color,
-                            DT_LEFT,
-                        ));
+                        );
                         label_bounds.left += dip(42);
                         if selected {
                             let mark = RECT {
@@ -1609,6 +1632,9 @@ fn draw_button(item: &DRAWITEMSTRUCT, p: *mut State) {
                         PAGES[usize::from(id - 100)].to_owned()
                     }
                     600..=602 => {
+                        if selected {
+                            shapes.focus_ring(r, dip(8) as f32, 1.5 * dpi_scale, accent);
+                        }
                         draw_preview(shapes, r, dip, id);
                         label_bounds.top = r.bottom - dip(36);
                         let name = ["跟随系统", "浅色", "深色"][usize::from(id - 600)];

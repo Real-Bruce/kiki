@@ -116,6 +116,7 @@ pub fn register(instance: HINSTANCE) -> Result<()> {
     }
     Ok(())
 }
+#[cfg(feature = "diagnostics")]
 pub fn open(image: Arc<Image>, anchor: PixelPoint) -> Result<()> {
     open_with_preview(image, None, anchor, !cfg!(test))
 }

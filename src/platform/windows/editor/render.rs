@@ -831,6 +831,17 @@ impl Canvas {
                 bottom: y + 5.5 * s,
             },
             5.5 * s,
+            tone(palette::background(dark), 1.),
+        );
+        self.outline(
+            D2D_RECT_F {
+                left: thumb - 5.5 * s,
+                top: y - 5.5 * s,
+                right: thumb + 5.5 * s,
+                bottom: y + 5.5 * s,
+            },
+            5.5 * s,
+            1.5 * s,
             accent,
         );
         if focus == 19 {
